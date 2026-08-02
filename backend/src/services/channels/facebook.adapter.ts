@@ -121,17 +121,27 @@ export class FacebookAdapter implements ChannelAdapter {
       const senderId = rawEvent.sender?.id;
       const messageText = rawEvent.message?.text || '';
 
-      // Extract image attachment if present
+      // Extract image / audio attachments if present
       let imageAttachmentUrl: string | undefined;
+      let audioAttachmentUrl: string | undefined;
       const attachments = rawEvent.message?.attachments;
       if (Array.isArray(attachments)) {
         const imageAtt = attachments.find((a: any) => a.type === 'image');
         if (imageAtt?.payload?.url) {
           imageAttachmentUrl = imageAtt.payload.url;
         }
+        const audioAtt = attachments.find(
+          (a: any) =>
+            a.type === 'audio' ||
+            (a.type === 'file' &&
+              /\.(ogg|opus|mp3|m4a|wav|aac)(\?|$)/i.test(String(a.payload?.url || '')))
+        );
+        if (audioAtt?.payload?.url) {
+          audioAttachmentUrl = audioAtt.payload.url;
+        }
       }
 
-      if (!pageId || !senderId || (!messageText && !imageAttachmentUrl)) {
+      if (!pageId || !senderId || (!messageText && !imageAttachmentUrl && !audioAttachmentUrl)) {
         logger.warn('Invalid Facebook message event', { event: rawEvent });
         return null;
       }
@@ -228,6 +238,7 @@ export class FacebookAdapter implements ChannelAdapter {
         externalMessageId: rawEvent.message?.mid,
         userName,
         imageAttachmentUrl,
+        audioAttachmentUrl,
         rawEventMetadata: {
           pageId,
           senderId,

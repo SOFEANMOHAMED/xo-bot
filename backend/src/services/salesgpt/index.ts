@@ -179,6 +179,16 @@ export function isAffirmativeReply(messageText: string): boolean {
 }
 
 /**
+ * Permissive negative detection ("لا", "لا شكرا", "nope", …).
+ * Used when the customer declines an upsell / "anything else?" while still finalizing the order.
+ */
+export function isNegativeReply(messageText: string): boolean {
+    if (!messageText) return false;
+    if (containsAnyToken(messageText, AFFIRMATIVE_TOKENS)) return false;
+    return containsAnyToken(messageText, NEGATIVE_TOKENS);
+}
+
+/**
  * True when an assistant text is still *asking* the customer to confirm
  * (e.g. "جاهز للتأكيد. هل ترغب في تأكيد الطلب؟" / "Would you like to confirm…?")
  * — as opposed to actually announcing the confirmation ("تم تأكيد طلبك" / "order confirmed").
@@ -442,14 +452,19 @@ export const processWithSalesGPT = async (
     let salesResult: SalesGPTResult;
 
     // ==================== DETERMINISTIC CONFIRMATION FAST-PATH ====================
-    // If the previous bot turn asked for order confirmation AND the user replied affirmatively
-    // AND we already have every required field → emit confirm_order locally (0 AI calls).
-    // This bypasses AI variance that otherwise causes the bot to re-ask the same question forever.
-    const botAskedConfirm = lastBotMessageAsksForConfirmation(recentMessages);
+    // Closing/order-collection stages (or legacy text cue) + yes OR "no more additions"
+    // with complete fields → emit confirm_order locally (0 AI calls).
+    // Stage id is primary: AI closing questions drift ("قبل ما أكمل الطلب؟") and break text-regex.
+    const stageId = conversationState.salesgpt_stage_id?.trim();
+    const wasInClosingFlow =
+        (!!stageId && ['6', '7', '8'].includes(stageId)) ||
+        lastBotMessageAsksForConfirmation(recentMessages);
     const userSaidYes = isAffirmativeReply(messageText);
+    const userSaidNo = isNegativeReply(messageText);
     const completeness = checkOrderCompleteness(conversationState, products[0]);
 
-    if (botAskedConfirm && userSaidYes && completeness.complete) {
+    // Affirmative confirm OR decline of upsell/"anything else?" while order is complete → finalize.
+    if (wasInClosingFlow && completeness.complete && (userSaidYes || userSaidNo)) {
         const e = conversationState.extracted_entities || {};
         const productName = products[0]?.name || e.product_query || '';
         const thankMsg = language === 'arabic'
@@ -459,10 +474,13 @@ export const processWithSalesGPT = async (
         logger.info('⚡ SalesGPT: deterministic confirm_order fast-path', {
             merchantId,
             product: productName,
-            missing: completeness.missing
+            missing: completeness.missing,
+            trigger: userSaidYes ? 'affirmative' : 'negative_no_more_additions',
+            stageId: stageId || null
         });
         console.log('⚡ SalesGPT: confirm_order fast-path engaged', {
             userMessage: messageText.substring(0, 60),
+            trigger: userSaidYes ? 'yes' : 'no',
             name: e.name,
             phone: e.phone,
             address: e.address
@@ -547,12 +565,13 @@ export const processWithSalesGPT = async (
         };
     }
 
-    if (botAskedConfirm && userSaidYes && !completeness.complete) {
+    if (wasInClosingFlow && userSaidYes && !completeness.complete) {
         logger.warn('SalesGPT: user confirmed but order is incomplete', {
             merchantId,
             missing: completeness.missing
         });
     }
+    // Negative + incomplete while in closing flow → fall through to agent.step() to collect fields.
 
     try {
         salesResult = await agent.step(messageText, products, catalogAwareness);

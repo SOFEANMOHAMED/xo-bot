@@ -15,6 +15,10 @@ import { persistBotChannelOrder } from '../services/channelBotOrder.js';
 import { botReplyAsksForConfirmation } from '../services/salesgpt/index.js';
 import { buildMerchantBotConfig } from '../services/buildMerchantBotConfig.js';
 import { analyzeImageAndSearch, imageUrlToBase64 } from '../services/imageRecognition.js';
+import {
+  resolveInboundVoice,
+  voiceTranscriptionFallbackMessage
+} from '../services/voiceTranscription.js';
 import { getCurrencyDisplayName } from '../utils/currencyDisplayName.js';
 import {
   applyCommentTemplate,
@@ -1039,20 +1043,30 @@ const processInstagramDM = async (event: any) => {
   const rawText = event.message?.text || '';
   const externalMessageId = event.message?.mid?.toString() || '';
 
-  // Extract image attachment from Instagram DM
+  // Extract image / audio attachments from Instagram DM
   let igImageAttachmentUrl: string | undefined;
+  let igAudioAttachmentUrl: string | undefined;
   const attachments = event.message?.attachments;
   if (Array.isArray(attachments)) {
     const imgAtt = attachments.find((a: any) => a.type === 'image');
     if (imgAtt?.payload?.url) {
       igImageAttachmentUrl = imgAtt.payload.url;
     }
+    const audioAtt = attachments.find(
+      (a: any) =>
+        a.type === 'audio' ||
+        (a.type === 'file' &&
+          /\.(ogg|opus|mp3|m4a|wav|aac)(\?|$)/i.test(String(a.payload?.url || '')))
+    );
+    if (audioAtt?.payload?.url) {
+      igAudioAttachmentUrl = audioAtt.payload.url;
+    }
   }
 
-  if (!senderId || !recipientId || (!rawText && !igImageAttachmentUrl)) return;
+  if (!senderId || !recipientId || (!rawText && !igImageAttachmentUrl && !igAudioAttachmentUrl)) return;
 
   let messageText = (rawText || '').trim();
-  if (messageText.length < 1 && !igImageAttachmentUrl) return;
+  if (messageText.length < 1 && !igImageAttachmentUrl && !igAudioAttachmentUrl) return;
 
   const igResult = await pool.query(
     `SELECT ia.*, ms.store_name, ms.store_currency, ms.system_prompt, ms.bot_persona
@@ -1089,6 +1103,38 @@ const processInstagramDM = async (event: any) => {
     enable_ai_injection: cachedSettings.enable_ai_injection,
     ai_mode: cachedSettings.ai_mode
   };
+
+  // ==================== VOICE TRANSCRIPTION (OpenAI STT) ====================
+  if (igAudioAttachmentUrl) {
+    const voiceResult = await resolveInboundVoice({
+      merchantId,
+      platform: 'instagram',
+      url: igAudioAttachmentUrl,
+      existingText: messageText,
+      filename: 'voice.ogg',
+      languageHint: 'arabic',
+      downloadHeaders: ig.access_token
+        ? { Authorization: `Bearer ${ig.access_token}` }
+        : undefined
+    });
+    messageText = voiceResult.messageText;
+    if (voiceResult.transcribed) {
+      logger.info('Instagram voice transcribed', {
+        merchantId,
+        userId: senderId,
+        textPreview: voiceResult.transcript?.text?.substring(0, 80),
+        model: voiceResult.transcript?.model
+      });
+    }
+    if (voiceResult.shouldAbortWithFallback) {
+      await sendInstagramDM(
+        senderId,
+        voiceTranscriptionFallbackMessage('arabic'),
+        ig.access_token
+      );
+      return;
+    }
+  }
 
   // ==================== IMAGE RECOGNITION ====================
   if (igImageAttachmentUrl) {

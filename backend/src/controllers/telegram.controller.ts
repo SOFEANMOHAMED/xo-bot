@@ -10,6 +10,10 @@ import type { Message, ConversationState, MerchantConfig } from '../bot/index.js
 import { botReplyAsksForConfirmation } from '../services/salesgpt/index.js';
 import { telegramAdapter } from '../services/channels/telegram.adapter.js';
 import { analyzeImageAndSearch, imageUrlToBase64 } from '../services/imageRecognition.js';
+import {
+  resolveInboundVoice,
+  voiceTranscriptionFallbackMessage
+} from '../services/voiceTranscription.js';
 import { getCurrencyDisplayName } from '../utils/currencyDisplayName.js';
 
 // ==================== UUID VALIDATION ====================
@@ -235,12 +239,17 @@ const processTelegramMessage = async (update: any) => {
     const hasText = !!message?.text;
     const hasPhoto = Array.isArray(message?.photo) && message.photo.length > 0;
     const hasCaption = !!message?.caption;
+    const voiceFileId: string | null = message?.voice?.file_id || null;
+    const audioFileId: string | null = message?.audio?.file_id || null;
+    const videoNoteFileId: string | null = message?.video_note?.file_id || null;
+    const hasVoice = !!(voiceFileId || audioFileId || videoNoteFileId);
 
-    if (!message || (!hasText && !hasPhoto)) {
-      logger.debug('Telegram message without text/photo', {
+    if (!message || (!hasText && !hasPhoto && !hasVoice)) {
+      logger.debug('Telegram message without text/photo/voice', {
         hasMessage: !!message,
         hasText,
         hasPhoto,
+        hasVoice,
         updateKeys: Object.keys(update || {})
       });
       return;
@@ -253,10 +262,11 @@ const processTelegramMessage = async (update: any) => {
     const photoFileId: string | null = hasPhoto
       ? message.photo[message.photo.length - 1].file_id
       : null;
+    const telegramAudioFileId = voiceFileId || audioFileId || videoNoteFileId;
 
-    // ==================== VALIDATION ====================
-    // Ignore empty or very short messages
-    if (!messageText || messageText.length < 1) {
+    // Empty text is OK when the customer sent a photo or voice note
+    // (media is resolved after we load the bot token below).
+    if ((!messageText || messageText.length < 1) && !hasPhoto && !hasVoice) {
       logger.debug('Ignoring empty message', { userId });
       return;
     }
@@ -344,6 +354,55 @@ const processTelegramMessage = async (update: any) => {
       additional_notes: cachedSettings.additional_notes,
       enable_ai_injection: cachedSettings.enable_ai_injection
     };
+
+    // ==================== VOICE TRANSCRIPTION (OpenAI STT) ====================
+    if (telegramAudioFileId && botToken) {
+      const fileUrl = await getTelegramFileUrl(telegramAudioFileId, botToken);
+      if (fileUrl) {
+        const voiceResult = await resolveInboundVoice({
+          merchantId,
+          platform: 'telegram',
+          url: fileUrl,
+          existingText: messageText,
+          filename: message.voice
+            ? 'voice.ogg'
+            : message.video_note
+              ? 'video_note.mp4'
+              : (message.audio?.file_name || 'audio.ogg'),
+          mimeType: message.voice
+            ? 'audio/ogg'
+            : message.video_note
+              ? 'video/mp4'
+              : (message.audio?.mime_type || undefined),
+          languageHint: 'arabic'
+        });
+        messageText = voiceResult.messageText;
+        if (voiceResult.transcribed) {
+          logger.info('Telegram voice transcribed', {
+            merchantId,
+            userId,
+            textPreview: voiceResult.transcript?.text?.substring(0, 80),
+            model: voiceResult.transcript?.model,
+            durationSec: voiceResult.transcript?.durationSec
+          });
+        }
+        if (voiceResult.shouldAbortWithFallback) {
+          await sendTelegramMessage(
+            chatId,
+            voiceTranscriptionFallbackMessage('arabic'),
+            botToken
+          );
+          return;
+        }
+      } else if (!messageText || !messageText.trim()) {
+        await sendTelegramMessage(
+          chatId,
+          voiceTranscriptionFallbackMessage('arabic'),
+          botToken
+        );
+        return;
+      }
+    }
 
     // ==================== IMAGE RECOGNITION ====================
     if (photoFileId && botToken) {

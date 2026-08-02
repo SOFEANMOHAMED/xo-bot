@@ -1,9 +1,9 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import morgan from 'morgan';
-import dotenv from 'dotenv';
 import session from 'express-session';
 import passport from 'passport';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -38,8 +38,6 @@ const swaggerUi = require('swagger-ui-express');
 import { swaggerSpec } from './config/swagger.js';
 import { initializeTools } from './services/tools/index.js';
 import { startSyncScheduler } from './services/syncScheduler.js';
-
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;

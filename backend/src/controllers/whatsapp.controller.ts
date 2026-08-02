@@ -6,6 +6,11 @@ import { AuthRequest } from '../middleware/auth.js';
 import { logger } from '../utils/logger.js';
 import { handleIncomingMessage } from '../services/orchestrator.service.js';
 import { getCachedMerchantSettings } from '../services/cacheService.js';
+import {
+  downloadAudioBuffer,
+  resolveInboundVoice,
+  voiceTranscriptionFallbackMessage
+} from '../services/voiceTranscription.js';
 
 // ==================== UUID VALIDATION ====================
 
@@ -77,6 +82,34 @@ const getWhatsAppPhoneNumberId = async (merchantId: string): Promise<string | nu
     return result.rows[0]?.phone_number_id || null;
   } catch (error) {
     logger.error('Error getting WhatsApp phone number ID', error as Error, { merchantId });
+    return null;
+  }
+};
+
+/**
+ * Resolve WhatsApp Cloud API media id → binary buffer (tenant-scoped via access token).
+ */
+const downloadWhatsAppMedia = async (
+  mediaId: string,
+  accessToken: string
+): Promise<{ buffer: Buffer; mimeType?: string } | null> => {
+  try {
+    const metaResp = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(mediaId)}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(15_000)
+    });
+    if (!metaResp.ok) {
+      logger.warn('WhatsApp media metadata fetch failed', { mediaId, status: metaResp.status });
+      return null;
+    }
+    const meta = (await metaResp.json()) as { url?: string; mime_type?: string };
+    if (!meta.url) return null;
+
+    return downloadAudioBuffer(meta.url, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+  } catch (error) {
+    logger.error('WhatsApp media download error', error as Error, { mediaId });
     return null;
   }
 };
@@ -531,14 +564,17 @@ export const handleWhatsAppWebhook = async (
             const from = message.from;
             const messageId = message.id;
             const messageType = message.type;
-            const messageText = message.text?.body || '';
+            let messageText = message.text?.body || message.image?.caption || message.audio?.caption || '';
             const phoneNumberId = metadata?.phone_number_id;
+            const audioMediaId: string | null =
+              messageType === 'audio' && message.audio?.id ? String(message.audio.id) : null;
 
             logger.info('Received WhatsApp message', {
               from,
               messageId,
               messageType,
-              phoneNumberId
+              phoneNumberId,
+              hasAudio: !!audioMediaId
             });
 
             // Find merchant by phone number ID
@@ -556,6 +592,53 @@ export const handleWhatsAppWebhook = async (
             const autoReplyEnabled = merchantResult.rows[0].auto_reply_enabled;
             const welcomeMessage = merchantResult.rows[0].welcome_message;
 
+            // ==================== VOICE TRANSCRIPTION (OpenAI STT) ====================
+            if (audioMediaId) {
+              const accessToken = await getWhatsAppAccessToken(merchantId);
+              if (accessToken) {
+                const media = await downloadWhatsAppMedia(audioMediaId, accessToken);
+                if (media?.buffer) {
+                  const voiceResult = await resolveInboundVoice({
+                    merchantId,
+                    platform: 'whatsapp',
+                    buffer: media.buffer,
+                    mimeType: media.mimeType || message.audio?.mime_type || 'audio/ogg',
+                    filename: 'whatsapp-voice.ogg',
+                    existingText: messageText,
+                    languageHint: 'arabic'
+                  });
+                  messageText = voiceResult.messageText;
+                  if (voiceResult.transcribed) {
+                    logger.info('WhatsApp voice transcribed', {
+                      merchantId,
+                      from,
+                      textPreview: voiceResult.transcript?.text?.substring(0, 80),
+                      model: voiceResult.transcript?.model
+                    });
+                  }
+                  if (voiceResult.shouldAbortWithFallback) {
+                    await sendWhatsAppMessage(
+                      phoneNumberId,
+                      from,
+                      voiceTranscriptionFallbackMessage('arabic'),
+                      accessToken
+                    );
+                    continue;
+                  }
+                } else if (!messageText.trim()) {
+                  await sendWhatsAppMessage(
+                    phoneNumberId,
+                    from,
+                    voiceTranscriptionFallbackMessage('arabic'),
+                    accessToken
+                  );
+                  continue;
+                }
+              } else if (!messageText.trim()) {
+                logger.warn('WhatsApp voice skipped: missing access token', { merchantId });
+                continue;
+              }
+            }
             // Get or create conversation
             let conversationResult = await pool.query(
             `SELECT id FROM conversations 

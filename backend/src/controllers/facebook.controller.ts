@@ -11,6 +11,10 @@ import { botReplyAsksForConfirmation } from '../services/salesgpt/index.js';
 import { facebookAdapter } from '../services/channels/facebook.adapter.js';
 import { checkRateLimit, getCachedMerchantSettings } from '../services/cacheService.js';
 import { analyzeImageAndSearch, imageUrlToBase64 } from '../services/imageRecognition.js';
+import {
+  resolveInboundVoice,
+  voiceTranscriptionFallbackMessage
+} from '../services/voiceTranscription.js';
 import { getCurrencyDisplayName } from '../utils/currencyDisplayName.js';
 import {
   applyCommentTemplate,
@@ -496,13 +500,13 @@ const processFacebookMessage = async (event: any) => {
       return;
     }
 
-    const { merchantId, userId, externalMessageId, userName, imageAttachmentUrl, rawEventMetadata } = parsedEvent;
+    const { merchantId, userId, externalMessageId, userName, imageAttachmentUrl, audioAttachmentUrl, rawEventMetadata } = parsedEvent;
     let messageText = parsedEvent.messageText;
     const pageId = rawEventMetadata?.pageId;
     const accessToken = rawEventMetadata?.accessToken;
 
     // ==================== VALIDATION ====================
-    if ((!messageText || messageText.trim().length < 1) && !imageAttachmentUrl) {
+    if ((!messageText || messageText.trim().length < 1) && !imageAttachmentUrl && !audioAttachmentUrl) {
       logger.debug('Ignoring empty Facebook message', { userId });
       return;
     }
@@ -517,8 +521,44 @@ const processFacebookMessage = async (event: any) => {
       userId,
       merchantId,
       messageText: (messageText || '').substring(0, 50),
-      hasImage: !!imageAttachmentUrl
+      hasImage: !!imageAttachmentUrl,
+      hasAudio: !!audioAttachmentUrl
     });
+
+    // ==================== VOICE TRANSCRIPTION (OpenAI STT) ====================
+    if (audioAttachmentUrl) {
+      const voiceResult = await resolveInboundVoice({
+        merchantId,
+        platform: 'facebook_messenger',
+        url: audioAttachmentUrl,
+        existingText: messageText === 'أرسل العميل صورة' ? '' : messageText,
+        filename: 'voice.ogg',
+        languageHint: 'arabic',
+        downloadHeaders: accessToken
+          ? { Authorization: `Bearer ${accessToken}` }
+          : undefined
+      });
+      messageText = voiceResult.messageText || messageText;
+      if (voiceResult.transcribed) {
+        logger.info('Facebook voice transcribed', {
+          merchantId,
+          userId,
+          textPreview: voiceResult.transcript?.text?.substring(0, 80),
+          model: voiceResult.transcript?.model
+        });
+      }
+      if (voiceResult.shouldAbortWithFallback) {
+        if (pageId && accessToken) {
+          await sendFacebookMessage(
+            pageId,
+            userId,
+            voiceTranscriptionFallbackMessage('arabic'),
+            accessToken
+          );
+        }
+        return;
+      }
+    }
 
     // ==================== IMAGE RECOGNITION ====================
     if (imageAttachmentUrl) {

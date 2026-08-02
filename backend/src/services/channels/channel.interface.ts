@@ -12,6 +12,8 @@ export interface ParsedIncomingEvent {
   userName?: string;
   /** URL of an image the customer attached (photo, sticker, etc.) */
   imageAttachmentUrl?: string;
+  /** URL of a voice note / audio attachment (Messenger audio) */
+  audioAttachmentUrl?: string;
   rawEventMetadata?: Record<string, any>;
 }
 
