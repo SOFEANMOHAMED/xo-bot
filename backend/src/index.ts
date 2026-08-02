@@ -38,6 +38,7 @@ const swaggerUi = require('swagger-ui-express');
 import { swaggerSpec } from './config/swagger.js';
 import { initializeTools } from './services/tools/index.js';
 import { startSyncScheduler } from './services/syncScheduler.js';
+import { startAbandonedCheckoutScheduler } from './services/abandonedCheckout/index.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -314,6 +315,9 @@ async function startServer() {
 
       startSyncScheduler(15);
       console.log('📦 Sync scheduler started (checking every 15 minutes)');
+
+      startAbandonedCheckoutScheduler(5);
+      console.log('🛒 Abandoned checkout reminder scheduler started (every 5 minutes)');
     });
   } catch (error) {
     console.error('❌ Failed to connect to database:', error);

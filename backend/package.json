@@ -22,6 +22,7 @@
     "migrate-hybrid-orchestrator": "tsx src/database/migrations/run_hybrid_orchestrator_migration.ts",
     "migrate-orders-viewed-at": "tsx src/database/migrations/run_add_orders_viewed_at_migration.ts",
     "migrate-pages-table": "tsx src/database/migrations/run_pages_table_migration.ts",
+    "migrate-abandoned-checkout": "tsx src/database/migrations/run_abandoned_checkout_reminder_migration.ts",
     "migrate-social-comment-templates": "tsx src/database/migrations/run_social_comment_templates_migration.ts",
     "add-viewed-at-column": "tsx src/database/add_viewed_at_column.ts",
     "add-colors-column": "tsx src/database/add-colors-column.ts",

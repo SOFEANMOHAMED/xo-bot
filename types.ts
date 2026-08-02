@@ -115,6 +115,12 @@ export interface MerchantSettings {
   enableSocialProof?: boolean;
   defaultDiscountPercentage?: number;
   salesScripts?: SalesScripts;
+  /** Recover incomplete checkouts with one gentle reminder inside the 24h window */
+  abandonedReminderEnabled?: boolean;
+  /** Customer silence (minutes) before the reminder */
+  abandonedReminderDelayMinutes?: number;
+  /** Optional template: {name}, {product}, {product_clause} */
+  abandonedReminderMessage?: string;
 }
 
 export enum AppView {

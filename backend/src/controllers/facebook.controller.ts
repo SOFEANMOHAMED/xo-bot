@@ -1343,6 +1343,7 @@ const processFacebookMessage = async (event: any) => {
         updatedState.salesgpt_stage_id = '1';
         updatedState.last_intent = 'greeting';
         updatedState.message_count = 0;
+        delete updatedState.abandoned_checkout;
 
         console.log('🧹 Facebook: Full state reset after order. last_order saved:', {
           orderId,

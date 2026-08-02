@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { MerchantSettings, BotPersona } from '../types';
-import { Save, Bot, DollarSign, Sparkles, Truck, CreditCard, AlertCircle, FileText, Check, Trash2, X } from 'lucide-react';
+import { Save, Bot, DollarSign, Sparkles, Truck, CreditCard, AlertCircle, FileText, Check, Trash2, X, ShoppingCart } from 'lucide-react';
 import { DEFAULT_SETTINGS } from '../constants'; // Import default to use as fallback
 import { useAuth } from '../contexts/AuthContext';
 import { createPortal } from 'react-dom';
@@ -295,6 +295,70 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                  </label>
                ))}
              </div>
+          </div>
+
+          {/* Abandoned checkout recovery */}
+          <div className="bg-emerald-50 dark:bg-emerald-900/10 p-6 rounded-xl border border-emerald-100 dark:border-emerald-900/40">
+            <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+              <div className="flex items-center gap-2">
+                <ShoppingCart className="text-emerald-600 dark:text-emerald-400" size={20} />
+                <h3 className="text-lg font-bold text-gray-800 dark:text-white">استعادة الطلبات غير المكتملة</h3>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <span className="text-sm text-gray-600 dark:text-gray-300">تفعيل التذكير</span>
+                <input
+                  type="checkbox"
+                  checked={safeFormData.abandonedReminderEnabled !== false}
+                  onChange={(e) =>
+                    setFormData({ ...safeFormData, abandonedReminderEnabled: e.target.checked })
+                  }
+                  className="w-4 h-4 rounded text-brand focus:ring-brand"
+                />
+              </label>
+            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+              إذا أعطى العميل اسمه ورقم هاتفه ثم صمت قبل تأكيد الطلب، يرسل البوت رسالة تذكير لطيفة واحدة داخل نافذة الـ 24 ساعة.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                  مهلة الصمت قبل التذكير (بالدقائق)
+                </label>
+                <input
+                  type="number"
+                  min={5}
+                  max={720}
+                  value={safeFormData.abandonedReminderDelayMinutes ?? 45}
+                  onChange={(e) =>
+                    setFormData({
+                      ...safeFormData,
+                      abandonedReminderDelayMinutes: Math.min(
+                        720,
+                        Math.max(5, parseInt(e.target.value || '45', 10) || 45)
+                      ),
+                    })
+                  }
+                  disabled={safeFormData.abandonedReminderEnabled === false}
+                  className="w-full p-3 border border-emerald-200 dark:border-emerald-800 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none text-sm disabled:opacity-50"
+                />
+                <p className="text-xs text-gray-400 mt-1">الافتراضي 45 دقيقة — الحد الأدنى 5 دقائق.</p>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                نص التذكير (اختياري)
+              </label>
+              <textarea
+                value={safeFormData.abandonedReminderMessage || ''}
+                onChange={(e) =>
+                  setFormData({ ...safeFormData, abandonedReminderMessage: e.target.value })
+                }
+                disabled={safeFormData.abandonedReminderEnabled === false}
+                rows={3}
+                placeholder="اتركه فارغاً لاستخدام النص الافتراضي. المتغيرات: {name} {product} {product_clause}"
+                className="w-full p-3 border border-emerald-200 dark:border-emerald-800 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none text-sm leading-relaxed disabled:opacity-50"
+              />
+            </div>
           </div>
 
           <div className="bg-yellow-50 dark:bg-yellow-900/10 p-6 rounded-xl border border-yellow-100 dark:border-yellow-900/30">

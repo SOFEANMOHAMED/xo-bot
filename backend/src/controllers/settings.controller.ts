@@ -32,6 +32,9 @@ const settingsSchema = z.object({
   enableUrgencyMessages: z.boolean().optional(),
   enableSocialProof: z.boolean().optional(),
   defaultDiscountPercentage: z.number().int().min(0).max(50).optional(),
+  abandonedReminderEnabled: z.boolean().optional(),
+  abandonedReminderDelayMinutes: z.number().int().min(5).max(720).optional(),
+  abandonedReminderMessage: z.string().max(2000).optional().nullable(),
   salesScripts: z.object({
     welcomeScript: z.string().optional(),
     objectionHandlingScript: z.string().optional(),
@@ -56,6 +59,7 @@ const SELECT_SETTINGS_COLS_FULL = `store_name, telegram_bot_token, welcome_messa
   return_policy, additional_notes, enable_ai_injection,
   enable_cross_selling, enable_upselling, enable_urgency_messages,
   enable_social_proof, default_discount_percentage, sales_scripts,
+  abandoned_reminder_enabled, abandoned_reminder_delay_minutes, abandoned_reminder_message,
   created_at, updated_at`;
 const SELECT_SETTINGS_COLS_FULL_WITH_AI = `store_name, telegram_bot_token, welcome_message, system_prompt,
   auto_reply_comments, auto_reply_messenger, store_currency,
@@ -63,6 +67,7 @@ const SELECT_SETTINGS_COLS_FULL_WITH_AI = `store_name, telegram_bot_token, welco
   return_policy, additional_notes, enable_ai_injection,
   enable_cross_selling, enable_upselling, enable_urgency_messages,
   enable_social_proof, default_discount_percentage, sales_scripts,
+  abandoned_reminder_enabled, abandoned_reminder_delay_minutes, abandoned_reminder_message,
   created_at, updated_at`;
 
 async function fetchSettingsRow(merchantId: string, includeSalesCols: boolean): Promise<any> {
@@ -74,14 +79,46 @@ async function fetchSettingsRow(merchantId: string, includeSalesCols: boolean): 
     );
     return r.rows[0] || null;
   } catch (err: any) {
-    if (err?.code === '42703' || (err?.message && String(err.message).includes('ai_mode'))) {
+    const msg = err?.message ? String(err.message) : '';
+    if (err?.code === '42703' || msg.includes('ai_mode') || msg.includes('abandoned_reminder')) {
+      // Prefer full cols without abandoned_* if those are missing; then drop ai_mode
+      if (includeSalesCols && msg.includes('abandoned_reminder')) {
+        try {
+          const colsNoAbandoned = SELECT_SETTINGS_COLS_FULL_WITH_AI
+            .replace(
+              /,\s*abandoned_reminder_enabled,\s*abandoned_reminder_delay_minutes,\s*abandoned_reminder_message/,
+              ''
+            );
+          const r = await pool.query(
+            `SELECT ${colsNoAbandoned} FROM merchant_settings WHERE merchant_id = $1`,
+            [merchantId]
+          );
+          const row = r.rows[0] || null;
+          if (row) {
+            row.abandoned_reminder_enabled = true;
+            row.abandoned_reminder_delay_minutes = 45;
+            row.abandoned_reminder_message = null;
+          }
+          return row;
+        } catch (inner: any) {
+          err = inner;
+        }
+      }
       const colsFallback = includeSalesCols ? SELECT_SETTINGS_COLS_FULL : SELECT_SETTINGS_COLS;
       const r = await pool.query(
-        `SELECT ${colsFallback} FROM merchant_settings WHERE merchant_id = $1`,
+        `SELECT ${colsFallback.replace(
+          /,\s*abandoned_reminder_enabled,\s*abandoned_reminder_delay_minutes,\s*abandoned_reminder_message/,
+          ''
+        )} FROM merchant_settings WHERE merchant_id = $1`,
         [merchantId]
       );
       const row = r.rows[0] || null;
-      if (row) row.ai_mode = 'hybrid';
+      if (row) {
+        row.ai_mode = row.ai_mode || 'hybrid';
+        row.abandoned_reminder_enabled = row.abandoned_reminder_enabled ?? true;
+        row.abandoned_reminder_delay_minutes = row.abandoned_reminder_delay_minutes ?? 45;
+        row.abandoned_reminder_message = row.abandoned_reminder_message ?? null;
+      }
       return row;
     }
     throw err;
@@ -401,6 +438,9 @@ function formatSettings(row: any) {
     enableUrgencyMessages: row.enable_urgency_messages ?? true,
     enableSocialProof: row.enable_social_proof ?? true,
     defaultDiscountPercentage: row.default_discount_percentage ?? 10,
+    abandonedReminderEnabled: row.abandoned_reminder_enabled ?? true,
+    abandonedReminderDelayMinutes: row.abandoned_reminder_delay_minutes ?? 45,
+    abandonedReminderMessage: row.abandoned_reminder_message || '',
     salesScripts: salesScripts
   };
 }

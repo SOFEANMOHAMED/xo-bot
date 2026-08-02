@@ -202,6 +202,9 @@ CREATE TABLE IF NOT EXISTS merchant_settings (
     return_policy TEXT,
     additional_notes TEXT,
     enable_ai_injection BOOLEAN DEFAULT false,
+    abandoned_reminder_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    abandoned_reminder_delay_minutes INTEGER NOT NULL DEFAULT 45,
+    abandoned_reminder_message TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

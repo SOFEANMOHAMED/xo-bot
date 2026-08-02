@@ -368,6 +368,9 @@ const MerchantApp: React.FC = () => {
           enableAIInjection: response.settings.storePolicies?.enableAIInjection ?? false,
         },
         signupDate: new Date(response.settings.signupDate || Date.now()),
+        abandonedReminderEnabled: response.settings.abandonedReminderEnabled ?? true,
+        abandonedReminderDelayMinutes: response.settings.abandonedReminderDelayMinutes ?? 45,
+        abandonedReminderMessage: response.settings.abandonedReminderMessage || '',
       };
       setSettings(settingsData);
     } catch (error: unknown) {
@@ -1098,6 +1101,9 @@ const MerchantApp: React.FC = () => {
                   enableAIInjection: newSettings.storePolicies?.enableAIInjection !== undefined 
                     ? newSettings.storePolicies.enableAIInjection 
                     : false,
+                  abandonedReminderEnabled: newSettings.abandonedReminderEnabled ?? true,
+                  abandonedReminderDelayMinutes: newSettings.abandonedReminderDelayMinutes ?? 45,
+                  abandonedReminderMessage: newSettings.abandonedReminderMessage || '',
                 });
                 setSettings(newSettings);
                 showNotification('تم حفظ التعديلات بنجاح', 'success');

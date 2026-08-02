@@ -133,7 +133,10 @@ export const DEFAULT_SETTINGS: MerchantSettings = {
   enableUrgencyMessages: true,
   enableSocialProof: true,
   defaultDiscountPercentage: 10,
-  salesScripts: {}
+  salesScripts: {},
+  abandonedReminderEnabled: true,
+  abandonedReminderDelayMinutes: 45,
+  abandonedReminderMessage: '',
 };
 
 export const SAAS_MARKETING_DATA = {

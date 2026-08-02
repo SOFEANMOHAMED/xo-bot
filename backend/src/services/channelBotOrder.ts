@@ -6,6 +6,7 @@
 import type { Pool } from 'pg';
 import type { ConversationState, Entities } from '../core/types.js';
 import { logger } from '../utils/logger.js';
+import { clearAbandonedCheckoutFromState } from './abandonedCheckout/index.js';
 
 export type ChannelOrderSettings = {
   store_currency: string;
@@ -352,6 +353,7 @@ export async function persistBotChannelOrder(
     updatedState.salesgpt_stage_id = '1';
     updatedState.last_intent = 'greeting';
     updatedState.message_count = 0;
+    clearAbandonedCheckoutFromState(updatedState);
 
     console.log(`[${logPrefix}] Full state reset after order. last_order saved:`, {
       orderId,

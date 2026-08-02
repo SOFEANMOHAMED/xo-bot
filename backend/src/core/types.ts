@@ -118,6 +118,22 @@ export interface LastOrderSummary {
   confirmedAt: string; // ISO timestamp
 }
 
+/** Tracking for abandoned-checkout reminder job (per conversation, tenant-isolated) */
+export interface AbandonedCheckoutState {
+  eligible_at?: string;
+  reminder_claimed_at?: string;
+  reminder_sent_at?: string;
+  reminder_count?: number;
+  last_error?: string;
+}
+
+/** Optional binding so outbound jobs use the correct page/account for multi-page merchants */
+export interface ChannelBinding {
+  account_id?: string;
+  page_id?: string;
+  platform?: string;
+}
+
 export interface ConversationState {
   last_intent?: Intent;
   current_stage?: Stage;
@@ -132,6 +148,8 @@ export interface ConversationState {
   missing_fields?: string[];
   objection?: Objection;
   last_order?: LastOrderSummary; // Triggers fresh-start greeting on next message
+  abandoned_checkout?: AbandonedCheckoutState;
+  channel_binding?: ChannelBinding;
 }
 
 // ==================== INCOMING MESSAGE ====================
