@@ -1,0 +1,211 @@
+import pool from '../database/connection.js';
+import { logger } from './logger.js';
+import {
+  DEFAULT_PLAN_LIMITS,
+  ZERO_PLAN_LIMITS,
+  type PlanLimits
+} from './planDefinitions.js';
+
+export type { PlanLimits };
+
+/**
+ * Get plan limits from database or return defaults
+ */
+export async function getPlanLimits(planKey: string): Promise<PlanLimits> {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS global_settings (
+        key VARCHAR(255) PRIMARY KEY,
+        value JSONB NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    const result = await pool.query(
+      `SELECT value::jsonb FROM global_settings WHERE key = $1`,
+      [`plan_limits_${planKey}`]
+    );
+
+    if (result.rows.length > 0 && result.rows[0].value) {
+      const dbLimits = result.rows[0].value;
+      return {
+        ...(DEFAULT_PLAN_LIMITS[planKey] || DEFAULT_PLAN_LIMITS.comments),
+        ...dbLimits
+      };
+    }
+  } catch (error) {
+    logger.warn(`Could not fetch plan limits for ${planKey} from database`, error as Error);
+  }
+
+  return DEFAULT_PLAN_LIMITS[planKey] || DEFAULT_PLAN_LIMITS.comments;
+}
+
+/**
+ * Get merchant's current plan limits
+ */
+export async function getMerchantPlanLimits(merchantId: string): Promise<PlanLimits> {
+  try {
+    const result = await pool.query(
+      `SELECT subscription_plan, subscription_status, trial_ends_at 
+       FROM merchants 
+       WHERE id = $1`,
+      [merchantId]
+    );
+
+    if (result.rows.length === 0) {
+      return DEFAULT_PLAN_LIMITS.trial;
+    }
+
+    const merchant = result.rows[0];
+    const subscriptionPlan = merchant.subscription_plan || 'trial';
+    const subscriptionStatus = merchant.subscription_status || 'active';
+    const trialEndsAt = merchant.trial_ends_at;
+
+    if (subscriptionPlan === 'trial' && trialEndsAt) {
+      const now = new Date();
+      const trialEndDate = new Date(trialEndsAt);
+
+      if (now > trialEndDate && subscriptionStatus === 'active') {
+        return { ...ZERO_PLAN_LIMITS };
+      }
+    }
+
+    if (subscriptionStatus === 'suspended' || subscriptionStatus === 'expired') {
+      return { ...ZERO_PLAN_LIMITS };
+    }
+
+    return await getPlanLimits(subscriptionPlan);
+  } catch (error) {
+    logger.error('Error getting merchant plan limits', error as Error, { merchantId });
+    return DEFAULT_PLAN_LIMITS.trial;
+  }
+}
+
+export function isWithinLimit(current: number, limit: number): boolean {
+  if (limit === -1) return true;
+  return current < limit;
+}
+
+export async function getProductCount(merchantId: string): Promise<number> {
+  try {
+    const result = await pool.query(
+      `SELECT COUNT(*)::int as count FROM products WHERE merchant_id = $1`,
+      [merchantId]
+    );
+    return result.rows[0]?.count || 0;
+  } catch (error) {
+    logger.error('Error getting product count', error as Error, { merchantId });
+    return 0;
+  }
+}
+
+export async function getMonthlyAIResponseCount(merchantId: string): Promise<number> {
+  try {
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const result = await pool.query(
+      `SELECT COUNT(*)::int as count 
+       FROM messages 
+       WHERE conversation_id IN (
+         SELECT id FROM conversations WHERE merchant_id = $1
+       )
+       AND role = 'assistant'
+       AND created_at >= $2`,
+      [merchantId, startOfMonth]
+    );
+    return result.rows[0]?.count || 0;
+  } catch (error) {
+    logger.error('Error getting monthly AI response count', error as Error, { merchantId });
+    return 0;
+  }
+}
+
+export async function getFacebookPagesCount(merchantId: string): Promise<number> {
+  try {
+    const result = await pool.query(
+      `SELECT COUNT(*)::int as count FROM facebook_pages WHERE merchant_id = $1`,
+      [merchantId]
+    );
+    return result.rows[0]?.count || 0;
+  } catch (error) {
+    logger.error('Error getting Facebook pages count', error as Error, { merchantId });
+    return 0;
+  }
+}
+
+export async function getInstagramAccountsCount(merchantId: string): Promise<number> {
+  try {
+    const result = await pool.query(
+      `SELECT COUNT(*)::int as count FROM instagram_accounts WHERE merchant_id = $1`,
+      [merchantId]
+    );
+    return result.rows[0]?.count || 0;
+  } catch (error) {
+    logger.error('Error getting Instagram accounts count', error as Error, { merchantId });
+    return 0;
+  }
+}
+
+export async function getWhatsAppAccountsCount(merchantId: string): Promise<number> {
+  try {
+    const result = await pool.query(
+      `SELECT COUNT(*)::int as count FROM whatsapp_accounts WHERE merchant_id = $1 AND is_verified = true`,
+      [merchantId]
+    );
+    return result.rows[0]?.count || 0;
+  } catch (error) {
+    logger.error('Error getting WhatsApp accounts count', error as Error, { merchantId });
+    return 0;
+  }
+}
+
+export async function getShopifyStoresCount(merchantId: string): Promise<number> {
+  try {
+    const result = await pool.query(
+      `SELECT COUNT(*)::int as count FROM shopify_stores WHERE merchant_id = $1`,
+      [merchantId]
+    );
+    return result.rows[0]?.count || 0;
+  } catch (error) {
+    logger.error('Error getting Shopify stores count', error as Error, { merchantId });
+    return 0;
+  }
+}
+
+export async function getCustomersCount(merchantId: string): Promise<number> {
+  try {
+    const result = await pool.query(
+      `SELECT COUNT(*)::int as count FROM customers WHERE merchant_id = $1`,
+      [merchantId]
+    );
+    return result.rows[0]?.count || 0;
+  } catch (error) {
+    logger.error('Error getting customers count', error as Error, { merchantId });
+    return 0;
+  }
+}
+
+export async function getTelegramBotsCount(merchantId: string): Promise<number> {
+  try {
+    const result = await pool.query(
+      `SELECT COUNT(*)::int as count FROM telegram_bots WHERE merchant_id = $1 AND is_active = true`,
+      [merchantId]
+    );
+    return result.rows[0]?.count || 0;
+  } catch (error) {
+    logger.error('Error getting Telegram bots count', error as Error, { merchantId });
+    return 0;
+  }
+}
+
+/** FB pages + IG accounts + active Telegram bots */
+export async function getTotalChannelsCount(merchantId: string): Promise<number> {
+  const [fb, ig, tg] = await Promise.all([
+    getFacebookPagesCount(merchantId),
+    getInstagramAccountsCount(merchantId),
+    getTelegramBotsCount(merchantId)
+  ]);
+  return fb + ig + tg;
+}

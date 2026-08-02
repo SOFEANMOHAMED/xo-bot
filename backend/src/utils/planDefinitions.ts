@@ -1,0 +1,240 @@
+/**
+ * Canonical subscription plan definitions for Xo Bot.
+ * All paid plans: unlimited monthly AI usage (maxMonthlyAIResponses = -1).
+ */
+
+export const PAID_PLAN_KEYS = ['comments', 'single', 'social', 'yearly'] as const;
+export type PaidPlanKey = (typeof PAID_PLAN_KEYS)[number];
+export const ALL_PLAN_KEYS = [...PAID_PLAN_KEYS, 'trial', 'starter', 'pro', 'business'] as const;
+
+export function isPaidPlanKey(key: string): key is PaidPlanKey {
+  return (PAID_PLAN_KEYS as readonly string[]).includes(key);
+}
+
+export interface PlanLimits {
+  maxProducts: number; // -1 unlimited
+  maxMonthlyAIResponses: number; // -1 unlimited
+  maxFacebookPages: number;
+  maxInstagramAccounts: number;
+  maxWhatsAppAccounts: number;
+  maxShopifyStores: number;
+  maxTelegramBots: number;
+  /** Cap across FB + IG + Telegram combined. -1 = no combined cap (use per-channel limits). */
+  maxTotalChannels: number;
+  maxCustomers: number;
+  hasAdvancedAnalytics: boolean;
+  hasAPIAccess: boolean;
+  /** When false: comment automation only — no Messenger / IG DM / Telegram sales bot. */
+  hasSalesBot: boolean;
+  billingPeriod: 'monthly' | 'yearly';
+}
+
+export interface PlanConfig {
+  name: string;
+  price: number;
+  features: string[];
+  billingPeriod: 'monthly' | 'yearly';
+  description: string;
+}
+
+export const DEFAULT_PLAN_CONFIGS: Record<PaidPlanKey, PlanConfig> = {
+  comments: {
+    name: 'التعليقات',
+    price: 5,
+    billingPeriod: 'monthly',
+    description: 'رد آلي على التعليقات فقط — بدون بوت مبيعات.',
+    features: [
+      'رد على تعليقات فيسبوك وإنستغرام فقط',
+      'بدون بوت مبيعات (رسائل خاصة)',
+      'ربط صفحة فيسبوك واحدة',
+      'ربط حساب إنستغرام واحد',
+      'استخدام AI غير محدود',
+      'دعم فني عبر البريد'
+    ]
+  },
+  single: {
+    name: 'القناة الواحدة',
+    price: 21,
+    billingPeriod: 'monthly',
+    description: 'بوت مبيعات على قناة واحدة من اختيارك.',
+    features: [
+      'بوت مبيعات ذكي',
+      'ربط قناة واحدة: فيسبوك أو إنستغرام أو تيليجرام',
+      'استخدام AI غير محدود',
+      'إدارة منتجات وطلبات',
+      'دعم فني'
+    ]
+  },
+  social: {
+    name: 'السوشيال',
+    price: 35,
+    billingPeriod: 'monthly',
+    description: 'فيسبوك وإنستغرام معاً لبوت المبيعات.',
+    features: [
+      'بوت مبيعات ذكي',
+      'ربط صفحة فيسبوك واحدة',
+      'ربط حساب إنستغرام واحد',
+      'استخدام AI غير محدود',
+      'إدارة منتجات وطلبات',
+      'تحليلات أساسية',
+      'دعم فني أولوية'
+    ]
+  },
+  yearly: {
+    name: 'السنوية',
+    price: 200,
+    billingPeriod: 'yearly',
+    description: 'باقة سنوية شاملة للقنوات الرئيسية.',
+    features: [
+      'بوت مبيعات ذكي',
+      'ربط صفحة فيسبوك واحدة',
+      'ربط حساب إنستغرام واحد',
+      'ربط بوت تيليجرام واحد',
+      'استخدام AI غير محدود',
+      'إدارة منتجات وطلبات',
+      'تحليلات متقدمة',
+      'فوترة سنوية بوفر واضح',
+      'دعم فني أولوية'
+    ]
+  }
+};
+
+export const DEFAULT_PLAN_LIMITS: Record<string, PlanLimits> = {
+  comments: {
+    maxProducts: -1,
+    maxMonthlyAIResponses: -1,
+    maxFacebookPages: 1,
+    maxInstagramAccounts: 1,
+    maxWhatsAppAccounts: 0,
+    maxShopifyStores: 0,
+    maxTelegramBots: 0,
+    maxTotalChannels: -1,
+    maxCustomers: -1,
+    hasAdvancedAnalytics: false,
+    hasAPIAccess: false,
+    hasSalesBot: false,
+    billingPeriod: 'monthly'
+  },
+  single: {
+    maxProducts: -1,
+    maxMonthlyAIResponses: -1,
+    maxFacebookPages: 1,
+    maxInstagramAccounts: 1,
+    maxWhatsAppAccounts: 0,
+    maxShopifyStores: 0,
+    maxTelegramBots: 1,
+    maxTotalChannels: 1, // FB OR IG OR Telegram
+    maxCustomers: -1,
+    hasAdvancedAnalytics: false,
+    hasAPIAccess: false,
+    hasSalesBot: true,
+    billingPeriod: 'monthly'
+  },
+  social: {
+    maxProducts: -1,
+    maxMonthlyAIResponses: -1,
+    maxFacebookPages: 1,
+    maxInstagramAccounts: 1,
+    maxWhatsAppAccounts: 0,
+    maxShopifyStores: 0,
+    maxTelegramBots: 0,
+    maxTotalChannels: -1,
+    maxCustomers: -1,
+    hasAdvancedAnalytics: true,
+    hasAPIAccess: false,
+    hasSalesBot: true,
+    billingPeriod: 'monthly'
+  },
+  yearly: {
+    maxProducts: -1,
+    maxMonthlyAIResponses: -1,
+    maxFacebookPages: 1,
+    maxInstagramAccounts: 1,
+    maxWhatsAppAccounts: 0,
+    maxShopifyStores: 0,
+    maxTelegramBots: 1,
+    maxTotalChannels: -1,
+    maxCustomers: -1,
+    hasAdvancedAnalytics: true,
+    hasAPIAccess: false,
+    hasSalesBot: true,
+    billingPeriod: 'yearly'
+  },
+  trial: {
+    maxProducts: -1,
+    maxMonthlyAIResponses: -1,
+    maxFacebookPages: 1,
+    maxInstagramAccounts: 1,
+    maxWhatsAppAccounts: 0,
+    maxShopifyStores: 0,
+    maxTelegramBots: 1,
+    maxTotalChannels: -1,
+    maxCustomers: -1,
+    hasAdvancedAnalytics: true,
+    hasAPIAccess: true,
+    hasSalesBot: true,
+    billingPeriod: 'monthly'
+  },
+  // Legacy aliases for existing subscribers
+  starter: {
+    maxProducts: -1,
+    maxMonthlyAIResponses: -1,
+    maxFacebookPages: 1,
+    maxInstagramAccounts: 1,
+    maxWhatsAppAccounts: 0,
+    maxShopifyStores: 0,
+    maxTelegramBots: 0,
+    maxTotalChannels: -1,
+    maxCustomers: -1,
+    hasAdvancedAnalytics: false,
+    hasAPIAccess: false,
+    hasSalesBot: false,
+    billingPeriod: 'monthly'
+  },
+  pro: {
+    maxProducts: -1,
+    maxMonthlyAIResponses: -1,
+    maxFacebookPages: 1,
+    maxInstagramAccounts: 1,
+    maxWhatsAppAccounts: 0,
+    maxShopifyStores: 0,
+    maxTelegramBots: 1,
+    maxTotalChannels: 1,
+    maxCustomers: -1,
+    hasAdvancedAnalytics: false,
+    hasAPIAccess: false,
+    hasSalesBot: true,
+    billingPeriod: 'monthly'
+  },
+  business: {
+    maxProducts: -1,
+    maxMonthlyAIResponses: -1,
+    maxFacebookPages: 1,
+    maxInstagramAccounts: 1,
+    maxWhatsAppAccounts: 0,
+    maxShopifyStores: 0,
+    maxTelegramBots: 0,
+    maxTotalChannels: -1,
+    maxCustomers: -1,
+    hasAdvancedAnalytics: true,
+    hasAPIAccess: false,
+    hasSalesBot: true,
+    billingPeriod: 'monthly'
+  }
+};
+
+export const ZERO_PLAN_LIMITS: PlanLimits = {
+  maxProducts: 0,
+  maxMonthlyAIResponses: 0,
+  maxFacebookPages: 0,
+  maxInstagramAccounts: 0,
+  maxWhatsAppAccounts: 0,
+  maxShopifyStores: 0,
+  maxTelegramBots: 0,
+  maxTotalChannels: 0,
+  maxCustomers: 0,
+  hasAdvancedAnalytics: false,
+  hasAPIAccess: false,
+  hasSalesBot: false,
+  billingPeriod: 'monthly'
+};

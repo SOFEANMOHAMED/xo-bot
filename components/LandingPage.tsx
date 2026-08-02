@@ -1,0 +1,720 @@
+import React, { useState, useEffect } from 'react';
+import {
+  Bot, Zap, MessageCircle, CheckCircle, Mail, ArrowRight, Shield, Smartphone,
+  Plus, Minus, Loader2, TrendingUp, Users, Clock, UserCircle, BarChart2,
+  MessageSquare, Link2, Database, Cpu, Sparkles
+} from 'lucide-react';
+import LandingChatBot from './LandingChatBot';
+import AntigravityHero from './AntigravityHero';
+import { apiService } from '../services/api';
+import { logger } from '../utils/logger';
+import { usePublishedFooterPages } from '../hooks/usePublishedFooterPages';
+import { validateEmail, validateLength } from '../utils/validation';
+
+interface LandingPageProps {
+  onNavigateToLogin: () => void;
+  onNavigateToSignup: () => void;
+  onNavigateToPage?: (slug: string) => void;
+}
+
+interface Plan {
+  name: string;
+  planKey: string;
+  price: number;
+  features: string[];
+  billingPeriod?: 'monthly' | 'yearly';
+  description?: string;
+}
+
+const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigateToSignup, onNavigateToPage }) => {
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [isLoadingPlans, setIsLoadingPlans] = useState(true);
+  const cmsFooterPages = usePublishedFooterPages();
+
+  useEffect(() => {
+    const fetchPlans = async () => {
+      try {
+        setIsLoadingPlans(true);
+        const response = await apiService.getPublicSubscriptionPlans();
+        if (response && typeof response === 'object' && 'plans' in response && Array.isArray(response.plans)) {
+          setPlans(response.plans);
+        } else {
+          throw new Error('Unexpected response structure');
+        }
+      } catch (error: any) {
+        logger.error('Failed to fetch subscription plans:', error);
+        setPlans([
+          {
+            name: 'التعليقات',
+            planKey: 'comments',
+            price: 5,
+            billingPeriod: 'monthly',
+            description: 'رد آلي على التعليقات فقط — بدون بوت مبيعات.',
+            features: [
+              'رد على تعليقات فيسبوك وإنستغرام فقط',
+              'بدون بوت مبيعات (رسائل خاصة)',
+              'ربط صفحة فيسبوك واحدة',
+              'ربط حساب إنستغرام واحد',
+              'استخدام AI غير محدود',
+              'دعم فني عبر البريد'
+            ]
+          },
+          {
+            name: 'القناة الواحدة',
+            planKey: 'single',
+            price: 21,
+            billingPeriod: 'monthly',
+            description: 'بوت مبيعات على قناة واحدة من اختيارك.',
+            features: [
+              'بوت مبيعات ذكي',
+              'ربط قناة واحدة: فيسبوك أو إنستغرام أو تيليجرام',
+              'استخدام AI غير محدود',
+              'إدارة منتجات وطلبات',
+              'دعم فني'
+            ]
+          },
+          {
+            name: 'السوشيال',
+            planKey: 'social',
+            price: 35,
+            billingPeriod: 'monthly',
+            description: 'فيسبوك وإنستغرام معاً لبوت المبيعات.',
+            features: [
+              'بوت مبيعات ذكي',
+              'ربط صفحة فيسبوك واحدة',
+              'ربط حساب إنستغرام واحد',
+              'استخدام AI غير محدود',
+              'إدارة منتجات وطلبات',
+              'تحليلات أساسية',
+              'دعم فني أولوية'
+            ]
+          },
+          {
+            name: 'السنوية',
+            planKey: 'yearly',
+            price: 200,
+            billingPeriod: 'yearly',
+            description: 'باقة سنوية شاملة للقنوات الرئيسية.',
+            features: [
+              'بوت مبيعات ذكي',
+              'ربط صفحة فيسبوك واحدة',
+              'ربط حساب إنستغرام واحد',
+              'ربط بوت تيليجرام واحد',
+              'استخدام AI غير محدود',
+              'إدارة منتجات وطلبات',
+              'تحليلات متقدمة',
+              'فوترة سنوية بوفر واضح',
+              'دعم فني أولوية'
+            ]
+          }
+        ]);
+      } finally {
+        setIsLoadingPlans(false);
+      }
+    };
+    fetchPlans();
+  }, []);
+
+  const scrollToSection = (id: string) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const [contactForm, setContactForm] = useState({ name: '', email: '', message: '' });
+  const [contactError, setContactError] = useState<string | null>(null);
+  const [contactSuccess, setContactSuccess] = useState(false);
+
+  const handleContactSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setContactError(null);
+    const errors: string[] = [];
+    const nameValidation = validateLength(contactForm.name, 2, 100, 'الاسم');
+    if (!nameValidation.isValid) errors.push(...nameValidation.errors);
+    const emailValidation = validateEmail(contactForm.email);
+    if (!emailValidation.isValid) errors.push(...emailValidation.errors);
+    const messageValidation = validateLength(contactForm.message, 10, 1000, 'الرسالة');
+    if (!messageValidation.isValid) errors.push(...messageValidation.errors);
+    if (errors.length > 0) {
+      setContactError(errors.join('، '));
+      return;
+    }
+    setContactSuccess(true);
+    setContactForm({ name: '', email: '', message: '' });
+    setTimeout(() => setContactSuccess(false), 5000);
+  };
+
+  const getPlanDisplayProps = (planKey: string) => {
+    const props: { [key: string]: { popular?: boolean } } = {
+      comments: {},
+      single: { popular: true },
+      social: {},
+      yearly: {}
+    };
+    return props[planKey] || {};
+  };
+
+  return (
+    <div className="min-h-screen bg-white font-sans text-slate-900 dir-rtl selection:bg-brand-200 selection:text-slate-900 overflow-x-hidden relative">
+      {/* Soft warm atmosphere */}
+      <div className="fixed inset-0 pointer-events-none z-0">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_#FFF8EB_0%,_#ffffff_55%,_#ffffff_100%)]" />
+        <div className="absolute -top-32 left-1/4 w-[420px] h-[420px] rounded-full bg-brand-200/40 blur-[100px] animate-blob" />
+        <div className="absolute top-1/3 -right-20 w-[360px] h-[360px] rounded-full bg-brand-100/60 blur-[90px] animate-blob animation-delay-2000" />
+        <div className="absolute bottom-0 left-1/3 w-[300px] h-[300px] rounded-full bg-orange-100/50 blur-[80px] animate-blob animation-delay-4000" />
+      </div>
+      <AntigravityHero />
+
+      {/* Navbar */}
+      <nav className="fixed top-0 w-full z-50 bg-white/80 backdrop-blur-xl border-b border-brand-100/80">
+        <div className="container mx-auto px-6 py-4 flex justify-between items-center">
+          <div className="flex items-center gap-2.5">
+            <div className="bg-brand p-2 rounded-xl shadow-md shadow-brand/25">
+              <Bot size={22} className="text-white" />
+            </div>
+            <span className="text-xl font-extrabold tracking-tight text-slate-900">
+              Xo <span className="text-brand">Bot</span>
+            </span>
+          </div>
+
+          <div className="hidden md:flex items-center gap-7 text-sm font-semibold text-slate-600">
+            <button onClick={() => scrollToSection('home')} className="hover:text-brand transition-colors">الرئيسية</button>
+            <button onClick={() => scrollToSection('features')} className="hover:text-brand transition-colors">المميزات</button>
+            <button onClick={() => scrollToSection('case-studies')} className="hover:text-brand transition-colors">قصص النجاح</button>
+            <button onClick={() => scrollToSection('pricing')} className="hover:text-brand transition-colors">الأسعار</button>
+            <button onClick={() => scrollToSection('contact')} className="hover:text-brand transition-colors">اتصل بنا</button>
+            <button onClick={() => scrollToSection('faq')} className="hover:text-brand transition-colors">الأسئلة الشائعة</button>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onNavigateToLogin}
+              className="text-sm font-semibold text-slate-600 hover:text-brand transition-colors hidden sm:block"
+            >
+              تسجيل الدخول
+            </button>
+            <button
+              onClick={onNavigateToSignup}
+              className="px-5 py-2.5 rounded-xl bg-brand text-white font-bold text-sm hover:bg-brand-600 transition-all shadow-lg shadow-brand/30"
+            >
+              جرب مجاناً 7 أيام
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      {/* Hero — brand first, one composition */}
+      <section id="home" className="relative min-h-[100svh] flex flex-col justify-center pt-28 pb-16 md:pt-32 md:pb-24">
+        <div className="container mx-auto px-6 relative z-10">
+          <div className="max-w-4xl mx-auto text-center">
+            <p className="text-4xl sm:text-5xl md:text-6xl font-extrabold tracking-tight text-slate-900 mb-5 animate-fade-in-up">
+              Xo <span className="text-brand">Bot</span>
+            </p>
+
+            <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-slate-800 leading-snug mb-5 animate-fade-in-up" style={{ animationDelay: '0.08s' }}>
+              ذكاء اصطناعي يرد على عملائك ويبيع عنك
+            </h1>
+
+            <p className="text-lg text-slate-500 max-w-2xl mx-auto leading-relaxed mb-9 animate-fade-in-up" style={{ animationDelay: '0.16s' }}>
+              منصة عربية تربط فيسبوك وواتساب بمتجرك، وتدير المحادثات بذكاء كموظف مبيعات حقيقي — على مدار الساعة.
+            </p>
+
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 animate-fade-in-up" style={{ animationDelay: '0.24s' }}>
+              <button
+                onClick={onNavigateToSignup}
+                className="w-full sm:w-auto px-8 py-3.5 bg-brand text-white rounded-xl font-bold text-base hover:bg-brand-600 shadow-xl shadow-brand/30 transition-all flex items-center justify-center gap-2"
+              >
+                <span>ابدأ التجربة المجانية</span>
+                <ArrowRight size={18} className="rotate-180" />
+              </button>
+              <button
+                onClick={() => scrollToSection('features')}
+                className="w-full sm:w-auto px-8 py-3.5 bg-white text-slate-800 rounded-xl font-bold text-base border border-slate-200 hover:border-brand-300 hover:text-brand transition-all"
+              >
+                اعرف المزيد
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-center gap-5 mt-8 text-sm text-slate-500 animate-fade-in-up" style={{ animationDelay: '0.32s' }}>
+              <span className="inline-flex items-center gap-1.5"><Sparkles size={14} className="text-brand" /> Gemini 2.5</span>
+              <span className="inline-flex items-center gap-1.5"><Shield size={14} className="text-brand" /> آمن 100%</span>
+              <span className="inline-flex items-center gap-1.5"><Users size={14} className="text-brand" /> 500+ متجر</span>
+              <span className="inline-flex items-center gap-1.5"><Clock size={14} className="text-brand" /> دعم 24/7</span>
+            </div>
+          </div>
+
+          {/* Product visual — full-bleed feel within container */}
+          <div className="mt-14 md:mt-16 relative mx-auto max-w-5xl animate-fade-in-up" style={{ animationDelay: '0.4s' }}>
+            <div className="absolute -inset-4 bg-gradient-to-r from-brand-200 via-brand-100 to-transparent rounded-[2rem] blur-2xl opacity-70" />
+            <div className="relative overflow-hidden rounded-2xl border border-brand-100 bg-gradient-to-br from-white via-brand-50/40 to-white shadow-2xl shadow-brand/10">
+              <div className="absolute top-0 inset-x-0 h-9 bg-white/90 border-b border-brand-100 flex items-center px-4 gap-2 z-20">
+                <div className="w-2.5 h-2.5 rounded-full bg-red-400" />
+                <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
+                <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
+                <span className="mr-3 text-xs font-medium text-slate-400">Xo Bot · لوحة الذكاء</span>
+              </div>
+
+              <div className="relative pt-9 aspect-video md:aspect-[16/9] flex items-center justify-center">
+                {/* Soft neural grid */}
+                <svg className="absolute inset-0 w-full h-full opacity-[0.12]" aria-hidden>
+                  <defs>
+                    <pattern id="ai-grid" width="36" height="36" patternUnits="userSpaceOnUse">
+                      <path d="M 36 0 L 0 0 0 36" fill="none" stroke="#FF9A00" strokeWidth="1" />
+                    </pattern>
+                  </defs>
+                  <rect width="100%" height="100%" fill="url(#ai-grid)" />
+                </svg>
+
+                {/* Conversation chips */}
+                <div className="absolute top-14 right-4 md:right-10 max-w-[180px] bg-white/90 backdrop-blur border border-brand-100 rounded-2xl rounded-bl-sm px-3.5 py-2.5 shadow-lg animate-float z-20">
+                  <p className="text-sm font-medium text-slate-700">كم السعر؟</p>
+                </div>
+                <div className="absolute top-28 left-4 md:left-10 max-w-[200px] bg-brand text-white rounded-2xl rounded-br-sm px-3.5 py-2.5 shadow-lg shadow-brand/25 animate-float-delayed z-20">
+                  <p className="text-sm font-medium">السعر 149 ر.س مع التوصيل</p>
+                </div>
+                <div className="absolute bottom-16 right-6 md:right-16 max-w-[190px] bg-white/90 backdrop-blur border border-brand-100 rounded-2xl rounded-bl-sm px-3.5 py-2.5 shadow-lg animate-float z-20" style={{ animationDelay: '0.8s' }}>
+                  <p className="text-sm font-medium text-slate-700">هل متوفر مقاس L؟</p>
+                </div>
+
+                <img
+                  src="/cpu_xo_bot_v2.png"
+                  alt="Xo Bot — نواة الذكاء الاصطناعي"
+                  className="relative z-10 max-w-[85%] md:max-w-[70%] h-auto drop-shadow-xl"
+                  style={{ maxHeight: '420px' }}
+                />
+              </div>
+            </div>
+
+            {/* Floating signals outside overflow */}
+            <div className="hidden md:flex absolute top-1/3 -right-6 bg-white border border-brand-100 p-3.5 rounded-2xl shadow-xl items-center gap-3 animate-bounce z-20" style={{ animationDuration: '3.2s' }}>
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-500">
+                <CheckCircle size={20} />
+              </div>
+              <div>
+                <p className="text-xs text-slate-400">تم البيع</p>
+                <p className="font-bold text-slate-800">+ 125.00$</p>
+              </div>
+            </div>
+            <div className="hidden md:flex absolute bottom-1/4 -left-6 bg-white border border-brand-100 p-3.5 rounded-2xl shadow-xl items-center gap-3 animate-bounce z-20" style={{ animationDuration: '4s' }}>
+              <div className="w-10 h-10 rounded-xl bg-brand-50 flex items-center justify-center text-brand">
+                <MessageCircle size={20} />
+              </div>
+              <div>
+                <p className="text-xs text-slate-400">استفسار جديد</p>
+                <p className="font-bold text-slate-800">متوفر مقاس L؟</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Features */}
+      <section id="features" className="py-24 relative z-10 bg-white">
+        <div className="container mx-auto px-6">
+          <div className="text-center mb-14 max-w-2xl mx-auto">
+            <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900 mb-3">
+              كل ما تحتاجه لإدارة <span className="text-brand">ذكية</span>
+            </h2>
+            <p className="text-slate-500">
+              أدوات متكاملة للمتاجر الإلكترونية — وفّر الوقت وزد الأرباح بذكاء اصطناعي يفهم عميلك.
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-6">
+            <FeatureCard icon={<MessageCircle size={28} />} title="ردود آلية متعددة القنوات" description="فيسبوك وواتساب بلهجات عربية دقيقة، كأن موظفاً حقيقياً يرد على عملائك." />
+            <FeatureCard icon={<UserCircle size={28} />} title="نظام CRM متكامل" description="تتبع التفاعلات، الملاحظات، التصنيف، وإحصائيات كل عميل في مكان واحد." />
+            <FeatureCard icon={<BarChart2 size={28} />} title="تحليلات وتقارير" description="لوحة أداء للمبيعات والمحادثات والمنتجات مع مؤشرات واضحة." />
+            <FeatureCard icon={<Link2 size={28} />} title="تكاملات متعددة" description="اربط صفحات فيسبوك، واتساب، وشوبيفاي بمزامنة تلقائية للمنتجات والطلبات." />
+            <FeatureCard icon={<Database size={28} />} title="إدارة منتجات وخدمات" description="استيراد من Excel أو شوبيفاي أو إضافة يدوية بسهولة." />
+            <FeatureCard icon={<Cpu size={28} />} title="ذكاء اصطناعي متقدم" description="مدعوم بـ Gemini 2.5 — يفهم السياق ويتعلم من المحادثات ويمنع التضارب." />
+            <FeatureCard icon={<Shield size={28} />} title="أمان وخصوصية" description="بيانات مشفرة، وعزل كامل بين التجار، مع Human Takeover عند الحاجة." />
+            <FeatureCard icon={<Zap size={28} />} title="إعداد في دقائق" description="بدون خبرة تقنية — واجهة بسيطة ودعم فني على مدار الساعة." />
+            <FeatureCard icon={<Smartphone size={28} />} title="إشعارات ذكية" description="تنبيهات الطلبات والأحداث المهمة في لوحة واحدة واضحة." />
+          </div>
+        </div>
+      </section>
+
+      {/* Integrations */}
+      <section id="integrations" className="py-24 relative z-10 bg-brand-50/40">
+        <div className="container mx-auto px-6">
+          <div className="text-center mb-14">
+            <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900 mb-3">
+              منصة متكاملة بكل ما تحتاجه
+            </h2>
+            <p className="text-slate-500 max-w-2xl mx-auto">
+              جميع أدوات إدارة متجرك في مكان واحد
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5 max-w-6xl mx-auto">
+            {[
+              { icon: <UserCircle size={22} />, title: 'نظام CRM', desc: 'إدارة العملاء وتتبع التفاعلات والإحصائيات', note: 'متوفر في جميع الباقات' },
+              { icon: <BarChart2 size={22} />, title: 'تحليلات متقدمة', desc: 'تقارير المبيعات والمحادثات وأداء المنتجات', note: 'باقات Pro و Business' },
+              { icon: <MessageSquare size={22} />, title: 'WhatsApp Business', desc: 'ربط الحساب وردود تلقائية وإدارة المحادثات', note: 'متوفر في جميع الباقات' },
+              { icon: <Link2 size={22} />, title: 'تكاملات متعددة', desc: 'Messenger و Shopify و Telegram ومزامنة المنتجات', note: 'متوفر في جميع الباقات' },
+            ].map((item) => (
+              <div
+                key={item.title}
+                className="group bg-white border border-brand-100 rounded-2xl p-6 hover:border-brand-300 hover:shadow-lg hover:shadow-brand/10 transition-all duration-300 hover:-translate-y-1"
+              >
+                <div className="w-11 h-11 bg-brand-50 text-brand rounded-xl flex items-center justify-center mb-4 group-hover:bg-brand group-hover:text-white transition-colors">
+                  {item.icon}
+                </div>
+                <h3 className="text-lg font-bold text-slate-900 mb-2">{item.title}</h3>
+                <p className="text-slate-500 text-sm leading-relaxed mb-4">{item.desc}</p>
+                <div className="flex items-center gap-1.5 text-brand text-sm font-medium">
+                  <CheckCircle size={14} />
+                  <span>{item.note}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Case studies */}
+      <section id="case-studies" className="py-24 relative z-10 bg-white">
+        <div className="container mx-auto px-6">
+          <div className="text-center mb-14">
+            <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900 mb-3">قصص نجاح عملائنا</h2>
+            <p className="text-slate-500 max-w-2xl mx-auto">كيف ساعدنا المتاجر على زيادة المبيعات وتحسين التجربة</p>
+          </div>
+          <div className="grid md:grid-cols-3 gap-6 max-w-6xl mx-auto">
+            <CaseStudyCard storeName="متجر الأزياء الراقية" industry="أزياء" metric="+40%" metricLabel="زيادة في المبيعات" description="بعد استخدام Xo Bot زادت المبيعات ورضا العملاء بشكل ملحوظ." improvement="تحسين وقت الاستجابة من ساعات إلى ثوانٍ" />
+            <CaseStudyCard storeName="متجر الإلكترونيات" industry="إلكترونيات" metric="+65%" metricLabel="زيادة في الاستفسارات" description="الرد التلقائي على أغلب الاستفسارات وفّر وقت فريق المبيعات." improvement="توفير 20 ساعة عمل أسبوعياً" />
+            <CaseStudyCard storeName="متجر العطور" industry="عطور ومستحضرات" metric="+85%" metricLabel="رضا العملاء" description="ردود سريعة ودقيقة رفعت تقييم المتجر من 4.2 إلى 4.8." improvement="رد فوري على 90% من الاستفسارات" />
+          </div>
+        </div>
+      </section>
+
+      {/* Pricing */}
+      <section id="pricing" className="py-24 relative z-10 bg-slate-50">
+        <div className="container mx-auto px-6">
+          <div className="text-center mb-14">
+            <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900 mb-3">باقات تناسب الجميع</h2>
+            <p className="text-slate-500">اختر الباقة المناسبة — يمكنك التغيير أو الإلغاء في أي وقت.</p>
+          </div>
+
+          {isLoadingPlans ? (
+            <div className="flex justify-center items-center py-20">
+              <Loader2 className="animate-spin text-brand" size={40} />
+            </div>
+          ) : plans.length > 0 ? (
+            <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-6 max-w-7xl mx-auto">
+              {plans.map((plan) => {
+                const displayProps = getPlanDisplayProps(plan.planKey);
+                const isPopular = !!displayProps.popular;
+                const periodLabel = plan.billingPeriod === 'yearly' ? 'سنوياً' : 'شهرياً';
+                return (
+                  <div
+                    key={plan.planKey}
+                    className={`relative rounded-2xl p-8 transition-all bg-white border ${
+                      isPopular
+                        ? 'border-brand shadow-xl shadow-brand/15 md:-translate-y-3'
+                        : 'border-slate-200 hover:border-brand-200'
+                    }`}
+                  >
+                    {isPopular && (
+                      <div className="absolute top-0 right-1/2 translate-x-1/2 -translate-y-1/2 bg-brand text-white px-4 py-1 rounded-lg text-xs font-bold shadow-md shadow-brand/30">
+                        الأكثر طلباً
+                      </div>
+                    )}
+                    <h3 className="text-xl font-bold mb-2 text-slate-900">{plan.name}</h3>
+                    <div className="flex items-baseline gap-1 mb-5">
+                      <span className={`font-extrabold text-slate-900 ${isPopular ? 'text-5xl' : 'text-4xl'}`}>{plan.price}$</span>
+                      <span className="text-slate-400">/ {periodLabel}</span>
+                    </div>
+                    <p className="text-sm mb-7 text-slate-500">
+                      {plan.description || ''}
+                    </p>
+                    <button
+                      onClick={onNavigateToSignup}
+                      className={`w-full py-3 rounded-xl font-bold transition-colors mb-7 ${
+                        isPopular
+                          ? 'bg-brand text-white hover:bg-brand-600 shadow-lg shadow-brand/25'
+                          : 'border border-slate-200 text-slate-800 hover:border-brand hover:text-brand'
+                      }`}
+                    >
+                      {plan.planKey === 'yearly' ? 'اشترك سنوياً' : isPopular ? 'جرب مجاناً' : 'ابدأ الآن'}
+                    </button>
+                    <ul className="space-y-3 text-sm text-slate-600">
+                      {plan.features.map((feature, idx) => (
+                        <li key={idx} className="flex gap-2.5">
+                          <CheckCircle size={16} className="text-brand shrink-0 mt-0.5" />
+                          <span>{feature}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-20">
+              <p className="text-slate-400">لا توجد باقات متاحة حالياً</p>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Contact */}
+      <section id="contact" className="py-24 relative z-10 overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-b from-white to-brand-50/60" />
+        <div className="container mx-auto px-6 relative z-10">
+          <div className="max-w-4xl mx-auto bg-white border border-brand-100 rounded-3xl p-8 md:p-12 shadow-xl shadow-brand/10">
+            <div className="grid md:grid-cols-2 gap-12">
+              <div>
+                <h2 className="text-3xl font-extrabold text-slate-900 mb-4">تواصل معنا</h2>
+                <p className="text-slate-500 mb-8">هل لديك استفسار؟ فريقنا جاهز للرد عليك في أي وقت.</p>
+                <div className="space-y-5">
+                  <div className="flex items-center gap-4 text-slate-700">
+                    <div className="w-12 h-12 bg-brand-50 rounded-xl flex items-center justify-center text-brand">
+                      <Mail size={22} />
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-400">البريد الإلكتروني</p>
+                      <p className="font-semibold">support@almusaid.ai</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 text-slate-700">
+                    <div className="w-12 h-12 bg-brand-50 rounded-xl flex items-center justify-center text-brand">
+                      <MessageCircle size={22} />
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-400">الدعم المباشر</p>
+                      <p className="font-semibold">متاح 24/7 عبر الدردشة</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <form className="space-y-4" onSubmit={handleContactSubmit}>
+                {contactError && (
+                  <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm">{contactError}</div>
+                )}
+                {contactSuccess && (
+                  <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-xl text-emerald-700 text-sm">
+                    تم إرسال رسالتك بنجاح! سنتواصل معك قريباً.
+                  </div>
+                )}
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-1.5">الاسم الكامل <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={100}
+                    value={contactForm.name}
+                    onChange={(e) => e.target.value.length <= 100 && setContactForm({ ...contactForm, name: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 focus:ring-2 focus:ring-brand/40 focus:border-brand outline-none transition"
+                    placeholder="محمد أحمد"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-1.5">البريد الإلكتروني <span className="text-red-500">*</span></label>
+                  <input
+                    type="email"
+                    required
+                    maxLength={255}
+                    value={contactForm.email}
+                    onChange={(e) => e.target.value.length <= 255 && setContactForm({ ...contactForm, email: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 focus:ring-2 focus:ring-brand/40 focus:border-brand outline-none transition"
+                    placeholder="name@example.com"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-1.5">الرسالة <span className="text-red-500">*</span></label>
+                  <textarea
+                    rows={4}
+                    required
+                    maxLength={1000}
+                    value={contactForm.message}
+                    onChange={(e) => e.target.value.length <= 1000 && setContactForm({ ...contactForm, message: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 focus:ring-2 focus:ring-brand/40 focus:border-brand outline-none transition"
+                    placeholder="كيف يمكننا مساعدتك؟"
+                  />
+                  <p className="text-xs text-slate-400 mt-1">{contactForm.message.length}/1000</p>
+                </div>
+                <button type="submit" className="w-full py-3.5 bg-brand hover:bg-brand-600 text-white rounded-xl font-bold transition-colors shadow-lg shadow-brand/25">
+                  إرسال الرسالة
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* FAQ */}
+      <section id="faq" className="py-24 relative z-10 bg-white">
+        <div className="container mx-auto px-6">
+          <div className="text-center mb-14">
+            <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900 mb-3">الأسئلة الشائعة</h2>
+            <p className="text-slate-500">إجابات سريعة على التساؤلات الأكثر شيوعاً</p>
+          </div>
+          <div className="max-w-3xl mx-auto space-y-3">
+            <FaqItem question="هل يدعم البوت اللهجات العربية العامية؟" answer="نعم، تم تدريب نماذج الذكاء الاصطناعي لدينا لفهم والرد بمختلف اللهجات العربية (المصرية، الخليجية، الشامية، وغيرها) بدقة عالية، مما يجعله يبدو كموظف حقيقي." />
+            <FaqItem question="هل أحتاج إلى خبرة برمجية لاستخدام المنصة؟" answer="إطلاقاً. تم تصميم لوحة التحكم لتكون سهلة الاستخدام للجميع. عملية الربط مع فيسبوك وشوبيفاي تتم بضغطات زر بسيطة ودون الحاجة لكتابة أي كود." />
+            <FaqItem question="كيف يتم تحديث معلومات المنتجات والأسعار؟" answer="يمكنك ربط متجر Shopify للمزامنة التلقائية، أو رفع ملف Excel، أو إضافة المنتجات يدوياً. البوت يحدّث إجاباته فوراً عند تغيير أي معلومة." />
+            <FaqItem question="هل هناك فترة تجربة مجانية؟" answer="نعم، نقدم فترة تجربة مجانية لمدة 7 أيام مع كامل المميزات (باقة المحترف) لتتمكن من اختبار النظام قبل الدفع." />
+            <FaqItem question="ماذا يحدث إذا لم يعرف البوت الإجابة؟" answer="إذا لم يجد المعلومة في قاعدة بياناتك، يعتذر بلطف ويطلب من العميل التواصل مع الدعم البشري — بدلاً من اختلاق إجابة غير صحيحة." />
+          </div>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="relative z-10 bg-slate-900 text-white pt-16 pb-8">
+        <div className="container mx-auto px-6">
+          <div className="grid md:grid-cols-4 gap-12 mb-12 border-b border-slate-800 pb-12">
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="bg-brand p-1.5 rounded-lg">
+                  <Bot size={18} className="text-white" />
+                </div>
+                <span className="text-lg font-bold">Xo Bot</span>
+              </div>
+              <p className="text-slate-400 text-sm leading-relaxed">
+                الحل الأمثل للمتاجر الإلكترونية العربية. خدمة عملاء ذكية، آلية، وسريعة.
+              </p>
+            </div>
+
+            <div className="col-span-1 md:col-span-2 flex justify-around gap-8">
+              <div>
+                <h4 className="font-bold mb-5">روابط هامة</h4>
+                <ul className="space-y-3 text-sm text-slate-400">
+                  <li><button onClick={() => scrollToSection('home')} className="hover:text-brand transition-colors">الرئيسية</button></li>
+                  <li><button onClick={() => scrollToSection('features')} className="hover:text-brand transition-colors">المميزات</button></li>
+                  <li><button onClick={() => scrollToSection('pricing')} className="hover:text-brand transition-colors">الأسعار</button></li>
+                  <li><button onClick={() => scrollToSection('faq')} className="hover:text-brand transition-colors">الأسئلة الشائعة</button></li>
+                </ul>
+              </div>
+              <div>
+                <h4 className="font-bold mb-5">قانوني</h4>
+                <ul className="space-y-3 text-sm text-slate-400">
+                  {onNavigateToPage ? (
+                    <>
+                      <li><button onClick={() => onNavigateToPage('privacy-policy')} className="hover:text-brand transition-colors">سياسة الخصوصية</button></li>
+                      <li><button onClick={() => onNavigateToPage('terms-of-service')} className="hover:text-brand transition-colors">الشروط والأحكام</button></li>
+                    </>
+                  ) : (
+                    <>
+                      <li><a href="#" className="hover:text-brand transition-colors">سياسة الخصوصية</a></li>
+                      <li><a href="#" className="hover:text-brand transition-colors">الشروط والأحكام</a></li>
+                    </>
+                  )}
+                </ul>
+              </div>
+              {cmsFooterPages.length > 0 && (
+                <div>
+                  <h4 className="font-bold mb-5">صفحات</h4>
+                  <ul className="space-y-3 text-sm text-slate-400">
+                    {cmsFooterPages.map((p) => (
+                      <li key={p.slug}>
+                        {onNavigateToPage ? (
+                          <button type="button" onClick={() => onNavigateToPage(p.slug)} className="hover:text-brand transition-colors text-right">{p.title}</button>
+                        ) : (
+                          <a href={`/${p.slug}`} className="hover:text-brand transition-colors">{p.title}</a>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <h4 className="font-bold mb-5">كن على تواصل</h4>
+              <div className="flex gap-3">
+                <a href="#" className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center text-slate-400 hover:bg-brand hover:text-white transition-all">
+                  <span className="sr-only">Facebook</span>
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" /></svg>
+                </a>
+                <a href="#" className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center text-slate-400 hover:bg-brand hover:text-white transition-all">
+                  <span className="sr-only">Twitter</span>
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M23.953 4.57a10 10 0 01-2.825.775 4.958 4.958 0 002.163-2.723c-.951.555-2.005.959-3.127 1.184a4.92 4.92 0 00-8.384 4.482C7.69 8.095 4.067 6.13 1.64 3.162a4.822 4.822 0 00-.666 2.475c0 1.71.87 3.213 2.188 4.096a4.904 4.904 0 01-2.228-.616v.06a4.923 4.923 0 003.946 4.827 4.996 4.996 0 01-2.212.085 4.936 4.936 0 004.604 3.417 9.867 9.867 0 01-6.102 2.105c-.39 0-.779-.023-1.17-.067a13.995 13.995 0 007.557 2.209c9.053 0 13.998-7.496 13.998-13.985 0-.21 0-.42-.015-.63A9.935 9.935 0 0024 4.59z" /></svg>
+                </a>
+              </div>
+            </div>
+          </div>
+          <div className="text-center text-slate-500 text-sm">
+            © {new Date().getFullYear()} Xo Bot. جميع الحقوق محفوظة.
+          </div>
+        </div>
+        <LandingChatBot />
+      </footer>
+    </div>
+  );
+};
+
+const FeatureCard = ({ icon, title, description }: { icon: React.ReactNode; title: string; description: string }) => (
+  <div className="p-7 rounded-2xl bg-white border border-slate-100 hover:border-brand-200 transition-all duration-300 hover:-translate-y-1 group hover:shadow-xl hover:shadow-brand/10 relative overflow-hidden">
+    <div className="mb-5 p-3.5 rounded-xl w-fit bg-brand-50 text-brand group-hover:bg-brand group-hover:text-white transition-colors relative z-10">
+      {icon}
+    </div>
+    <div className="absolute top-0 left-0 w-28 h-28 bg-brand-100 blur-[50px] opacity-0 group-hover:opacity-70 transition-opacity duration-500 rounded-full -mr-8 -mt-8 pointer-events-none" />
+    <h3 className="text-lg font-bold mb-2 text-slate-900 relative z-10">{title}</h3>
+    <p className="text-slate-500 leading-relaxed text-sm relative z-10">{description}</p>
+  </div>
+);
+
+const CaseStudyCard = ({
+  storeName, industry, metric, metricLabel, description, improvement
+}: {
+  storeName: string; industry: string; metric: string; metricLabel: string; description: string; improvement: string;
+}) => (
+  <div className="p-7 rounded-2xl bg-white border border-slate-100 hover:border-brand-200 transition-all duration-300 hover:-translate-y-1 group hover:shadow-xl hover:shadow-brand/10">
+    <div className="flex items-start justify-between mb-4 gap-3">
+      <div>
+        <h3 className="text-lg font-bold text-slate-900 mb-0.5">{storeName}</h3>
+        <p className="text-sm text-slate-400">{industry}</p>
+      </div>
+      <div className="text-left shrink-0">
+        <div className="text-3xl font-extrabold text-brand">{metric}</div>
+        <div className="text-xs text-slate-400">{metricLabel}</div>
+      </div>
+    </div>
+    <p className="text-slate-600 mb-4 leading-relaxed text-sm">{description}</p>
+    <div className="flex items-center gap-2 text-sm text-brand font-medium">
+      <TrendingUp size={15} />
+      <span>{improvement}</span>
+    </div>
+  </div>
+);
+
+const FaqItem = ({ question, answer }: { question: string; answer: string }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  return (
+    <div className={`border rounded-2xl bg-white transition-all duration-300 ${isOpen ? 'border-brand shadow-md shadow-brand/10' : 'border-slate-100'}`}>
+      <button onClick={() => setIsOpen(!isOpen)} className="w-full flex items-center justify-between p-5 text-right focus:outline-none gap-4">
+        <span className={`font-bold text-base transition-colors ${isOpen ? 'text-brand' : 'text-slate-900'}`}>{question}</span>
+        {isOpen ? <Minus size={18} className="text-brand shrink-0" /> : <Plus size={18} className="text-slate-400 shrink-0" />}
+      </button>
+      <div className={`grid transition-all duration-300 ease-in-out ${isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
+        <div className="overflow-hidden">
+          <div className="px-5 pb-5 text-slate-500 leading-relaxed border-t border-slate-100 pt-3 text-sm">
+            {answer}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default LandingPage;
+
+if (typeof document !== 'undefined') {
+  const styleId = 'landing-light-animations';
+  if (!document.getElementById(styleId)) {
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `
+      @keyframes float {
+        0%, 100% { transform: translateY(0px); }
+        50% { transform: translateY(-14px); }
+      }
+      @keyframes float-delayed {
+        0%, 100% { transform: translateY(0px); }
+        50% { transform: translateY(-10px); }
+      }
+      .animate-float { animation: float 3.5s ease-in-out infinite; }
+      .animate-float-delayed { animation: float-delayed 3.5s ease-in-out infinite; animation-delay: 1.2s; }
+    `;
+    document.head.appendChild(style);
+  }
+}
