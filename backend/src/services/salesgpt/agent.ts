@@ -6,12 +6,9 @@
  * It manages conversation stages, generates responses, and uses tools.
  */
 
-import { generateJSON, generateSimple, trackAICall } from '../../ai/gemini-client.js';
-import { CONVERSATION_STAGES, CONVERSATION_STAGES_EN, getStageDescription, mapStageIdToStage } from './stages.js';
+import { generateJSON, trackAICall } from '../../ai/gemini-client.js';
+import { getStageDescription, mapStageIdToStage } from './stages.js';
 import {
-    STAGE_ANALYZER_INCEPTION_PROMPT,
-    SALES_AGENT_INCEPTION_PROMPT,
-    SALES_AGENT_TOOLS_PROMPT,
     buildSalesGPTSystemPrompt,
     getSalesGPTPersonaMeta,
 } from './prompts.js';
@@ -47,6 +44,22 @@ const SALESGPT_MODEL_NEXT_ACTIONS = new Set([
   'send_image',
   'end_conversation'
 ]);
+
+/**
+ * Single source of truth: next_action → SalesGPT stage (1–9).
+ * Stage is derived — never decided by a separate AI call.
+ */
+const NEXT_ACTION_TO_STAGE_ID: Record<string, string> = {
+  greet: '1',
+  discover_needs: '2',
+  present_product: '4',
+  send_image: '4',
+  handle_objection: '5',
+  close_sale: '6',
+  collect_info: '7',
+  confirm_order: '8',
+  end_conversation: '9'
+};
 
 /** Explicit photo request in the customer message (must match SalesGPT pipeline detector). */
 export const SALESGPT_IMAGE_REQUEST_RE =
@@ -84,6 +97,10 @@ function intentFromSalesGPTNextAction(action: string): Intent {
     default:
       return 'other';
   }
+}
+
+function stageIdFromNextAction(action: string, fallbackStageId: string): string {
+  return NEXT_ACTION_TO_STAGE_ID[action] || fallbackStageId;
 }
 
 // ==================== TYPES ====================
@@ -273,56 +290,12 @@ export class SalesGPTAgent {
         this.state.conversationHistory.push(`نظام: ${note} <END_OF_TURN>`);
     }
 
-    // ==================== DETERMINE CONVERSATION STAGE ====================
-
-    /**
-     * Use AI to determine the current conversation stage
-     */
-    async determineConversationStage(): Promise<string> {
-        const stages = this.config.language === 'arabic'
-            ? CONVERSATION_STAGES
-            : CONVERSATION_STAGES_EN;
-
-        const stagesText = Object.entries(stages)
-            .map(([key, value]) => `${key}: ${value}`)
-            .join('\n');
-
-        const prompt = STAGE_ANALYZER_INCEPTION_PROMPT
-            .replace('{conversation_history}', this.state.conversationHistory.join('\n'))
-            .replace('{current_stage_id}', this.state.conversationStageId)
-            .replace('{conversation_stages}', stagesText);
-
-        trackAICall();
-        this.aiCallsCount++;
-
-        const result = await generateSimple(prompt, {
-            temperature: 0.1,
-            maxOutputTokens: 10
-        });
-
-        if (result.success && result.text) {
-            // Extract just the number
-            const match = result.text.trim().match(/\d/);
-            if (match) {
-                const newStageId = match[0];
-                if (stages[newStageId]) {
-                    this.state.conversationStageId = newStageId;
-                    this.state.currentConversationStage = getStageDescription(newStageId, this.config.language);
-
-                    if (this.config.verbose) {
-                        logger.debug(`Stage changed to: ${newStageId} - ${this.state.currentConversationStage.substring(0, 50)}`);
-                    }
-                }
-            }
-        }
-
-        return this.state.conversationStageId;
-    }
-
     // ==================== GENERATE RESPONSE (MAIN STEP) ====================
 
     /**
-     * Generate the next sales response - the main brain function
+     * Generate the next sales response - the main brain function.
+     * Single AI call: response + next_action + extracted_info.
+     * Stage is derived from next_action (no separate stage-analyzer call).
      */
     async step(
         messageText: string,
@@ -332,11 +305,9 @@ export class SalesGPTAgent {
         const startTime = Date.now();
         let toolUsed: string | undefined;
         let toolOutput: string | undefined;
+        const previousStageId = this.state.conversationStageId;
 
-        // Step 1: Determine conversation stage
-        await this.determineConversationStage();
-
-        // Step 2: Tools (extraction happens in generateSalesResponse via extracted_info — single AI pass)
+        // Step 1: Tools (extraction happens in generateSalesResponse via extracted_info)
         let toolContext: string = '';
         if (this.config.useTools) {
             const needsProductSearch = this.shouldSearchProducts(messageText);
@@ -352,59 +323,73 @@ export class SalesGPTAgent {
             }
         }
 
-        // Step 3: Build product context (active + catalog awareness)
+        // Step 2: Build product context (active + catalog awareness)
         const productContext = this.buildProductContext(products, catalog);
 
         this.currentProductsHaveColors = products.some(p => p.colors && p.colors.length > 0);
         this.currentProductsHaveSizes = products.some(p => p.sizes && p.sizes.length > 0);
 
-        // Step 4: Response + structured fields (extracted_info) in one AI call
+        // Step 3: One AI call — response + next_action + extracted_info
+        // Prompt still receives previous stage as guidance only (not a competing decision).
         const { responseText: response, aiNextAction } = await this.generateSalesResponse(
             messageText,
             productContext,
             toolContext
         );
 
-        // Step 5: Rule-based baseline (stage + collected fields)
-        let { intent, nextAction } = this.determineIntentAndAction(
-            messageText,
-            this.state.conversationStageId
-        );
-
-        // Step 5.5: AI `next_action` takes priority over stage-only rules
+        // Step 4: next_action is the sole decision source (fallback only if model omits it)
+        let nextAction: string;
+        let intent: Intent;
         const normalizedAiAction = normalizeSalesGPTNextAction(aiNextAction);
+
         if (normalizedAiAction) {
-            // Never honor send_image unless the customer explicitly asked for a photo
-            if (normalizedAiAction === 'send_image' && !SALESGPT_IMAGE_REQUEST_RE.test(messageText)) {
-                nextAction = 'present_product';
-                intent = 'product_query';
-                logger.debug('SalesGPT: ignored send_image without explicit image request', {
-                    aiNextAction,
-                    messagePreview: messageText.substring(0, 80)
-                });
-            } else {
-                nextAction = normalizedAiAction;
-                intent = intentFromSalesGPTNextAction(normalizedAiAction);
-                logger.debug('SalesGPT: using AI next_action over stage rules', {
-                    aiNextAction,
-                    normalized: normalizedAiAction,
-                    intent
-                });
-            }
+            nextAction = normalizedAiAction;
+            intent = intentFromSalesGPTNextAction(normalizedAiAction);
+        } else {
+            const fallback = this.determineIntentAndAction(messageText, previousStageId);
+            nextAction = fallback.nextAction;
+            intent = fallback.intent;
+            logger.debug('SalesGPT: AI next_action missing — using stage fallback', {
+                previousStageId,
+                nextAction
+            });
         }
 
-        // Step 5.6: Explicit user confirmation if model did not emit confirm_order
-        if (nextAction !== 'confirm_order' && this.isUserConfirmingOrder(messageText)) {
-            const { name, phone, address, product_name } = this.state.collectedInfo;
-            if (name && phone && address && product_name) {
-                const needsColor = this.currentProductsHaveColors && !this.state.collectedInfo.color;
-                const needsSize = this.currentProductsHaveSizes && !this.state.collectedInfo.size;
-                if (!needsColor && !needsSize) {
-                    nextAction = 'confirm_order';
-                    intent = 'order';
-                    console.log('✅ SalesGPT: User explicitly confirmed order (fallback)');
-                }
-            }
+        // Step 4.1: Safety — never honor send_image without an explicit photo request
+        if (nextAction === 'send_image' && !SALESGPT_IMAGE_REQUEST_RE.test(messageText)) {
+            nextAction = 'present_product';
+            intent = 'product_query';
+            logger.debug('SalesGPT: ignored send_image without explicit image request', {
+                aiNextAction,
+                messagePreview: messageText.substring(0, 80)
+            });
+        }
+
+        // Step 4.2: Deterministic order rails from collected fields (tenant-safe)
+        const orderCompleteness = this.getOrderFieldCompleteness();
+        if (nextAction === 'confirm_order' && !orderCompleteness.complete) {
+            nextAction = 'collect_info';
+            intent = 'order';
+            logger.debug('SalesGPT: downgraded confirm_order → collect_info (incomplete fields)', {
+                missing: orderCompleteness.missing
+            });
+        } else if (
+            nextAction !== 'confirm_order' &&
+            this.isUserConfirmingOrder(messageText) &&
+            orderCompleteness.complete
+        ) {
+            nextAction = 'confirm_order';
+            intent = 'order';
+            logger.debug('SalesGPT: user confirmed order with complete fields');
+        }
+
+        // Step 5: Derive stage from next_action (single source of truth)
+        const newStageId = stageIdFromNextAction(nextAction, previousStageId);
+        this.state.conversationStageId = newStageId;
+        this.state.currentConversationStage = getStageDescription(newStageId, this.config.language);
+
+        if (this.config.verbose && newStageId !== previousStageId) {
+            logger.debug(`Stage derived from next_action=${nextAction}: ${previousStageId} → ${newStageId}`);
         }
 
         // Step 6: Add response to history
@@ -436,6 +421,19 @@ export class SalesGPTAgent {
             toolOutput,
             aiCallsCount: this.aiCallsCount
         };
+    }
+
+    /** Whether order-critical fields are complete for this merchant's active product options. */
+    private getOrderFieldCompleteness(): { complete: boolean; missing: string[] } {
+        const { name, phone, address, product_name, color, size } = this.state.collectedInfo;
+        const missing: string[] = [];
+        if (!product_name) missing.push('product_name');
+        if (!name) missing.push('name');
+        if (!phone) missing.push('phone');
+        if (!address) missing.push('address');
+        if (this.currentProductsHaveColors && !color) missing.push('color');
+        if (this.currentProductsHaveSizes && !size) missing.push('size');
+        return { complete: missing.length === 0, missing };
     }
 
     // ==================== PRIVATE METHODS ====================
