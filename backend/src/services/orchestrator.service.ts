@@ -53,6 +53,7 @@ export interface OrchestratorResult {
     toolResultsCount: number;
     usedFallback: boolean;
   };
+  shouldEscalate?: boolean;
 }
 
 // ==================== HELPER FUNCTIONS ====================
@@ -382,6 +383,27 @@ export const handleIncomingMessage = async (
       });
     }
 
+    // Escalation markers + strip internal tokens before persist/send
+    const { prepareBotReplyForCustomer } = await import('../response/sanitize-reply.js');
+    const prepared = prepareBotReplyForCustomer(replyText, {
+      nextAction: salesPlan.next_action,
+    });
+    replyText = prepared.text;
+    const shouldEscalate = prepared.shouldEscalate;
+
+    if (shouldEscalate && conversationId) {
+      const { escalateConversationToHuman } = await import('./escalation.js');
+      await escalateConversationToHuman({
+        merchantId,
+        conversationId,
+        platform,
+        userId,
+        userName,
+        reason: salesPlan.next_action === 'handoff' ? 'handoff_action' : 'escalate_marker',
+        replyPreview: replyText,
+      });
+    }
+
     // ==================== STEP 8: Append User Message ====================
     if (conversationId) {
       await appendMessage(
@@ -481,10 +503,11 @@ export const handleIncomingMessage = async (
       meta: {
         conversationId,
         intent: detection.intent,
-        stage: detection.stage,
+        stage: shouldEscalate ? 'handoff' : detection.stage,
         toolResultsCount: toolResults.length,
         usedFallback
-      }
+      },
+      shouldEscalate
     };
 
   } catch (error: any) {

@@ -8,6 +8,8 @@ import { logger } from '../utils/logger.js';
 import { handleIncomingMessage } from '../bot/index.js';
 import type { Message, ConversationState, MerchantConfig } from '../bot/index.js';
 import { botReplyAsksForConfirmation } from '../services/salesgpt/index.js';
+import { escalateConversationToHuman } from '../services/escalation.js';
+import { stripInternalControlMarkers } from '../response/sanitize-reply.js';
 import { telegramAdapter } from '../services/channels/telegram.adapter.js';
 import { analyzeImageAndSearch, imageUrlToBase64 } from '../services/imageRecognition.js';
 import {
@@ -468,6 +470,40 @@ const processTelegramMessage = async (update: any) => {
       conversationId = newConvResult.rows[0].id;
     }
 
+    // Human takeover: skip bot when merchant owns the chat (same as Messenger/IG)
+    try {
+      const convStatus = await pool.query(
+        `SELECT bot_disabled, last_human_response_at, status
+         FROM conversations WHERE id = $1 AND merchant_id = $2`,
+        [conversationId, merchantId]
+      );
+      const conv = convStatus.rows[0] || { bot_disabled: false, status: 'bot' };
+      if (conv.bot_disabled || conv.status === 'human') {
+        await pool.query(
+          `INSERT INTO messages (conversation_id, role, content, sender_type, source)
+           VALUES ($1, 'user', $2, 'user', 'telegram')`,
+          [conversationId, messageText]
+        );
+        await pool.query(
+          `UPDATE conversations
+           SET last_message_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1 AND merchant_id = $2`,
+          [conversationId, merchantId]
+        );
+        logger.info('Telegram bot skipped — conversation in human mode', {
+          conversationId,
+          merchantId,
+          status: conv.status,
+          bot_disabled: conv.bot_disabled,
+        });
+        return;
+      }
+    } catch (statusErr: any) {
+      if (statusErr?.code !== '42703') {
+        throw statusErr;
+      }
+    }
+
     // ✅ جلب الرسائل السابقة للسياق (آخر 25 رسالة)
     const recentMessagesResult = await pool.query(
       `SELECT role, content FROM messages 
@@ -614,6 +650,20 @@ const processTelegramMessage = async (update: any) => {
           });
         }
       }
+
+      if (result.shouldEscalate) {
+        await escalateConversationToHuman({
+          merchantId,
+          conversationId,
+          platform: 'telegram',
+          userId,
+          userName: userName || 'عميل',
+          reason: result.next_action === 'handoff' ? 'handoff_action' : 'escalate_marker',
+          replyPreview: responseText,
+        });
+      }
+
+      responseText = stripInternalControlMarkers(responseText);
 
       console.log('[processTelegramMessage] NEW Orchestrator response generated:', {
         conversationId,
@@ -1127,7 +1177,7 @@ const processTelegramMessage = async (update: any) => {
     // ==================== STEP 3: Send message via adapter ====================
     // ✅ NOTE: Messages are already saved by orchestrator.service.ts
     // DO NOT save messages here to avoid duplication
-    const finalResponseText = cleanText || responseWithoutOrderData;
+    const finalResponseText = stripInternalControlMarkers(cleanText || responseWithoutOrderData);
     console.log('[processTelegramMessage] Prepared final response for sending:', { conversationId, responseLength: finalResponseText.length });
 
     // ✅ Send image first if present

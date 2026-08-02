@@ -308,7 +308,13 @@ const BotPlayground: React.FC<BotPlaygroundProps> = ({ products, services = [], 
   };
 
   // Helper to extract image URL from bot text
-  const parseMessageContent = (content: string) => {
+  const parseMessageContent = (rawContent: string) => {
+    const content = (rawContent || '')
+      .replace(/<\s*ESCALATE\s*>/gi, '')
+      .replace(/<\s*END_OF_TURN\s*>/gi, '')
+      .replace(/<\s*END_OF_CALL\s*>/gi, '')
+      .trim();
+
     try {
       if (!content || typeof content !== 'string') {
         return { text: '', imageUrl: null };

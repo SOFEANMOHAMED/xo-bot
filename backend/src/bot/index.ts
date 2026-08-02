@@ -177,6 +177,8 @@ export interface HandleMessageResult {
   };
   updatedState: ConversationState;
   next_action?: string;  // For Full AI Mode order detection
+  /** True when reply contained <ESCALATE> or next_action is handoff */
+  shouldEscalate?: boolean;
 }
 
 /**
@@ -219,17 +221,28 @@ export const handleIncomingMessage = async (
     merchantConfig
   });
 
+  const { prepareBotReplyForCustomer } = await import('../response/sanitize-reply.js');
+  const prepared = prepareBotReplyForCustomer(result.response.replyText, {
+    nextAction: result.response.meta.next_action
+  });
+
   return {
-    replyText: result.response.replyText,
+    replyText: prepared.text,
     meta: {
       intent: result.response.meta.intent,
-      stage: result.response.meta.stage,
+      stage: prepared.shouldEscalate ? 'handoff' : result.response.meta.stage,
       pipelineUsed: result.response.meta.pipelineUsed,
       aiCallsCount: result.response.meta.aiCallsCount,
       processingTimeMs: result.response.meta.processingTimeMs
     },
-    updatedState: result.updatedState,
-    next_action: result.response.meta.next_action  // Pass next_action for order detection
+    updatedState: prepared.shouldEscalate
+      ? {
+          ...result.updatedState,
+          current_stage: 'handoff'
+        }
+      : result.updatedState,
+    next_action: result.response.meta.next_action,
+    shouldEscalate: prepared.shouldEscalate
   };
 };
 

@@ -219,11 +219,11 @@ export class FacebookAdapter implements ChannelAdapter {
       let userName: string | undefined;
       try {
         const userInfoResponse = await fetch(
-          `https://graph.facebook.com/v21.0/${senderId}?fields=first_name,last_name&access_token=${access_token}`
+          `https://graph.facebook.com/v21.0/${senderId}?fields=name,first_name,last_name&access_token=${access_token}`
         );
-        const userInfo = await userInfoResponse.json() as { first_name?: string; last_name?: string };
-        if (userInfo.first_name) {
-          userName = `${userInfo.first_name} ${userInfo.last_name || ''}`.trim();
+        const userInfo = await userInfoResponse.json() as { name?: string; first_name?: string; last_name?: string };
+        if (userInfo.name || userInfo.first_name) {
+          userName = (userInfo.name || `${userInfo.first_name || ''} ${userInfo.last_name || ''}`).trim();
         }
       } catch (error) {
         // Ignore error, userName is optional

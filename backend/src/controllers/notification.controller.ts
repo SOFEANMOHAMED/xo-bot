@@ -58,16 +58,25 @@ export const getUserNotifications = async (
     
     console.log(`getUserNotifications: Found ${result.rows.length} notifications for merchant ${merchantId}`);
     
-    const notifications = result.rows.map((row) => ({
-      id: String(row.id),
-      type: row.type,
-      title: row.title,
-      message: row.message,
-      data: row.data || {},
-      isRead: row.is_read,
-      createdAt: new Date(row.created_at),
-      readAt: row.read_at ? new Date(row.read_at) : null
-    }));
+    const notifications = result.rows.map((row) => {
+      const rawType = String(row.type || 'info').toLowerCase();
+      // Normalize legacy / unknown types so the dashboard never crashes
+      const known = new Set(['info', 'success', 'warning', 'error', 'escalation']);
+      const type = known.has(rawType)
+        ? rawType
+        : (row.data?.kind === 'escalation' ? 'escalation' : 'info');
+
+      return {
+        id: String(row.id),
+        type,
+        title: row.title,
+        message: row.message,
+        data: row.data || {},
+        isRead: row.is_read,
+        createdAt: new Date(row.created_at),
+        readAt: row.read_at ? new Date(row.read_at) : null
+      };
+    });
 
     res.json({
       success: true,

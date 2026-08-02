@@ -13,6 +13,8 @@ import {
   buildMerchantBotConfig,
   appendOrderDataIfConfirmed
 } from '../services/buildMerchantBotConfig.js';
+import { escalateConversationToHuman } from '../services/escalation.js';
+import { stripInternalControlMarkers } from '../response/sanitize-reply.js';
 import {
   getOrCreateConversationHelper,
   appendMessage,
@@ -193,6 +195,20 @@ export const generateChatResponse = async (
       channelLabel: `Bot Playground (${botPlatform})`,
       replyStillAsks: botReplyAsksForConfirmation(responseText)
     });
+
+    if (result.shouldEscalate) {
+      await escalateConversationToHuman({
+        merchantId: req.merchantId!,
+        conversationId: conversation.id,
+        platform: botPlatform,
+        userId: conversation.userId || playgroundUserId,
+        userName: 'عميل تجريبي',
+        reason: result.next_action === 'handoff' ? 'handoff_action' : 'escalate_marker',
+        replyPreview: responseText,
+      });
+    }
+
+    responseText = stripInternalControlMarkers(responseText);
 
     // Persist like channel controllers (bot core does not auto-save)
     await appendMessage(

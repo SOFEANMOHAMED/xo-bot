@@ -8,6 +8,13 @@ import { logger } from '../utils/logger.js';
 import { handleIncomingMessage } from '../bot/index.js';
 import type { Message, ConversationState, MerchantConfig } from '../bot/index.js';
 import { botReplyAsksForConfirmation } from '../services/salesgpt/index.js';
+import { escalateConversationToHuman } from '../services/escalation.js';
+import { stripInternalControlMarkers } from '../response/sanitize-reply.js';
+import {
+  ensureConversationCustomerName,
+  isPlaceholderCustomerName,
+  bindConversationChannelAccount,
+} from '../services/socialProfile.js';
 import { facebookAdapter } from '../services/channels/facebook.adapter.js';
 import { checkRateLimit, getCachedMerchantSettings } from '../services/cacheService.js';
 import { analyzeImageAndSearch, imageUrlToBase64 } from '../services/imageRecognition.js';
@@ -593,7 +600,7 @@ const processFacebookMessage = async (event: any) => {
     // ==================== STEP 2: Check bot_disabled and human response ====================
     // Get or create conversation
     const convResult = await pool.query(
-      `SELECT id, conversation_state, current_intent, stage FROM conversations 
+      `SELECT id, conversation_state, current_intent, stage, user_name FROM conversations 
        WHERE merchant_id = $1 AND platform = 'facebook_messenger' AND user_id = $2
        ORDER BY last_message_at DESC LIMIT 1`,
       [merchantId, userId]
@@ -601,6 +608,7 @@ const processFacebookMessage = async (event: any) => {
 
     let conversationId: string;
     let conversationState: ConversationState = { message_count: 0 };
+    let resolvedUserName = userName || '';
     
     if (convResult.rows.length > 0) {
       conversationId = convResult.rows[0].id;
@@ -609,15 +617,46 @@ const processFacebookMessage = async (event: any) => {
       if (convResult.rows[0].current_intent) {
         conversationState.last_intent = convResult.rows[0].current_intent;
       }
+      // Refresh profile name from Graph when missing/placeholder
+      resolvedUserName = await ensureConversationCustomerName({
+        merchantId,
+        conversationId,
+        platform: 'facebook_messenger',
+        userId,
+        currentName: !isPlaceholderCustomerName(userName)
+          ? userName
+          : convResult.rows[0].user_name,
+        preferredPageId: pageId ? String(pageId) : null,
+      });
     } else {
-      // Create new conversation
+      // Create new conversation — prefer Graph name over placeholders
+      if (isPlaceholderCustomerName(resolvedUserName)) {
+        const { resolveSocialCustomerName } = await import('../services/socialProfile.js');
+        resolvedUserName =
+          (await resolveSocialCustomerName({
+            merchantId,
+            platform: 'facebook_messenger',
+            userId,
+            preferredPageId: pageId ? String(pageId) : null,
+          })) || resolvedUserName || 'عميل فيسبوك';
+      }
       const newConvResult = await pool.query(
         `INSERT INTO conversations (merchant_id, platform, user_id, user_name)
          VALUES ($1, 'facebook_messenger', $2, $3)
          RETURNING id`,
-        [merchantId, userId, userName || 'Facebook User']
+        [merchantId, userId, resolvedUserName]
       );
       conversationId = newConvResult.rows[0].id;
+    }
+
+    // Bind Meta page id for later profile lookups / outbound sends
+    if (pageId) {
+      await bindConversationChannelAccount({
+        merchantId,
+        conversationId,
+        platform: 'facebook_messenger',
+        accountId: String(pageId),
+      });
     }
 
     // ==================== ACQUISITION (ad / post / ref) ====================
@@ -822,7 +861,7 @@ const processFacebookMessage = async (event: any) => {
         merchantId,
         platform: 'facebook_messenger',
         userId,
-        userName: userName || 'عميل',
+        userName: resolvedUserName || userName || 'عميل',
         messageText,
         externalMessageId: externalMessageId || '',
         recentMessages,           // ✅ الرسائل السابقة
@@ -893,6 +932,21 @@ const processFacebookMessage = async (event: any) => {
           });
         }
       }
+
+      if (result.shouldEscalate) {
+        await escalateConversationToHuman({
+          merchantId,
+          conversationId,
+          platform: 'facebook_messenger',
+          userId,
+          userName: resolvedUserName || userName || 'عميل',
+          reason: result.next_action === 'handoff' ? 'handoff_action' : 'escalate_marker',
+          replyPreview: responseText,
+        });
+      }
+
+      // Belt-and-suspenders: never persist/send internal control markers
+      responseText = stripInternalControlMarkers(responseText);
 
       console.log('[processFacebookMessage] NEW Orchestrator response generated:', {
         conversationId,
@@ -1401,7 +1455,7 @@ const processFacebookMessage = async (event: any) => {
     }
     
     // ==================== STEP 5: Send message via adapter ====================
-    const finalResponseText = cleanText || responseWithoutOrderData;
+    const finalResponseText = stripInternalControlMarkers(cleanText || responseWithoutOrderData);
     console.log('[processFacebookMessage] Prepared final response for sending:', { conversationId, responseLength: finalResponseText.length });
 
     // If orchestrator returns empty, don't send reply

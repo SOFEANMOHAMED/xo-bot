@@ -75,7 +75,7 @@ const Layout: React.FC<LayoutProps> = ({ currentView, onChangeView, children, is
     const fetchUnreadCount = async () => {
       try {
         const notifications = await apiService.getUserNotifications(true);
-        setUnreadNotificationsCount(notifications.length);
+        setUnreadNotificationsCount(Array.isArray(notifications) ? notifications.length : 0);
       } catch (err: any) {
         logger.error('Failed to fetch unread notifications count:', err);
       }

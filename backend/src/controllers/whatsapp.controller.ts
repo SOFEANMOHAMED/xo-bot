@@ -11,6 +11,7 @@ import {
   resolveInboundVoice,
   voiceTranscriptionFallbackMessage
 } from '../services/voiceTranscription.js';
+import { stripInternalControlMarkers } from '../response/sanitize-reply.js';
 
 // ==================== UUID VALIDATION ====================
 
@@ -990,19 +991,20 @@ export const handleWhatsAppWebhook = async (
                   const phoneNumberIdForReply = await getWhatsAppPhoneNumberId(merchantId);
                   
                   if (accessToken && phoneNumberIdForReply) {
+                    const outboundText = stripInternalControlMarkers(cleanText || responseText);
                     if (imageUrl && imageUrl !== 'N/A' && imageUrl.startsWith('http')) {
                       await sendWhatsAppImage(
                         phoneNumberIdForReply,
                         from,
                         imageUrl,
-                        cleanText || 'صورة المنتج',
+                        outboundText || 'صورة المنتج',
                         accessToken
                       );
-                    } else {
+                    } else if (outboundText.trim()) {
                       await sendWhatsAppMessage(
                         phoneNumberIdForReply,
                         from,
-                        cleanText || responseText,
+                        outboundText,
                         accessToken
                       );
                     }

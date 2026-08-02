@@ -31,6 +31,7 @@ import type {
 } from '../../core/types.js';
 import { logger } from '../../utils/logger.js';
 import { getCurrencyDisplayName } from '../../utils/currencyDisplayName.js';
+import { detectEscalationMarker, stripInternalControlMarkers } from '../../response/sanitize-reply.js';
 
 /** Values the sales-response model may return in JSON `next_action` */
 const SALESGPT_MODEL_NEXT_ACTIONS = new Set([
@@ -383,6 +384,13 @@ export class SalesGPTAgent {
             logger.debug('SalesGPT: user confirmed order with complete fields');
         }
 
+        // Step 4.3: <ESCALATE> in model reply → end_conversation / human handoff
+        if (detectEscalationMarker(response)) {
+            nextAction = 'end_conversation';
+            intent = 'complaint';
+            logger.info('SalesGPT: <ESCALATE> detected — forcing end_conversation');
+        }
+
         // Step 5: Derive stage from next_action (single source of truth)
         const newStageId = stageIdFromNextAction(nextAction, previousStageId);
         this.state.conversationStageId = newStageId;
@@ -392,10 +400,11 @@ export class SalesGPTAgent {
             logger.debug(`Stage derived from next_action=${nextAction}: ${previousStageId} → ${newStageId}`);
         }
 
-        // Step 6: Add response to history
+        // Step 6: Add response to history (without leaking control markers into context)
         const agentName = this.getSalespersonName();
+        const historySafeResponse = stripInternalControlMarkers(response);
         this.state.conversationHistory.push(
-            `${agentName}: ${response} <END_OF_TURN>`
+            `${agentName}: ${historySafeResponse} <END_OF_TURN>`
         );
 
         const stage = mapStageIdToStage(this.state.conversationStageId) as Stage;

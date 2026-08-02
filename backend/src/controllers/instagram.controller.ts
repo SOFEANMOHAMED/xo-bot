@@ -14,6 +14,13 @@ import { checkRateLimit, getCachedMerchantSettings } from '../services/cacheServ
 import { persistBotChannelOrder } from '../services/channelBotOrder.js';
 import { botReplyAsksForConfirmation } from '../services/salesgpt/index.js';
 import { buildMerchantBotConfig } from '../services/buildMerchantBotConfig.js';
+import { escalateConversationToHuman } from '../services/escalation.js';
+import { stripInternalControlMarkers } from '../response/sanitize-reply.js';
+import {
+  ensureConversationCustomerName,
+  isPlaceholderCustomerName,
+  bindConversationChannelAccount,
+} from '../services/socialProfile.js';
 import { analyzeImageAndSearch, imageUrlToBase64 } from '../services/imageRecognition.js';
 import {
   resolveInboundVoice,
@@ -1167,14 +1174,14 @@ const processInstagramDM = async (event: any) => {
     }
   }
 
-  const userName =
+  let userName =
     (event.sender?.name as string | undefined) ||
     [event.sender?.first_name, event.sender?.last_name].filter(Boolean).join(' ') ||
-    'عميل إنستغرام';
+    '';
 
   try {
     const convResult = await pool.query(
-      `SELECT id, conversation_state, current_intent, stage FROM conversations 
+      `SELECT id, conversation_state, current_intent, stage, user_name FROM conversations 
        WHERE merchant_id = $1 AND platform = 'instagram' AND user_id = $2
        ORDER BY last_message_at DESC LIMIT 1`,
       [merchantId, senderId]
@@ -1182,6 +1189,7 @@ const processInstagramDM = async (event: any) => {
 
     let conversationId: string;
     let conversationState: ConversationState = { message_count: 0 };
+    let resolvedUserName = userName;
 
     if (convResult.rows.length > 0) {
       conversationId = convResult.rows[0].id;
@@ -1189,14 +1197,42 @@ const processInstagramDM = async (event: any) => {
       if (convResult.rows[0].current_intent) {
         conversationState.last_intent = convResult.rows[0].current_intent;
       }
+      resolvedUserName = await ensureConversationCustomerName({
+        merchantId,
+        conversationId,
+        platform: 'instagram',
+        userId: senderId,
+        currentName: !isPlaceholderCustomerName(userName)
+          ? userName
+          : convResult.rows[0].user_name,
+      });
     } else {
+      if (isPlaceholderCustomerName(resolvedUserName)) {
+        const { resolveSocialCustomerName } = await import('../services/socialProfile.js');
+        resolvedUserName =
+          (await resolveSocialCustomerName({
+            merchantId,
+            platform: 'instagram',
+            userId: senderId,
+          })) || resolvedUserName || 'عميل إنستغرام';
+      }
       const newConvResult = await pool.query(
         `INSERT INTO conversations (merchant_id, platform, user_id, user_name)
          VALUES ($1, 'instagram', $2, $3)
          RETURNING id`,
-        [merchantId, senderId, userName]
+        [merchantId, senderId, resolvedUserName]
       );
       conversationId = newConvResult.rows[0].id;
+    }
+
+    // Bind IG page / account for profile lookups
+    if (ig.page_id || ig.ig_user_id) {
+      await bindConversationChannelAccount({
+        merchantId,
+        conversationId,
+        platform: 'instagram',
+        accountId: String(ig.page_id || ig.ig_user_id),
+      });
     }
 
     // ==================== Human takeover / bot_disabled ====================
@@ -1347,7 +1383,7 @@ const processInstagramDM = async (event: any) => {
         merchantId,
         platform: 'instagram',
         userId: senderId,
-        userName: userName || 'عميل',
+        userName: resolvedUserName || userName || 'عميل',
         messageText,
         externalMessageId,
         recentMessages,
@@ -1391,6 +1427,20 @@ const processInstagramDM = async (event: any) => {
           responseText = `${responseText}\n[ORDER_DATA]${JSON.stringify(fullAIOrderData)}[/ORDER_DATA]`;
         }
       }
+
+      if (result.shouldEscalate) {
+        await escalateConversationToHuman({
+          merchantId,
+          conversationId,
+          platform: 'instagram',
+          userId: senderId,
+          userName: resolvedUserName || userName || 'عميل',
+          reason: result.next_action === 'handoff' ? 'handoff_action' : 'escalate_marker',
+          replyPreview: responseText,
+        });
+      }
+
+      responseText = stripInternalControlMarkers(responseText);
 
       await pool.query(
         `INSERT INTO messages (conversation_id, role, content, metadata, intent, entities)
@@ -1522,7 +1572,7 @@ const processInstagramDM = async (event: any) => {
       }
     }
 
-    const finalResponseText = cleanText || responseWithoutOrderData;
+    const finalResponseText = stripInternalControlMarkers(cleanText || responseWithoutOrderData);
     if (!finalResponseText || !finalResponseText.trim()) {
       logger.info('Instagram DM: no reply text to send', { merchantId, conversationId });
       return;
