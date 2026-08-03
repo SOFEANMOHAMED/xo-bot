@@ -28,6 +28,13 @@ export interface SendMessageParams {
   };
 }
 
+export interface TypingIndicatorParams {
+  merchantId: string;
+  userId: string;
+  isTyping: boolean;
+  metadata?: Record<string, any>;
+}
+
 export interface ChannelAdapter {
   /**
    * Parse incoming webhook event to standard format
@@ -44,6 +51,11 @@ export interface ChannelAdapter {
    * @returns true if message sent successfully, false otherwise
    */
   sendMessage(params: SendMessageParams): Promise<boolean>;
+
+  /**
+   * Toggle channel typing indicator (Messenger typing_on, Telegram chat action, etc.)
+   */
+  setTypingIndicator?(params: TypingIndicatorParams): Promise<void>;
 
   /**
    * Get channel-specific metadata for merchant

@@ -3,6 +3,12 @@ import { Product, Service, MerchantSettings, ChatMessage, BotPersona, Order } fr
 import { apiService } from '../services/api';
 import { logger } from '../utils/logger';
 import { Send, Bot, RefreshCw, AlertCircle, Facebook, MessageSquare, Sparkles, ShoppingCart, Plus, Check } from 'lucide-react';
+import {
+  splitReplyIntoBubbles,
+  computeTypingDelayMs,
+  computeInterBubbleDelayMs,
+  sleep
+} from '../utils/humanLikeReply';
 
 interface BotPlaygroundProps {
   products: Product[];
@@ -95,13 +101,21 @@ const BotPlayground: React.FC<BotPlaygroundProps> = ({ products, services = [], 
         }
       }
 
-      // Prepare messages for API (remove IDs and timestamps)
-      const apiMessages = newHistory.map(msg => ({
-        role: msg.role,
-        content: msg.content
-      }));
+      // Prepare messages for API (merge consecutive assistant bubbles so history stays one logical turn)
+      const apiMessages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+      for (const msg of newHistory) {
+        if (msg.role === 'system') continue;
+        const role = msg.role === 'assistant' ? 'assistant' as const : 'user' as const;
+        const last = apiMessages[apiMessages.length - 1];
+        if (role === 'assistant' && last?.role === 'assistant') {
+          last.content = `${last.content}\n\n${msg.content}`;
+        } else {
+          apiMessages.push({ role, content: msg.content });
+        }
+      }
 
       // Call AI API
+      const startedAt = Date.now();
       const aiResponse = await apiService.generateChatResponse({
         conversationId: currentConversationId || undefined,
         platform: testPlatform,
@@ -203,16 +217,37 @@ const BotPlayground: React.FC<BotPlaygroundProps> = ({ products, services = [], 
           // Don't show error to user, just log it
         }
       }
-      
-      const botMsg: ChatMessage = {
-        id: (Date.now() + 1).toString(),
+
+      const fallbackText = cleanedResponse || 'عذراً، لم أتمكن من إرسال رد. يرجى المحاولة مرة أخرى.';
+      const bubbles = splitReplyIntoBubbles(fallbackText);
+      const elapsedMs = Date.now() - startedAt;
+      const firstDelay = computeTypingDelayMs(bubbles[0]?.length || fallbackText.length);
+      // Keep typing indicator for remaining proportional delay (API wait already counts)
+      await sleep(Math.max(350, firstDelay - elapsedMs));
+      setLoading(false);
+
+      const firstBubble: ChatMessage = {
+        id: `${Date.now()}-b1`,
         role: 'assistant',
-        content: cleanedResponse || 'عذراً، لم أتمكن من إرسال رد. يرجى المحاولة مرة أخرى.',
+        content: bubbles[0] || fallbackText,
         timestamp: new Date(),
         platform: testPlatform
       };
-      
-      setMessages(prev => [...prev, botMsg]);
+      setMessages(prev => [...prev, firstBubble]);
+
+      if (bubbles.length > 1) {
+        setLoading(true);
+        await sleep(computeInterBubbleDelayMs(bubbles[1].length));
+        setLoading(false);
+        const secondBubble: ChatMessage = {
+          id: `${Date.now()}-b2`,
+          role: 'assistant',
+          content: bubbles[1],
+          timestamp: new Date(),
+          platform: testPlatform
+        };
+        setMessages(prev => [...prev, secondBubble]);
+      }
     } catch (err: any) {
       logger.error('Error in handleSend:', err);
       setError(err?.message || "فشل الاتصال بخدمة الذكاء الاصطناعي");

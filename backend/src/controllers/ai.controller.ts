@@ -21,6 +21,7 @@ import {
   patchConversationState
 } from '../controllers/conversation.controller.js';
 import { getCachedMerchantSettings } from '../services/cacheService.js';
+import { conversationIngressQueue } from '../services/conversationIngressQueue.js';
 import { getAIClient, isAIAvailable } from '../ai/gemini-client.js';
 import { generateImageWithKie } from '../ai/kie-client.js';
 import { logger } from '../utils/logger.js';
@@ -130,26 +131,6 @@ export const generateChatResponse = async (
       });
     }
 
-    const conversationState: ConversationState =
-      conversation.conversationState && typeof conversation.conversationState === 'object'
-        ? { message_count: 0, ...conversation.conversationState }
-        : { message_count: 0 };
-
-    // Same recent-message window as Facebook / Instagram (25)
-    const recentMessagesResult = await pool.query(
-      `SELECT role, content FROM messages
-       WHERE conversation_id = $1
-       ORDER BY created_at DESC
-       LIMIT 25`,
-      [conversation.id]
-    );
-    const recentMessages: Message[] = recentMessagesResult.rows
-      .reverse()
-      .map((row: { role: string; content: string }) => ({
-        role: row.role as 'user' | 'assistant',
-        content: row.content
-      }));
-
     const merchantConfig = buildMerchantBotConfig({
       merchantId: req.merchantId,
       settings: {
@@ -169,98 +150,165 @@ export const generateChatResponse = async (
       }
     });
 
-    const result = await handleIncomingMessage({
+    type PlaygroundIngressPayload = {
+      conversationId: string;
+      merchantId: string;
+      botPlatform: Platform;
+      playgroundUserId: string;
+      merchantConfig: ReturnType<typeof buildMerchantBotConfig>;
+      storeCurrency: string;
+    };
+
+    const ingress = await conversationIngressQueue.enqueue({
+      conversationKey: `${req.merchantId}:${botPlatform}:${conversation.id}`,
       merchantId: req.merchantId,
       platform: botPlatform,
-      userId: conversation.userId || playgroundUserId,
-      userName: 'عميل تجريبي',
-      messageText,
-      externalMessageId: `playground-${Date.now()}`,
-      recentMessages,
-      conversationState,
-      merchantConfig
-    });
-
-    let responseText = result.replyText;
-    const updatedState = result.updatedState;
-    const entities = updatedState.extracted_entities || {};
-    const productIds = updatedState.last_recommended_products || [];
-
-    responseText = appendOrderDataIfConfirmed({
-      responseText,
-      nextAction: result.next_action,
-      entities,
-      productIds,
-      storeCurrency: cachedSettings.store_currency || 'USD',
-      channelLabel: `Bot Playground (${botPlatform})`,
-      replyStillAsks: botReplyAsksForConfirmation(responseText)
-    });
-
-    if (result.shouldEscalate) {
-      await escalateConversationToHuman({
-        merchantId: req.merchantId!,
+      text: messageText,
+      externalMessageId: `playground-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      payload: {
         conversationId: conversation.id,
-        platform: botPlatform,
-        userId: conversation.userId || playgroundUserId,
-        userName: 'عميل تجريبي',
-        reason: result.next_action === 'handoff' ? 'handoff_action' : 'escalate_marker',
-        replyPreview: responseText,
-      });
-    }
+        merchantId: req.merchantId,
+        botPlatform,
+        playgroundUserId,
+        merchantConfig,
+        storeCurrency: cachedSettings.store_currency || 'USD'
+      } satisfies PlaygroundIngressPayload,
+      process: async (batch) => {
+        const p = batch.latestPayload;
+        const mergedText = batch.mergedText || messageText;
 
-    responseText = stripInternalControlMarkers(responseText);
+        // Reload conversation state at flush time (SaaS-scoped) so merged turns see latest DB state
+        const fresh = await pool.query(
+          `SELECT conversation_state FROM conversations
+           WHERE id = $1 AND merchant_id = $2
+           LIMIT 1`,
+          [p.conversationId, p.merchantId]
+        );
+        const freshState: ConversationState =
+          fresh.rows[0]?.conversation_state && typeof fresh.rows[0].conversation_state === 'object'
+            ? { message_count: 0, ...fresh.rows[0].conversation_state }
+            : { message_count: 0 };
 
-    // Persist like channel controllers (bot core does not auto-save)
-    await appendMessage(
-      conversation.id,
-      'user',
-      messageText,
-      'user',
-      undefined,
-      { platform: botPlatform, timestamp: new Date().toISOString(), source: 'playground' },
-      result.meta.intent,
-      entities
-    );
+        const recentMessagesResult = await pool.query(
+          `SELECT role, content FROM messages
+           WHERE conversation_id = $1
+           ORDER BY created_at DESC
+           LIMIT 25`,
+          [p.conversationId]
+        );
+        const recentMessages: Message[] = recentMessagesResult.rows
+          .reverse()
+          .map((row: { role: string; content: string }) => ({
+            role: row.role as 'user' | 'assistant',
+            content: row.content
+          }));
 
-    await appendMessage(
-      conversation.id,
-      'assistant',
-      responseText,
-      'bot',
-      undefined,
-      {
-        platform: botPlatform,
-        pipelineUsed: result.meta.pipelineUsed,
-        aiCallsCount: result.meta.aiCallsCount,
-        processingTimeMs: result.meta.processingTimeMs,
-        next_action: result.next_action,
-        source: 'playground',
-        engine: 'channel-bot'
-      },
-      result.meta.intent,
-      { recommended_products: productIds }
-    );
+        const result = await handleIncomingMessage({
+          merchantId: p.merchantId,
+          platform: p.botPlatform,
+          userId: playgroundUserId,
+          userName: 'عميل تجريبي',
+          messageText: mergedText,
+          externalMessageId: `playground-batch-${Date.now()}`,
+          recentMessages,
+          conversationState: freshState,
+          merchantConfig: p.merchantConfig
+        });
 
-    await patchConversationState(conversation.id, {
-      conversation_state: updatedState,
-      current_intent: result.meta.intent,
-      stage: result.meta.stage
-    });
+        let responseText = result.replyText;
+        const updatedState = result.updatedState;
+        const entities = updatedState.extracted_entities || {};
+        const productIds = updatedState.last_recommended_products || [];
 
-    logger.info('Playground message processed via channel bot path', {
-      merchantId: req.merchantId,
-      conversationId: conversation.id,
-      platform: botPlatform,
-      pipelineUsed: result.meta.pipelineUsed,
-      intent: result.meta.intent,
-      stage: result.meta.stage
+        responseText = appendOrderDataIfConfirmed({
+          responseText,
+          nextAction: result.next_action,
+          entities,
+          productIds,
+          storeCurrency: p.storeCurrency,
+          channelLabel: `Bot Playground (${p.botPlatform})`,
+          replyStillAsks: botReplyAsksForConfirmation(responseText)
+        });
+
+        if (result.shouldEscalate) {
+          await escalateConversationToHuman({
+            merchantId: p.merchantId,
+            conversationId: p.conversationId,
+            platform: p.botPlatform,
+            userId: playgroundUserId,
+            userName: 'عميل تجريبي',
+            reason: result.next_action === 'handoff' ? 'handoff_action' : 'escalate_marker',
+            replyPreview: responseText,
+          });
+        }
+
+        responseText = stripInternalControlMarkers(responseText);
+
+        await appendMessage(
+          p.conversationId,
+          'user',
+          mergedText,
+          'user',
+          undefined,
+          {
+            platform: p.botPlatform,
+            timestamp: new Date().toISOString(),
+            source: 'playground',
+            mergedParts: batch.parts.length
+          },
+          result.meta.intent,
+          entities
+        );
+
+        await appendMessage(
+          p.conversationId,
+          'assistant',
+          responseText,
+          'bot',
+          undefined,
+          {
+            platform: p.botPlatform,
+            pipelineUsed: result.meta.pipelineUsed,
+            aiCallsCount: result.meta.aiCallsCount,
+            processingTimeMs: result.meta.processingTimeMs,
+            next_action: result.next_action,
+            source: 'playground',
+            engine: 'channel-bot',
+            mergedParts: batch.parts.length
+          },
+          result.meta.intent,
+          { recommended_products: productIds }
+        );
+
+        await patchConversationState(p.conversationId, {
+          conversation_state: updatedState,
+          current_intent: result.meta.intent,
+          stage: result.meta.stage
+        });
+
+        logger.info('Playground message processed via channel bot path', {
+          merchantId: p.merchantId,
+          conversationId: p.conversationId,
+          platform: p.botPlatform,
+          pipelineUsed: result.meta.pipelineUsed,
+          intent: result.meta.intent,
+          stage: result.meta.stage,
+          mergedParts: batch.parts.length
+        });
+
+        return {
+          responseText,
+          conversationId: p.conversationId
+        };
+      }
     });
 
     res.json({
       success: true,
       data: {
-        response: responseText,
-        conversationId: conversation.id
+        response: ingress.result.responseText,
+        conversationId: ingress.result.conversationId,
+        mergedParts: ingress.batchSize
       }
     });
   } catch (error: any) {

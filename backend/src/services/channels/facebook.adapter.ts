@@ -8,8 +8,10 @@ import { logger } from '../../utils/logger.js';
 import {
   ChannelAdapter,
   ParsedIncomingEvent,
-  SendMessageParams
+  SendMessageParams,
+  TypingIndicatorParams
 } from './channel.interface.js';
+import { deliverHumanLikeReply } from './replyDelivery.js';
 
 // Extract image URL from response text
 const extractImageUrl = (text: string): { imageUrl: string | null; cleanText: string } => {
@@ -26,7 +28,7 @@ const extractImageUrl = (text: string): { imageUrl: string | null; cleanText: st
 };
 
 // Send image via Facebook Graph API
-const sendFacebookImage = async (
+export const sendFacebookImage = async (
   pageId: string,
   recipientId: string,
   imageUrl: string,
@@ -78,7 +80,7 @@ const sendFacebookImage = async (
 };
 
 // Send message via Facebook Graph API
-const sendFacebookMessage = async (
+export const sendFacebookMessage = async (
   pageId: string,
   recipientId: string,
   message: string,
@@ -108,6 +110,38 @@ const sendFacebookMessage = async (
   } catch (error) {
     logger.error('Error sending Facebook message', error as Error, { pageId, recipientId });
     return false;
+  }
+};
+
+/** Messenger typing_on / typing_off */
+export const sendFacebookTyping = async (
+  pageId: string,
+  recipientId: string,
+  isTyping: boolean,
+  accessToken: string
+): Promise<void> => {
+  try {
+    const response = await fetch(
+      `https://graph.facebook.com/v21.0/${encodeURIComponent(pageId)}/messages?access_token=${encodeURIComponent(accessToken)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipient: { id: recipientId },
+          sender_action: isTyping ? 'typing_on' : 'typing_off'
+        })
+      }
+    );
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      logger.debug('Facebook typing indicator failed', { pageId, recipientId, data });
+    }
+  } catch (error) {
+    logger.debug('Facebook typing indicator error', {
+      error: error instanceof Error ? error.message : String(error),
+      pageId,
+      recipientId
+    });
   }
 };
 
@@ -253,7 +287,7 @@ export class FacebookAdapter implements ChannelAdapter {
   }
 
   /**
-   * Send message via Facebook
+   * Send message via Facebook (human-like: typing + delay + optional 2 bubbles)
    */
   async sendMessage(params: SendMessageParams): Promise<boolean> {
     try {
@@ -290,20 +324,36 @@ export class FacebookAdapter implements ChannelAdapter {
         return false;
       }
 
-      // Extract image URL if present
-      const { imageUrl, cleanText } = extractImageUrl(text);
+      const resolvedPageId = pageId;
+      const resolvedToken = accessToken;
 
-      // Send image if available
-      if (imageUrl && imageUrl !== 'N/A' && imageUrl.startsWith('http')) {
-        const imageSent = await sendFacebookImage(pageId, userId, imageUrl, cleanText || '', accessToken);
-        if (imageSent) {
-          return true;
-        }
-        // If image failed, fall back to text message
+      // Prefer explicit metadata.imageUrl; otherwise extract [IMAGE:] tag
+      let imageUrl: string | null =
+        typeof metadata.imageUrl === 'string' && metadata.imageUrl.startsWith('http')
+          ? metadata.imageUrl
+          : null;
+      let cleanText = text;
+      if (!imageUrl) {
+        const extracted = extractImageUrl(text);
+        imageUrl = extracted.imageUrl;
+        cleanText = extracted.cleanText;
+      } else {
+        cleanText = extractImageUrl(text).cleanText;
       }
 
-      // Send text message
-      return await sendFacebookMessage(pageId, userId, cleanText || text, accessToken);
+      const result = await deliverHumanLikeReply({
+        text: cleanText,
+        imageUrl,
+        transport: {
+          setTyping: (on) => sendFacebookTyping(resolvedPageId, userId, on, resolvedToken),
+          sendText: (bubble) => sendFacebookMessage(resolvedPageId, userId, bubble, resolvedToken),
+          sendImage: (url, caption) =>
+            sendFacebookImage(resolvedPageId, userId, url, caption, resolvedToken)
+        },
+        context: { merchantId, platform: 'facebook' }
+      });
+
+      return result.sent;
     } catch (error) {
       logger.error('Error sending Facebook message', error as Error, {
         merchantId: params.merchantId,
@@ -311,6 +361,25 @@ export class FacebookAdapter implements ChannelAdapter {
       });
       return false;
     }
+  }
+
+  async setTypingIndicator(params: TypingIndicatorParams): Promise<void> {
+    const { merchantId, userId, isTyping, metadata = {} } = params;
+    let pageId = metadata.pageId as string | undefined;
+    let accessToken = metadata.accessToken as string | undefined;
+
+    if (!pageId || !accessToken) {
+      const result = await pool.query(
+        `SELECT page_id, access_token FROM facebook_pages WHERE merchant_id = $1 LIMIT 1`,
+        [merchantId]
+      );
+      if (result.rows.length === 0) return;
+      pageId = result.rows[0].page_id;
+      accessToken = result.rows[0].access_token;
+    }
+
+    if (!pageId || !accessToken) return;
+    await sendFacebookTyping(pageId, userId, isTyping, accessToken);
   }
 
   /**

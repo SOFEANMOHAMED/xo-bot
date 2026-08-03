@@ -17,6 +17,14 @@ import { buildMerchantBotConfig } from '../services/buildMerchantBotConfig.js';
 import { escalateConversationToHuman } from '../services/escalation.js';
 import { stripInternalControlMarkers } from '../response/sanitize-reply.js';
 import {
+  deliverHumanLikeReply,
+  startTypingKeepalive
+} from '../services/channels/replyDelivery.js';
+import {
+  conversationIngressQueue,
+  mergeMessengerStylePayloads
+} from '../services/conversationIngressQueue.js';
+import {
   ensureConversationCustomerName,
   isPlaceholderCustomerName,
   bindConversationChannelAccount,
@@ -349,6 +357,31 @@ const sendInstagramDM = async (
   }
 };
 
+const sendInstagramTyping = async (
+  igScopedUserId: string,
+  isTyping: boolean,
+  accessToken: string
+): Promise<void> => {
+  try {
+    const url =
+      `https://graph.facebook.com/v21.0/me/messages` +
+      `?access_token=${encodeURIComponent(accessToken)}`;
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recipient: { id: igScopedUserId },
+        sender_action: isTyping ? 'typing_on' : 'typing_off'
+      })
+    });
+  } catch (error) {
+    logger.debug('Instagram typing indicator error', {
+      error: error instanceof Error ? error.message : String(error),
+      igScopedUserId
+    });
+  }
+};
+
 const sendInstagramImage = async (
   igScopedUserId: string,
   imageUrl: string,
@@ -669,9 +702,28 @@ export const instagramWebhook = async (
                 logger.error('Error processing IG message echo', err as Error)
               );
             } else if (event.message && !event.message.is_echo) {
-              processInstagramDM(event).catch(err =>
-                logger.error('Error processing IG DM', err as Error)
-              );
+              const igAccountId = event.recipient?.id ? String(event.recipient.id) : String(entry?.id || '');
+              const senderId = event.sender?.id ? String(event.sender.id) : '';
+              const text = String(event.message?.text || '').trim();
+              if (!igAccountId || !senderId) {
+                processInstagramDM(event).catch(err =>
+                  logger.error('Error processing IG DM', err as Error)
+                );
+              } else {
+                conversationIngressQueue
+                  .enqueue({
+                    conversationKey: `ig:${igAccountId}:${senderId}`,
+                    platform: 'instagram',
+                    text,
+                    externalMessageId: event.message?.mid ? String(event.message.mid) : undefined,
+                    payload: event,
+                    process: async (batch) => {
+                      const mergedEvent = mergeMessengerStylePayloads(batch.parts);
+                      await processInstagramDM(mergedEvent);
+                    }
+                  })
+                  .catch(err => logger.error('Error processing IG DM', err as Error));
+              }
             }
           }
         }
@@ -1372,6 +1424,10 @@ const processInstagramDM = async (event: any) => {
     let responseText = '';
     let updatedState: ConversationState = conversationState;
 
+    const stopTypingKeepalive = startTypingKeepalive(() =>
+      sendInstagramTyping(senderId, true, ig.access_token)
+    );
+
     try {
       const merchantConfig: Partial<MerchantConfig> = buildMerchantBotConfig({
         merchantId,
@@ -1515,6 +1571,8 @@ const processInstagramDM = async (event: any) => {
       } catch (saveError) {
         logger.error('Failed to save Instagram messages after orchestrator failure', saveError as Error);
       }
+    } finally {
+      stopTypingKeepalive();
     }
 
     let { orderData, cleanText: responseWithoutOrderData } = extractOrderData(responseText);
@@ -1573,32 +1631,23 @@ const processInstagramDM = async (event: any) => {
     }
 
     const finalResponseText = stripInternalControlMarkers(cleanText || responseWithoutOrderData);
-    if (!finalResponseText || !finalResponseText.trim()) {
+    const hasImage = !!(imageUrl && imageUrl.startsWith('http'));
+    if ((!finalResponseText || !finalResponseText.trim()) && !hasImage) {
       logger.info('Instagram DM: no reply text to send', { merchantId, conversationId });
       return;
     }
 
-    if (imageUrl && imageUrl.startsWith('http')) {
-      let imageCaption = finalResponseText
-        .replace(/https?:\/\/[^\s]+/gi, '')
-        .replace(/\[IMAGE:[^\]]+\]/gi, '')
-        .trim();
-      if (imageCaption.length > 1000) {
-        imageCaption = imageCaption.substring(0, 996) + '...';
-      }
-      const photoSent = await sendInstagramImage(senderId, imageUrl, imageCaption, ig.access_token);
-      if (photoSent) {
-        await pool.query(
-          `UPDATE conversations 
-           SET last_message_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-           WHERE id = $1 AND merchant_id = $2`,
-          [conversationId, merchantId]
-        );
-        return;
-      }
-    }
+    await deliverHumanLikeReply({
+      text: finalResponseText || '',
+      imageUrl: hasImage ? imageUrl : null,
+      transport: {
+        setTyping: (on) => sendInstagramTyping(senderId, on, ig.access_token),
+        sendText: (bubble) => sendInstagramDM(senderId, bubble, ig.access_token),
+        sendImage: (url, caption) => sendInstagramImage(senderId, url, caption, ig.access_token)
+      },
+      context: { merchantId, platform: 'instagram', conversationId }
+    });
 
-    await sendInstagramDM(senderId, finalResponseText, ig.access_token);
     await pool.query(
       `UPDATE conversations 
        SET last_message_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP

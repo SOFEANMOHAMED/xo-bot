@@ -15,7 +15,12 @@ import {
   isPlaceholderCustomerName,
   bindConversationChannelAccount,
 } from '../services/socialProfile.js';
-import { facebookAdapter } from '../services/channels/facebook.adapter.js';
+import { facebookAdapter, sendFacebookTyping } from '../services/channels/facebook.adapter.js';
+import { startTypingKeepalive } from '../services/channels/replyDelivery.js';
+import {
+  conversationIngressQueue,
+  mergeMessengerStylePayloads
+} from '../services/conversationIngressQueue.js';
 import { checkRateLimit, getCachedMerchantSettings } from '../services/cacheService.js';
 import { analyzeImageAndSearch, imageUrlToBase64 } from '../services/imageRecognition.js';
 import {
@@ -840,6 +845,11 @@ const processFacebookMessage = async (event: any) => {
     // ==================== STEP 4: Process through NEW orchestrator (same as Telegram) ====================
     let responseText: string;
     let updatedState: ConversationState = conversationState;
+
+    // Typing while generating — keepalive for long AI calls
+    const stopTypingKeepalive = accessToken
+      ? startTypingKeepalive(() => sendFacebookTyping(pageId, userId, true, accessToken))
+      : () => undefined;
     
     try {
       // ✅ بناء merchantConfig للنظام الجديد - نفس تلجرام بالضبط
@@ -1058,6 +1068,8 @@ const processFacebookMessage = async (event: any) => {
       }
       
       console.log('[processFacebookMessage] Orchestrator failed, sending error message');
+    } finally {
+      stopTypingKeepalive();
     }
 
     // ✅ Extract ORDER_DATA and remove it from message text
@@ -1454,56 +1466,24 @@ const processFacebookMessage = async (event: any) => {
       }
     }
     
-    // ==================== STEP 5: Send message via adapter ====================
+    // ==================== STEP 5: Human-like send (typing delay + ≤2 bubbles) ====================
     const finalResponseText = stripInternalControlMarkers(cleanText || responseWithoutOrderData);
     console.log('[processFacebookMessage] Prepared final response for sending:', { conversationId, responseLength: finalResponseText.length });
 
-    // If orchestrator returns empty, don't send reply
-    if (!finalResponseText || finalResponseText.trim().length === 0) {
+    const hasImage = !!(imageUrl && imageUrl.startsWith('http') && accessToken);
+    if ((!finalResponseText || finalResponseText.trim().length === 0) && !hasImage) {
       logger.info('Orchestrator returned no reply for Facebook', { conversationId, merchantId });
       return;
     }
 
-    // ✅ Send image first if present
-    if (imageUrl && imageUrl.startsWith('http') && accessToken) {
-      console.log('[processFacebookMessage] Sending product image:', { imageUrl });
-      
-      let imageCaption = finalResponseText
-        .replace(/https?:\/\/[^\s]+/gi, '') 
-        .replace(/\[IMAGE:[^\]]+\]/gi, '') 
-        .trim();
-        
-      if (imageCaption.length > 1024) {
-        imageCaption = imageCaption.substring(0, 1020) + '...';
-      }
-      
-      const photoSent = await sendFacebookImage(pageId, userId, imageUrl, imageCaption, accessToken);
-      
-      if (photoSent) {
-        console.log('[processFacebookMessage] Image sent successfully');
-        // Update conversation and return early
-        await pool.query(
-          `UPDATE conversations 
-           SET last_message_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-           WHERE id = $1 AND merchant_id = $2`,
-          [conversationId, merchantId]
-        );
-        
-        logger.info('Facebook message with image processed successfully', { pageId, userId, conversationId });
-        return;
-      } else {
-        console.log('[processFacebookMessage] Failed to send image, falling back to text');
-      }
-    }
-
-    // Send via adapter (text only if no image or image failed)
     await facebookAdapter.sendMessage({
       merchantId,
       userId,
-      text: finalResponseText,
+      text: finalResponseText || '',
       metadata: {
         pageId,
-        accessToken
+        accessToken,
+        ...(hasImage ? { imageUrl } : {})
       }
     });
 
@@ -1761,18 +1741,62 @@ export const facebookWebhook = async (
                 });
               }
             } else if (event.message && !event.message.is_echo) {
-              // Process asynchronously to avoid timeout
-              processFacebookMessage(event).catch(err => {
-                logger.error('Error processing Facebook message event', err as Error);
-              });
+              // Per-conversation queue: merge rapid messages (4–6s) then process once
+              const pageId = event.recipient?.id ? String(event.recipient.id) : '';
+              const senderId = event.sender?.id ? String(event.sender.id) : '';
+              const text = String(event.message?.text || '').trim();
+              if (!pageId || !senderId) {
+                processFacebookMessage(event).catch(err => {
+                  logger.error('Error processing Facebook message event', err as Error);
+                });
+              } else {
+                conversationIngressQueue
+                  .enqueue({
+                    conversationKey: `fb:${pageId}:${senderId}`,
+                    platform: 'facebook_messenger',
+                    text,
+                    externalMessageId: event.message?.mid ? String(event.message.mid) : undefined,
+                    payload: event,
+                    process: async (batch) => {
+                      const mergedEvent = mergeMessengerStylePayloads(batch.parts);
+                      await processFacebookMessage(mergedEvent);
+                    }
+                  })
+                  .catch(err => {
+                    logger.error('Error processing Facebook message event', err as Error);
+                  });
+              }
             } else if (event.referral || event.postback) {
               // CTM / Ads / Get Started — seed product context then optional greeting turn
-              processFacebookMessage({
+              // Postbacks are intentional single actions: serialize but skip merge wait
+              const pageId = event.recipient?.id ? String(event.recipient.id) : '';
+              const senderId = event.sender?.id ? String(event.sender.id) : '';
+              const synthetic = {
                 ...event,
                 message: event.message || { text: event.postback?.title || 'مرحبا' }
-              }).catch(err => {
-                logger.error('Error processing Facebook referral/postback', err as Error);
-              });
+              };
+              if (!pageId || !senderId) {
+                processFacebookMessage(synthetic).catch(err => {
+                  logger.error('Error processing Facebook referral/postback', err as Error);
+                });
+              } else {
+                conversationIngressQueue
+                  .enqueue({
+                    conversationKey: `fb:${pageId}:${senderId}`,
+                    platform: 'facebook_messenger',
+                    text: String(synthetic.message?.text || '').trim(),
+                    externalMessageId: event.postback?.mid || event.message?.mid,
+                    payload: synthetic,
+                    debounceMs: 0,
+                    process: async (batch) => {
+                      const mergedEvent = mergeMessengerStylePayloads(batch.parts);
+                      await processFacebookMessage(mergedEvent);
+                    }
+                  })
+                  .catch(err => {
+                    logger.error('Error processing Facebook referral/postback', err as Error);
+                  });
+              }
             }
           }
         }

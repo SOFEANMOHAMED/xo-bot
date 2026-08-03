@@ -8,8 +8,10 @@ import { logger } from '../../utils/logger.js';
 import {
   ChannelAdapter,
   ParsedIncomingEvent,
-  SendMessageParams
+  SendMessageParams,
+  TypingIndicatorParams
 } from './channel.interface.js';
+import { deliverHumanLikeReply } from './replyDelivery.js';
 
 // Extract image URL from response text
 const extractImageUrl = (text: string): { imageUrl: string | null; cleanText: string } => {
@@ -26,24 +28,30 @@ const extractImageUrl = (text: string): { imageUrl: string | null; cleanText: st
 };
 
 // Send photo via Telegram Bot API
-const sendTelegramPhoto = async (
+export const sendTelegramPhoto = async (
   chatId: string,
   photoUrl: string,
   caption: string,
   botToken: string
 ): Promise<boolean> => {
   try {
+    const payload: Record<string, unknown> = {
+      chat_id: chatId,
+      photo: photoUrl
+    };
+    // Omit empty caption so delivery can send text as separate bubbles
+    const trimmedCaption = (caption || '').trim();
+    if (trimmedCaption) {
+      payload.caption = trimmedCaption.substring(0, 1024);
+      payload.parse_mode = 'HTML';
+    }
+
     const response = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        chat_id: chatId,
-        photo: photoUrl,
-        caption: caption.substring(0, 1024), // Telegram caption limit is 1024 characters
-        parse_mode: 'HTML'
-      })
+      body: JSON.stringify(payload)
     });
 
     const data = await response.json() as { ok?: boolean; error_code?: number; description?: string };
@@ -64,7 +72,7 @@ const sendTelegramPhoto = async (
 };
 
 // Send message via Telegram Bot API
-const sendTelegramMessage = async (
+export const sendTelegramMessage = async (
   chatId: string,
   message: string,
   botToken: string
@@ -93,6 +101,28 @@ const sendTelegramMessage = async (
   } catch (error) {
     logger.error('Error sending Telegram message', error as Error, { chatId });
     return false;
+  }
+};
+
+/** Telegram sendChatAction typing (auto-expires; no explicit off) */
+export const sendTelegramTyping = async (
+  chatId: string,
+  botToken: string
+): Promise<void> => {
+  try {
+    await fetch(`https://api.telegram.org/bot${botToken}/sendChatAction`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        action: 'typing'
+      })
+    });
+  } catch (error) {
+    logger.debug('Telegram typing indicator error', {
+      error: error instanceof Error ? error.message : String(error),
+      chatId
+    });
   }
 };
 
@@ -180,7 +210,7 @@ export class TelegramAdapter implements ChannelAdapter {
   }
 
   /**
-   * Send message via Telegram
+   * Send message via Telegram (human-like: typing + delay + optional 2 bubbles)
    */
   async sendMessage(params: SendMessageParams): Promise<boolean> {
     try {
@@ -218,13 +248,24 @@ export class TelegramAdapter implements ChannelAdapter {
         return false;
       }
 
-      // Extract image URL if present
-      const { imageUrl, cleanText } = extractImageUrl(text);
+      const resolvedToken = botToken;
+
+      let imageUrl: string | null =
+        typeof metadata.imageUrl === 'string' && metadata.imageUrl.startsWith('http')
+          ? metadata.imageUrl
+          : null;
+      let cleanText = text;
+      if (!imageUrl) {
+        const extracted = extractImageUrl(text);
+        imageUrl = extracted.imageUrl;
+        cleanText = extracted.cleanText;
+      } else {
+        cleanText = extractImageUrl(text).cleanText;
+      }
 
       // Check if imageUrl is valid and accessible (not localhost)
       let validImageUrl: string | null = null;
       if (imageUrl && imageUrl !== 'N/A' && imageUrl.startsWith('http')) {
-        // Convert localhost URLs to public URLs
         if (imageUrl.includes('localhost') || imageUrl.includes('127.0.0.1')) {
           const backendUrl = process.env.BACKEND_URL || process.env.CORS_ORIGIN?.replace(':3000', ':3001') || '';
           if (backendUrl && backendUrl.startsWith('https://')) {
@@ -237,17 +278,24 @@ export class TelegramAdapter implements ChannelAdapter {
         }
       }
 
-      // Send photo with caption if image available
-      if (validImageUrl && validImageUrl.startsWith('https://')) {
-        const photoSent = await sendTelegramPhoto(userId, validImageUrl, cleanText || '', botToken);
-        if (photoSent) {
-          return true;
-        }
-        // If photo failed, send text message instead
+      if (validImageUrl && !validImageUrl.startsWith('https://')) {
+        validImageUrl = null;
       }
 
-      // Send text message
-      return await sendTelegramMessage(userId, cleanText || text, botToken);
+      const result = await deliverHumanLikeReply({
+        text: cleanText,
+        imageUrl: validImageUrl,
+        transport: {
+          setTyping: async (on) => {
+            if (on) await sendTelegramTyping(userId, resolvedToken);
+          },
+          sendText: (bubble) => sendTelegramMessage(userId, bubble, resolvedToken),
+          sendImage: (url, caption) => sendTelegramPhoto(userId, url, caption, resolvedToken)
+        },
+        context: { merchantId, platform: 'telegram' }
+      });
+
+      return result.sent;
     } catch (error) {
       logger.error('Error sending Telegram message', error as Error, {
         merchantId: params.merchantId,
@@ -255,6 +303,31 @@ export class TelegramAdapter implements ChannelAdapter {
       });
       return false;
     }
+  }
+
+  async setTypingIndicator(params: TypingIndicatorParams): Promise<void> {
+    if (!params.isTyping) return; // Telegram has no typing_off
+    const { merchantId, userId, metadata = {} } = params;
+    let botToken = metadata.botToken as string | undefined;
+
+    if (!botToken && metadata.botId) {
+      const botResult = await pool.query(
+        `SELECT bot_token FROM telegram_bots WHERE id = $1 AND merchant_id = $2 AND is_active = true`,
+        [metadata.botId, merchantId]
+      );
+      botToken = botResult.rows[0]?.bot_token;
+    }
+
+    if (!botToken) {
+      const settingsResult = await pool.query(
+        `SELECT telegram_bot_token FROM merchant_settings WHERE merchant_id = $1`,
+        [merchantId]
+      );
+      botToken = settingsResult.rows[0]?.telegram_bot_token;
+    }
+
+    if (!botToken) return;
+    await sendTelegramTyping(userId, botToken);
   }
 
   /**

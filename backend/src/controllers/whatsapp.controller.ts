@@ -12,6 +12,14 @@ import {
   voiceTranscriptionFallbackMessage
 } from '../services/voiceTranscription.js';
 import { stripInternalControlMarkers } from '../response/sanitize-reply.js';
+import {
+  deliverHumanLikeReply,
+  startTypingKeepalive
+} from '../services/channels/replyDelivery.js';
+import {
+  conversationIngressQueue,
+  type IngressBatch
+} from '../services/conversationIngressQueue.js';
 
 // ==================== UUID VALIDATION ====================
 
@@ -182,6 +190,12 @@ const sendWhatsAppImage = async (
   accessToken: string
 ): Promise<boolean> => {
   try {
+    const imagePayload: { link: string; caption?: string } = { link: imageUrl };
+    const trimmed = (caption || '').trim();
+    if (trimmed) {
+      imagePayload.caption = trimmed.substring(0, 1024);
+    }
+
     const response = await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
       method: 'POST',
       headers: {
@@ -192,10 +206,7 @@ const sendWhatsAppImage = async (
         messaging_product: 'whatsapp',
         to: to,
         type: 'image',
-        image: {
-          link: imageUrl,
-          caption: caption.substring(0, 1024) // WhatsApp caption limit is 1024 characters
-        }
+        image: imagePayload
       })
     });
 
@@ -258,6 +269,38 @@ const sendWhatsAppMessage = async (
   } catch (error) {
     logger.error('Error sending WhatsApp message', error as Error, { phoneNumberId, to });
     return false;
+  }
+};
+
+/**
+ * WhatsApp Cloud API typing indicator (requires inbound wamid).
+ * @see https://developers.facebook.com/docs/whatsapp/cloud-api/typing-indicators
+ */
+const sendWhatsAppTyping = async (
+  phoneNumberId: string,
+  inboundMessageId: string,
+  accessToken: string
+): Promise<void> => {
+  if (!inboundMessageId) return;
+  try {
+    await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        status: 'read',
+        message_id: inboundMessageId,
+        typing_indicator: { type: 'text' }
+      })
+    });
+  } catch (error) {
+    logger.debug('WhatsApp typing indicator error', {
+      error: error instanceof Error ? error.message : String(error),
+      phoneNumberId
+    });
   }
 };
 
@@ -640,380 +683,460 @@ export const handleWhatsAppWebhook = async (
                 continue;
               }
             }
-            // Get or create conversation
-            let conversationResult = await pool.query(
-            `SELECT id FROM conversations 
-             WHERE merchant_id = $1 
-             AND platform = 'whatsapp' 
-             AND user_id = $2
-             ORDER BY created_at DESC
-             LIMIT 1`,
-              [merchantId, from]
-            );
+            // Per-conversation queue: merge rapid messages (4–6s) then process once
+            type WaIngressPayload = {
+              merchantId: string;
+              from: string;
+              messageId: string;
+              messageText: string;
+              phoneNumberId: string;
+              contact: any;
+              value: any;
+              autoReplyEnabled: boolean;
+              welcomeMessage: string;
+            };
 
-            let conversationId: string;
-            if (conversationResult.rows.length === 0) {
-              // Create new conversation
-              const newConversation = await pool.query(
-                `INSERT INTO conversations (merchant_id, platform, user_id, user_name, last_message_at)
-                 VALUES ($1, 'whatsapp', $2, $3, CURRENT_TIMESTAMP)
-                 RETURNING id`,
-                [merchantId, from, contact.profile?.name || from]
+            const waIngressPayload: WaIngressPayload = {
+              merchantId,
+              from,
+              messageId,
+              messageText,
+              phoneNumberId,
+              contact,
+              value,
+              autoReplyEnabled,
+              welcomeMessage
+            };
+
+            conversationIngressQueue
+              .enqueue({
+                conversationKey: `${merchantId}:whatsapp:${from}`,
+                merchantId,
+                platform: 'whatsapp',
+                text: messageText,
+                externalMessageId: messageId,
+                payload: waIngressPayload,
+                process: async (batch: IngressBatch<WaIngressPayload>) => {
+                  const latest = batch.latestPayload;
+                  const merchantId = latest.merchantId;
+                  const from = latest.from;
+                  const phoneNumberId = latest.phoneNumberId;
+                  const contact = latest.contact;
+                  const value = latest.value;
+                  const autoReplyEnabled = latest.autoReplyEnabled;
+                  const welcomeMessage = latest.welcomeMessage;
+                  const messageText = batch.mergedText || latest.messageText;
+                  const messageId =
+                    batch.externalMessageIds[batch.externalMessageIds.length - 1] ||
+                    latest.messageId;
+
+              // Get or create conversation
+              let conversationResult = await pool.query(
+              `SELECT id FROM conversations 
+               WHERE merchant_id = $1 
+               AND platform = 'whatsapp' 
+               AND user_id = $2
+               ORDER BY created_at DESC
+               LIMIT 1`,
+                [merchantId, from]
               );
-              conversationId = newConversation.rows[0].id;
 
-              // Send welcome message if enabled
-              if (welcomeMessage && autoReplyEnabled) {
-                await sendWhatsAppMessage(
-                  phoneNumberId,
-                  from,
-                  welcomeMessage,
-                  await getWhatsAppAccessToken(merchantId) || ''
+              let conversationId: string;
+              if (conversationResult.rows.length === 0) {
+                // Create new conversation
+                const newConversation = await pool.query(
+                  `INSERT INTO conversations (merchant_id, platform, user_id, user_name, last_message_at)
+                   VALUES ($1, 'whatsapp', $2, $3, CURRENT_TIMESTAMP)
+                   RETURNING id`,
+                  [merchantId, from, contact.profile?.name || from]
+                );
+                conversationId = newConversation.rows[0].id;
+
+                // Send welcome message if enabled
+                if (welcomeMessage && autoReplyEnabled) {
+                  await sendWhatsAppMessage(
+                    phoneNumberId,
+                    from,
+                    welcomeMessage,
+                    await getWhatsAppAccessToken(merchantId) || ''
+                  );
+                }
+              } else {
+                conversationId = conversationResult.rows[0].id;
+              
+                // Update last message time
+                await pool.query(
+                  'UPDATE conversations SET last_message_at = CURRENT_TIMESTAMP WHERE id = $1',
+                  [conversationId]
                 );
               }
-            } else {
-              conversationId = conversationResult.rows[0].id;
-              
-              // Update last message time
-              await pool.query(
-                'UPDATE conversations SET last_message_at = CURRENT_TIMESTAMP WHERE id = $1',
+
+              // ✅ فحص حالة المحادثة لمنع التضارب
+              const convStatus = await pool.query(
+                `SELECT bot_disabled, last_human_response_at, last_bot_response_at, status
+                 FROM conversations WHERE id = $1`,
                 [conversationId]
               );
-            }
 
-            // ✅ فحص حالة المحادثة لمنع التضارب
-            const convStatus = await pool.query(
-              `SELECT bot_disabled, last_human_response_at, last_bot_response_at, status
-               FROM conversations WHERE id = $1`,
-              [conversationId]
-            );
+              const conv = convStatus.rows[0] || { bot_disabled: false, status: 'bot' };
 
-            const conv = convStatus.rows[0] || { bot_disabled: false, status: 'bot' };
+              // ✅ فحص آخر رسالة في المحادثة
+              const lastMessageCheck = await pool.query(
+                `SELECT sender_type, created_at, external_message_id
+                 FROM messages 
+                 WHERE conversation_id = $1 
+                 ORDER BY created_at DESC 
+                 LIMIT 1`,
+                [conversationId]
+              );
 
-            // ✅ فحص آخر رسالة في المحادثة
-            const lastMessageCheck = await pool.query(
-              `SELECT sender_type, created_at, external_message_id
-               FROM messages 
-               WHERE conversation_id = $1 
-               ORDER BY created_at DESC 
-               LIMIT 1`,
-              [conversationId]
-            );
+              let shouldSkipBotReply = false;
+              let skipReason = '';
 
-            let shouldSkipBotReply = false;
-            let skipReason = '';
-
-            // ✅ منطق منع التضارب:
-            // 1. إذا كان البوت معطل لهذه المحادثة
-            if (conv.bot_disabled || conv.status === 'human') {
-              shouldSkipBotReply = true;
-              skipReason = 'Bot disabled or conversation assigned to human';
-            }
-            // 2. إذا كانت آخر رسالة من إنسان خلال آخر 5 دقائق
-            else if (lastMessageCheck.rows.length > 0) {
-              const lastMsg = lastMessageCheck.rows[0];
+              // ✅ منطق منع التضارب:
+              // 1. إذا كان البوت معطل لهذه المحادثة
+              if (conv.bot_disabled || conv.status === 'human') {
+                shouldSkipBotReply = true;
+                skipReason = 'Bot disabled or conversation assigned to human';
+              }
+              // 2. إذا كانت آخر رسالة من إنسان خلال آخر 5 دقائق
+              else if (lastMessageCheck.rows.length > 0) {
+                const lastMsg = lastMessageCheck.rows[0];
               
-              if (lastMsg.sender_type === 'human') {
-                const lastMsgTime = new Date(lastMsg.created_at);
-                const now = new Date();
-                const minutesSinceHuman = (now.getTime() - lastMsgTime.getTime()) / (1000 * 60);
+                if (lastMsg.sender_type === 'human') {
+                  const lastMsgTime = new Date(lastMsg.created_at);
+                  const now = new Date();
+                  const minutesSinceHuman = (now.getTime() - lastMsgTime.getTime()) / (1000 * 60);
                 
-                if (minutesSinceHuman < 5) {
-                  shouldSkipBotReply = true;
-                  skipReason = `Recent human response (${Math.round(minutesSinceHuman)} minutes ago)`;
+                  if (minutesSinceHuman < 5) {
+                    shouldSkipBotReply = true;
+                    skipReason = `Recent human response (${Math.round(minutesSinceHuman)} minutes ago)`;
+                  }
                 }
               }
-            }
 
-            const cachedSettings = await getCachedMerchantSettings(merchantId);
+              const cachedSettings = await getCachedMerchantSettings(merchantId);
 
-            if (!autoReplyEnabled || shouldSkipBotReply) {
-            await pool.query(
-              `INSERT INTO messages (conversation_id, role, content, sender_type, external_message_id, source)
-               VALUES ($1, 'user', $2, 'user', $3, 'whatsapp')`,
-              [conversationId, messageText, messageId]
-            );
+              if (!autoReplyEnabled || shouldSkipBotReply) {
+              await pool.query(
+                `INSERT INTO messages (conversation_id, role, content, sender_type, external_message_id, source)
+                 VALUES ($1, 'user', $2, 'user', $3, 'whatsapp')`,
+                [conversationId, messageText, messageId]
+              );
 
-              if (shouldSkipBotReply) {
-                logger.info('Bot reply skipped', {
-                  conversationId,
-                  reason: skipReason,
-                  merchantId
-                });
-              }
-            } else if (messageText.trim()) {
-              try {
-                const { getMerchantPlanLimits, getMonthlyAIResponseCount, isWithinLimit } = await import('../utils/planLimits.js');
-                const limits = await getMerchantPlanLimits(merchantId);
-                const currentCount = await getMonthlyAIResponseCount(merchantId);
-
-                if (!isWithinLimit(currentCount, limits.maxMonthlyAIResponses)) {
-                  logger.warn('AI response limit exceeded for WhatsApp', {
-                    merchantId,
-                    currentCount,
-                    limit: limits.maxMonthlyAIResponses
+                if (shouldSkipBotReply) {
+                  logger.info('Bot reply skipped', {
+                    conversationId,
+                    reason: skipReason,
+                    merchantId
                   });
-                } else {
-                  const result = await handleIncomingMessage({
-                    merchantId,
-                    platform: 'whatsapp',
-                    userId: from,
-                    userName: contact.profile?.name || from,
-                    messageText,
-                    externalMessageId: messageId,
-                    rawEventMetadata: value,
-                    merchantPolicies: {
-                      storeName: cachedSettings?.store_name || 'المتجر',
-                      storeCurrency: cachedSettings?.store_currency || 'USD',
-                      systemPrompt: cachedSettings?.system_prompt || '',
-                      persona: (cachedSettings?.bot_persona || 'friendly') as any,
-                      shippingPolicy: cachedSettings?.shipping_policy || '',
-                      deliveryTime: cachedSettings?.delivery_time || '',
-                      paymentMethods: cachedSettings?.payment_methods || '',
-                      returnPolicy: cachedSettings?.return_policy || '',
-                      additionalNotes: cachedSettings?.additional_notes || ''
-                    }
-                  });
+                }
+              } else if (messageText.trim()) {
+                try {
+                  const { getMerchantPlanLimits, getMonthlyAIResponseCount, isWithinLimit } = await import('../utils/planLimits.js');
+                  const limits = await getMerchantPlanLimits(merchantId);
+                  const currentCount = await getMonthlyAIResponseCount(merchantId);
 
-                  const responseText = result.replyText;
-                  const { orderData, cleanText: responseWithoutOrderData } = extractOrderData(responseText);
-                  const { imageUrl, cleanText } = extractImageUrl(responseWithoutOrderData);
-
-                  if (orderData && orderData.customerName && orderData.customerPhone && 
-                      orderData.customerAddress && orderData.products && 
-                      Array.isArray(orderData.products) && orderData.products.length > 0) {
-                    
-                    logger.info('ORDER_DATA detected from WhatsApp, processing order', {
+                  if (!isWithinLimit(currentCount, limits.maxMonthlyAIResponses)) {
+                    logger.warn('AI response limit exceeded for WhatsApp', {
                       merchantId,
-                      customerName: orderData.customerName,
-                      productsCount: orderData.products.length
+                      currentCount,
+                      limit: limits.maxMonthlyAIResponses
                     });
+                  } else {
+                    const accessTokenForTyping = await getWhatsAppAccessToken(merchantId);
+                    const phoneNumberIdForTyping = await getWhatsAppPhoneNumberId(merchantId);
+                    const stopTypingKeepalive =
+                      accessTokenForTyping && phoneNumberIdForTyping && messageId
+                        ? startTypingKeepalive(() =>
+                            sendWhatsAppTyping(phoneNumberIdForTyping, messageId, accessTokenForTyping)
+                          )
+                        : () => undefined;
 
-                    const client = await pool.connect();
+                    let result;
                     try {
-                      await client.query('BEGIN');
-
-                      const customerEmail = orderData.customerEmail?.trim() || 
-                        `${orderData.customerPhone.replace(/\s+/g, '').replace(/[^0-9]/g, '')}@chat-order.com`;
-                      const deliveryNote = orderData.deliveryTime ? `وقت التوصيل: ${orderData.deliveryTime}` : '';
-                      const baseNotes = orderData.notes || 'Order created via WhatsApp bot';
-                      const combinedNotes = deliveryNote ? `${baseNotes} | ${deliveryNote}` : baseNotes;
-
-                      let customerId: string | null = null;
-                      const existingCustomer = await client.query(
-                        `SELECT id FROM customers 
-                         WHERE merchant_id = $1 
-                         AND (phone = $2 OR email = $3)
-                         LIMIT 1`,
-                        [merchantId, orderData.customerPhone, customerEmail]
-                      );
-
-                      if (existingCustomer.rows.length > 0) {
-                        customerId = existingCustomer.rows[0].id;
-                        await client.query(
-                          `UPDATE customers 
-                           SET name = COALESCE($1, name),
-                               email = COALESCE($2, email),
-                               phone = COALESCE($3, phone),
-                               address = COALESCE($4, address),
-                               notes = CASE 
-                                 WHEN $7 IS NULL OR $7 = '' THEN notes 
-                                 ELSE COALESCE(notes, '') || ' | ' || $7 
-                               END,
-                               last_interaction_date = CURRENT_TIMESTAMP,
-                               updated_at = CURRENT_TIMESTAMP
-                           WHERE id = $5 AND merchant_id = $6`,
-                          [
-                            orderData.customerName,
-                            customerEmail,
-                            orderData.customerPhone,
-                            orderData.customerAddress,
-                            customerId,
-                            merchantId,
-                            deliveryNote
-                          ]
-                        );
-                      } else {
-                        const customerResult = await client.query(
-                          `INSERT INTO customers (
-                            merchant_id, name, email, phone, address,
-                            customer_type, status, notes, tags
-                          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                          RETURNING id`,
-                          [
-                            merchantId,
-                            orderData.customerName,
-                            customerEmail,
-                            orderData.customerPhone,
-                            orderData.customerAddress,
-                            'new',
-                            'active',
-                            combinedNotes,
-                            ['bot-order', 'whatsapp']
-                          ]
-                        );
-                        customerId = customerResult.rows[0].id;
+                      result = await handleIncomingMessage({
+                      merchantId,
+                      platform: 'whatsapp',
+                      userId: from,
+                      userName: contact.profile?.name || from,
+                      messageText,
+                      externalMessageId: messageId,
+                      rawEventMetadata: value,
+                      merchantPolicies: {
+                        storeName: cachedSettings?.store_name || 'المتجر',
+                        storeCurrency: cachedSettings?.store_currency || 'USD',
+                        systemPrompt: cachedSettings?.system_prompt || '',
+                        persona: (cachedSettings?.bot_persona || 'friendly') as any,
+                        shippingPolicy: cachedSettings?.shipping_policy || '',
+                        deliveryTime: cachedSettings?.delivery_time || '',
+                        paymentMethods: cachedSettings?.payment_methods || '',
+                        returnPolicy: cachedSettings?.return_policy || '',
+                        additionalNotes: cachedSettings?.additional_notes || ''
                       }
+                    });
+                    } finally {
+                      stopTypingKeepalive();
+                    }
 
-                      const duplicateOrderCheck = await client.query(
-                        `SELECT id FROM orders 
+                    const responseText = result.replyText;
+                    const { orderData, cleanText: responseWithoutOrderData } = extractOrderData(responseText);
+                    const { imageUrl, cleanText } = extractImageUrl(responseWithoutOrderData);
+
+                    if (orderData && orderData.customerName && orderData.customerPhone && 
+                        orderData.customerAddress && orderData.products && 
+                        Array.isArray(orderData.products) && orderData.products.length > 0) {
+                    
+                      logger.info('ORDER_DATA detected from WhatsApp, processing order', {
+                        merchantId,
+                        customerName: orderData.customerName,
+                        productsCount: orderData.products.length
+                      });
+
+                      const client = await pool.connect();
+                      try {
+                        await client.query('BEGIN');
+
+                        const customerEmail = orderData.customerEmail?.trim() || 
+                          `${orderData.customerPhone.replace(/\s+/g, '').replace(/[^0-9]/g, '')}@chat-order.com`;
+                        const deliveryNote = orderData.deliveryTime ? `وقت التوصيل: ${orderData.deliveryTime}` : '';
+                        const baseNotes = orderData.notes || 'Order created via WhatsApp bot';
+                        const combinedNotes = deliveryNote ? `${baseNotes} | ${deliveryNote}` : baseNotes;
+
+                        let customerId: string | null = null;
+                        const existingCustomer = await client.query(
+                          `SELECT id FROM customers 
                            WHERE merchant_id = $1 
-                             AND customer_phone = $2 
-                             AND status IN ('pending','new','processing')
-                             AND created_at >= NOW() - INTERVAL '5 minutes'
-                     ORDER BY created_at DESC 
+                           AND (phone = $2 OR email = $3)
                            LIMIT 1`,
-                        [merchantId, orderData.customerPhone]
-                      );
+                          [merchantId, orderData.customerPhone, customerEmail]
+                        );
 
-                      let orderId: string;
-                      if (duplicateOrderCheck.rows.length > 0) {
-                        orderId = duplicateOrderCheck.rows[0].id;
-                      } else {
-                        const deliveryTimeColumnCheck = await client.query(`
-                          SELECT column_name 
-                          FROM information_schema.columns 
-                          WHERE table_schema = 'public' 
-                          AND table_name = 'orders' 
-                          AND column_name = 'delivery_time'
-                        `);
-                        const hasDeliveryTimeColumn = deliveryTimeColumnCheck.rows.length > 0;
-
-                        const orderInsertQuery = hasDeliveryTimeColumn
-                          ? `INSERT INTO orders (
-                              merchant_id, customer_name, customer_email, 
-                              customer_phone, customer_address, delivery_time,
-                              total, currency, status, source, notes
-                            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-                            RETURNING id`
-                          : `INSERT INTO orders (
-                              merchant_id, customer_name, customer_email, 
-                              customer_phone, customer_address,
-                              total, currency, status, source, notes
-                            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                            RETURNING id`;
-
-                        const orderInsertParams = hasDeliveryTimeColumn
-                          ? [
+                        if (existingCustomer.rows.length > 0) {
+                          customerId = existingCustomer.rows[0].id;
+                          await client.query(
+                            `UPDATE customers 
+                             SET name = COALESCE($1, name),
+                                 email = COALESCE($2, email),
+                                 phone = COALESCE($3, phone),
+                                 address = COALESCE($4, address),
+                                 notes = CASE 
+                                   WHEN $7 IS NULL OR $7 = '' THEN notes 
+                                   ELSE COALESCE(notes, '') || ' | ' || $7 
+                                 END,
+                                 last_interaction_date = CURRENT_TIMESTAMP,
+                                 updated_at = CURRENT_TIMESTAMP
+                             WHERE id = $5 AND merchant_id = $6`,
+                            [
+                              orderData.customerName,
+                              customerEmail,
+                              orderData.customerPhone,
+                              orderData.customerAddress,
+                              customerId,
+                              merchantId,
+                              deliveryNote
+                            ]
+                          );
+                        } else {
+                          const customerResult = await client.query(
+                            `INSERT INTO customers (
+                              merchant_id, name, email, phone, address,
+                              customer_type, status, notes, tags
+                            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                            RETURNING id`,
+                            [
                               merchantId,
                               orderData.customerName,
                               customerEmail,
                               orderData.customerPhone,
                               orderData.customerAddress,
-                              orderData.deliveryTime || null,
-                              orderData.total || 0,
-                              cachedSettings?.store_currency || 'USD',
-                              'pending',
-                              'bot',
-                              combinedNotes
+                              'new',
+                              'active',
+                              combinedNotes,
+                              ['bot-order', 'whatsapp']
                             ]
-                          : [
-                    merchantId,
-                              orderData.customerName,
-                              customerEmail,
-                              orderData.customerPhone,
-                              orderData.customerAddress,
-                              orderData.total || 0,
-                              cachedSettings?.store_currency || 'USD',
-                              'pending',
-                              'bot',
-                              combinedNotes
-                            ];
+                          );
+                          customerId = customerResult.rows[0].id;
+                        }
 
-                        const orderResult = await client.query(orderInsertQuery, orderInsertParams);
-                        orderId = orderResult.rows[0].id;
-                      }
+                        const duplicateOrderCheck = await client.query(
+                          `SELECT id FROM orders 
+                             WHERE merchant_id = $1 
+                               AND customer_phone = $2 
+                               AND status IN ('pending','new','processing')
+                               AND created_at >= NOW() - INTERVAL '5 minutes'
+                       ORDER BY created_at DESC 
+                             LIMIT 1`,
+                          [merchantId, orderData.customerPhone]
+                        );
 
-                      for (const item of orderData.products) {
-                        // ✅ تنظيف وتصحيح UUID المنتج
-                        const sanitizedProductId = sanitizeUUID(item.productId);
+                        let orderId: string;
+                        if (duplicateOrderCheck.rows.length > 0) {
+                          orderId = duplicateOrderCheck.rows[0].id;
+                        } else {
+                          const deliveryTimeColumnCheck = await client.query(`
+                            SELECT column_name 
+                            FROM information_schema.columns 
+                            WHERE table_schema = 'public' 
+                            AND table_name = 'orders' 
+                            AND column_name = 'delivery_time'
+                          `);
+                          const hasDeliveryTimeColumn = deliveryTimeColumnCheck.rows.length > 0;
+
+                          const orderInsertQuery = hasDeliveryTimeColumn
+                            ? `INSERT INTO orders (
+                                merchant_id, customer_name, customer_email, 
+                                customer_phone, customer_address, delivery_time,
+                                total, currency, status, source, notes
+                              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                              RETURNING id`
+                            : `INSERT INTO orders (
+                                merchant_id, customer_name, customer_email, 
+                                customer_phone, customer_address,
+                                total, currency, status, source, notes
+                              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                              RETURNING id`;
+
+                          const orderInsertParams = hasDeliveryTimeColumn
+                            ? [
+                                merchantId,
+                                orderData.customerName,
+                                customerEmail,
+                                orderData.customerPhone,
+                                orderData.customerAddress,
+                                orderData.deliveryTime || null,
+                                orderData.total || 0,
+                                cachedSettings?.store_currency || 'USD',
+                                'pending',
+                                'bot',
+                                combinedNotes
+                              ]
+                            : [
+                      merchantId,
+                                orderData.customerName,
+                                customerEmail,
+                                orderData.customerPhone,
+                                orderData.customerAddress,
+                                orderData.total || 0,
+                                cachedSettings?.store_currency || 'USD',
+                                'pending',
+                                'bot',
+                                combinedNotes
+                              ];
+
+                          const orderResult = await client.query(orderInsertQuery, orderInsertParams);
+                          orderId = orderResult.rows[0].id;
+                        }
+
+                        for (const item of orderData.products) {
+                          // ✅ تنظيف وتصحيح UUID المنتج
+                          const sanitizedProductId = sanitizeUUID(item.productId);
                         
+                          await client.query(
+                            `INSERT INTO order_items (
+                              order_id, product_id, product_name, quantity, price, currency
+                            ) VALUES ($1, $2, $3, $4, $5, $6)`,
+                            [
+                              orderId,
+                              sanitizedProductId,  // ✅ استخدام UUID النظيف أو null
+                              item.productName || 'Unknown Product',
+                              item.quantity || 1,
+                              item.price || 0,
+                              cachedSettings?.store_currency || 'USD'
+                            ]
+                          );
+                        }
+
                         await client.query(
-                          `INSERT INTO order_items (
-                            order_id, product_id, product_name, quantity, price, currency
-                          ) VALUES ($1, $2, $3, $4, $5, $6)`,
+                          `UPDATE customers 
+                           SET total_orders = total_orders + 1,
+                               total_spent = total_spent + $1,
+                               last_order_date = CURRENT_TIMESTAMP,
+                               last_interaction_date = CURRENT_TIMESTAMP
+                           WHERE id = $2 AND merchant_id = $3`,
+                          [orderData.total || 0, customerId, merchantId]
+                        );
+
+                        await client.query(
+                          `INSERT INTO customer_interactions (
+                            customer_id, merchant_id, interaction_type, 
+                            title, description, platform, related_order_id
+                          ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
                           [
-                            orderId,
-                            sanitizedProductId,  // ✅ استخدام UUID النظيف أو null
-                            item.productName || 'Unknown Product',
-                            item.quantity || 1,
-                            item.price || 0,
-                            cachedSettings?.store_currency || 'USD'
+                            customerId,
+                            merchantId,
+                            'order',
+                            'Order Created via WhatsApp Bot',
+                            `Order #${orderId} created via WhatsApp bot`,
+                            'whatsapp',
+                            orderId
                           ]
                         );
+
+                        await client.query('COMMIT');
+                      } catch (orderError) {
+                        await client.query('ROLLBACK');
+                        logger.error('Failed to process WhatsApp ORDER_DATA', orderError as Error, { merchantId });
+                      } finally {
+                        client.release();
                       }
-
-                      await client.query(
-                        `UPDATE customers 
-                         SET total_orders = total_orders + 1,
-                             total_spent = total_spent + $1,
-                             last_order_date = CURRENT_TIMESTAMP,
-                             last_interaction_date = CURRENT_TIMESTAMP
-                         WHERE id = $2 AND merchant_id = $3`,
-                        [orderData.total || 0, customerId, merchantId]
-                      );
-
-                      await client.query(
-                        `INSERT INTO customer_interactions (
-                          customer_id, merchant_id, interaction_type, 
-                          title, description, platform, related_order_id
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-                        [
-                          customerId,
-                          merchantId,
-                          'order',
-                          'Order Created via WhatsApp Bot',
-                          `Order #${orderId} created via WhatsApp bot`,
-                          'whatsapp',
-                          orderId
-                        ]
-                      );
-
-                      await client.query('COMMIT');
-                    } catch (orderError) {
-                      await client.query('ROLLBACK');
-                      logger.error('Failed to process WhatsApp ORDER_DATA', orderError as Error, { merchantId });
-                    } finally {
-                      client.release();
                     }
-                  }
 
-                  await pool.query(
-                    `UPDATE conversations 
-                     SET last_bot_response_at = CURRENT_TIMESTAMP,
-                         last_message_at = CURRENT_TIMESTAMP,
-                         updated_at = CURRENT_TIMESTAMP
-                     WHERE id = $1`,
-                    [conversationId]
-                  );
+                    await pool.query(
+                      `UPDATE conversations 
+                       SET last_bot_response_at = CURRENT_TIMESTAMP,
+                           last_message_at = CURRENT_TIMESTAMP,
+                           updated_at = CURRENT_TIMESTAMP
+                       WHERE id = $1`,
+                      [conversationId]
+                    );
 
-                  const accessToken = await getWhatsAppAccessToken(merchantId);
-                  const phoneNumberIdForReply = await getWhatsAppPhoneNumberId(merchantId);
+                    const accessToken = accessTokenForTyping || (await getWhatsAppAccessToken(merchantId));
+                    const phoneNumberIdForReply =
+                      phoneNumberIdForTyping || (await getWhatsAppPhoneNumberId(merchantId));
                   
-                  if (accessToken && phoneNumberIdForReply) {
-                    const outboundText = stripInternalControlMarkers(cleanText || responseText);
-                    if (imageUrl && imageUrl !== 'N/A' && imageUrl.startsWith('http')) {
-                      await sendWhatsAppImage(
-                        phoneNumberIdForReply,
-                        from,
-                        imageUrl,
-                        outboundText || 'صورة المنتج',
-                        accessToken
-                      );
-                    } else if (outboundText.trim()) {
-                      await sendWhatsAppMessage(
-                        phoneNumberIdForReply,
-                        from,
-                        outboundText,
-                        accessToken
-                      );
+                    if (accessToken && phoneNumberIdForReply) {
+                      const outboundText = stripInternalControlMarkers(cleanText || responseText);
+                      const hasImage = !!(imageUrl && imageUrl !== 'N/A' && imageUrl.startsWith('http'));
+                      if (outboundText.trim() || hasImage) {
+                        await deliverHumanLikeReply({
+                          text: outboundText,
+                          imageUrl: hasImage ? imageUrl : null,
+                          transport: {
+                            setTyping: async (on) => {
+                              if (on && messageId) {
+                                await sendWhatsAppTyping(phoneNumberIdForReply, messageId, accessToken);
+                              }
+                            },
+                            sendText: (bubble) =>
+                              sendWhatsAppMessage(phoneNumberIdForReply, from, bubble, accessToken),
+                            sendImage: (url, caption) =>
+                              sendWhatsAppImage(
+                                phoneNumberIdForReply,
+                                from,
+                                url,
+                                caption,
+                                accessToken
+                              )
+                          },
+                          context: { merchantId, platform: 'whatsapp', conversationId }
+                        });
+                      }
                     }
                   }
+                } catch (error: any) {
+                  logger.error('Error processing WhatsApp auto-reply', error, { merchantId, conversationId });
                 }
-              } catch (error: any) {
-                logger.error('Error processing WhatsApp auto-reply', error, { merchantId, conversationId });
               }
-            }
+                }
+              })
+              .catch((error) => {
+                logger.error('Error processing WhatsApp ingress batch', error as Error, {
+                  merchantId,
+                  from
+                });
+              });
+
           }
         }
       }

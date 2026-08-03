@@ -10,7 +10,12 @@ import type { Message, ConversationState, MerchantConfig } from '../bot/index.js
 import { botReplyAsksForConfirmation } from '../services/salesgpt/index.js';
 import { escalateConversationToHuman } from '../services/escalation.js';
 import { stripInternalControlMarkers } from '../response/sanitize-reply.js';
-import { telegramAdapter } from '../services/channels/telegram.adapter.js';
+import { telegramAdapter, sendTelegramTyping } from '../services/channels/telegram.adapter.js';
+import { startTypingKeepalive } from '../services/channels/replyDelivery.js';
+import {
+  conversationIngressQueue,
+  mergeTelegramUpdates
+} from '../services/conversationIngressQueue.js';
 import { analyzeImageAndSearch, imageUrlToBase64 } from '../services/imageRecognition.js';
 import {
   resolveInboundVoice,
@@ -553,6 +558,10 @@ const processTelegramMessage = async (update: any) => {
     // ==================== Process through NEW orchestrator ====================
     let responseText: string;
     let updatedState: ConversationState = conversationState;
+
+    const stopTypingKeepalive = botToken
+      ? startTypingKeepalive(() => sendTelegramTyping(chatId, botToken))
+      : () => undefined;
     
     try {
       // ✅ بناء merchantConfig للنظام الجديد
@@ -776,6 +785,8 @@ const processTelegramMessage = async (update: any) => {
       }
       
       console.log('[processTelegramMessage] Orchestrator failed, sending error message');
+    } finally {
+      stopTypingKeepalive();
     }
 
     // ✅ Extract ORDER_DATA and remove it from message text
@@ -1174,57 +1185,27 @@ const processTelegramMessage = async (update: any) => {
       }
     }
     
-    // ==================== STEP 3: Send message via adapter ====================
-    // ✅ NOTE: Messages are already saved by orchestrator.service.ts
+    // ==================== STEP 3: Human-like send (typing delay + ≤2 bubbles) ====================
+    // ✅ NOTE: Messages are already saved by orchestrator / bot core
     // DO NOT save messages here to avoid duplication
     const finalResponseText = stripInternalControlMarkers(cleanText || responseWithoutOrderData);
     console.log('[processTelegramMessage] Prepared final response for sending:', { conversationId, responseLength: finalResponseText.length });
 
-    // ✅ Send image first if present
-    if (imageUrl && imageUrl.startsWith('http') && botToken) {
-      console.log('[processTelegramMessage] Sending product image:', { imageUrl });
-      
-      // ✅ إزالة أي روابط من الـ caption (الصورة تُرسل مباشرة)
-      let imageCaption = finalResponseText
-        .replace(/https?:\/\/[^\s]+/gi, '') // إزالة روابط HTTP/HTTPS
-        .replace(/\[IMAGE:[^\]]+\]/gi, '') // إزالة [IMAGE: url] tag
-        .trim();
-      
-      // ✅ إذا كان الـ caption طويل جداً، نقصه
-      if (imageCaption.length > 1024) {
-        imageCaption = imageCaption.substring(0, 1020) + '...';
-      }
-      
-      const photoSent = await sendTelegramPhoto(chatId, imageUrl, imageCaption, botToken);
-      
-      if (photoSent) {
-        console.log('[processTelegramMessage] Image sent successfully');
-        // If photo was sent with caption, we're done
-        // Update conversation and return early
-        await pool.query(
-          `UPDATE conversations 
-           SET last_message_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-           WHERE id = $1 AND merchant_id = $2`,
-          [conversationId, merchantId]
-        );
-        
-        logger.info('Telegram message with image processed successfully', { chatId, userId, conversationId });
-        return;
-      } else {
-        // Photo failed to send, fall back to text-only
-        console.log('[processTelegramMessage] Failed to send image, falling back to text');
-      }
+    const hasImage = !!(imageUrl && imageUrl.startsWith('http') && botToken);
+    if ((!finalResponseText || !finalResponseText.trim()) && !hasImage) {
+      logger.info('Orchestrator returned no reply for Telegram', { conversationId, merchantId });
+      return;
     }
 
-    // Send via adapter (text only if no image or image failed)
     await telegramAdapter.sendMessage({
       merchantId,
       userId,
-      text: finalResponseText,
+      text: finalResponseText || '',
       metadata: {
         botId: botId || null,
         botToken: botToken || null,
-        botType: configuredBotType || null
+        botType: configuredBotType || null,
+        ...(hasImage ? { imageUrl } : {})
       }
     });
 
@@ -1670,14 +1651,47 @@ export const telegramWebhook = async (
         text: update.message.text?.substring(0, 50)
       });
       
-      // Process asynchronously to avoid timeout
-      processTelegramMessage(update).catch(err => {
-        logger.error('Error processing Telegram message event', err as Error, {
-          merchantId,
-          chatId: update.message?.chat?.id,
-          userId: update.message?.from?.id
+      // Per-conversation queue: merge rapid messages (4–6s) then process once
+      const chatId = update.message.chat?.id != null ? String(update.message.chat.id) : '';
+      const userId = update.message.from?.id != null ? String(update.message.from.id) : '';
+      const text = String(update.message.text || update.message.caption || '').trim();
+      const externalMessageId =
+        update.message.message_id != null ? String(update.message.message_id) : undefined;
+
+      if (!merchantId || !chatId) {
+        processTelegramMessage(update).catch(err => {
+          logger.error('Error processing Telegram message event', err as Error, {
+            merchantId,
+            chatId: update.message?.chat?.id,
+            userId: update.message?.from?.id
+          });
         });
-      });
+      } else {
+        conversationIngressQueue
+          .enqueue({
+            conversationKey: `${merchantId}:telegram:${chatId}`,
+            merchantId,
+            platform: 'telegram',
+            text,
+            externalMessageId,
+            payload: update,
+            process: async (batch) => {
+              const mergedUpdate = mergeTelegramUpdates(batch.parts);
+              // Preserve tenant stamps from webhook (not always on every part)
+              (mergedUpdate as any).merchantId = merchantId;
+              (mergedUpdate as any).botId = (update as any).botId ?? (mergedUpdate as any).botId;
+              (mergedUpdate as any).botType = (update as any).botType ?? (mergedUpdate as any).botType;
+              await processTelegramMessage(mergedUpdate);
+            }
+          })
+          .catch(err => {
+            logger.error('Error processing Telegram message event', err as Error, {
+              merchantId,
+              chatId: update.message?.chat?.id,
+              userId: update.message?.from?.id
+            });
+          });
+      }
     } else {
       console.log('[Telegram Webhook] Update without message:', {
         merchantId,
