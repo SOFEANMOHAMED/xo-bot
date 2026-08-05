@@ -274,8 +274,13 @@ const App: React.FC = () => {
           }
         />
 
+        {/* Secret super-admin panel (path from VITE_ADMIN_BASE_PATH) */}
         <Route path={PATHS.ADMIN} element={<Navigate to={adminPath(AdminView.OVERVIEW)} replace />} />
         <Route path={`${PATHS.ADMIN}/:viewSlug`} element={<AdminLogoutRoute />} />
+
+        {/* Legacy guessable /admin — closed (no hint that an admin panel exists) */}
+        <Route path={PATHS.ADMIN_LEGACY} element={<Navigate to={PATHS.HOME} replace />} />
+        <Route path={`${PATHS.ADMIN_LEGACY}/*`} element={<Navigate to={PATHS.HOME} replace />} />
 
         <Route path="/:slug" element={<PublicPageRoute />} />
         <Route path="*" element={<Navigate to={PATHS.HOME} replace />} />

@@ -6,6 +6,13 @@
 import { logger } from '../utils/logger';
 
 const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'https://xo-bot.com/api';
+const ADMIN_GATE_SECRET = String((import.meta as any).env?.VITE_ADMIN_GATE_SECRET || '').trim();
+
+/** Admin API paths need the obscure gate header (except public catalog endpoints). */
+function needsAdminGate(endpoint: string): boolean {
+  if (endpoint.includes('/subscriptions/public')) return false;
+  return /(^|\/)admin(\/|$|\?)/.test(endpoint);
+}
 
 logger.log('API Base URL:', API_BASE_URL);
 
@@ -74,6 +81,10 @@ class ApiService {
 
     if (requireAuth && this.token) {
       headers['Authorization'] = `Bearer ${this.token}`;
+    }
+
+    if (ADMIN_GATE_SECRET && needsAdminGate(endpoint)) {
+      headers['X-Admin-Gate'] = ADMIN_GATE_SECRET;
     }
 
     try {

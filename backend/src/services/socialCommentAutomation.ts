@@ -17,7 +17,8 @@ import {
   applyCommentTemplate,
   clampSocialText,
   DEFAULT_COMMENT_REPLY,
-  DEFAULT_DM_AFTER_COMMENT
+  DEFAULT_DM_AFTER_COMMENT,
+  withPublicCommentMention
 } from './socialCommentReplies.js';
 import type { ConversationState } from '../core/types.js';
 
@@ -40,6 +41,8 @@ export type CommentAutomationInput = {
   commentText: string;
   commenterId?: string | null;
   commenterName: string;
+  /** Instagram username (without @) for public @mention */
+  commenterUsername?: string | null;
   account: CommentAutomationAccount;
   sendPublicReply: (commentId: string, text: string, accessToken: string) => Promise<boolean>;
   sendPrivateReply: (
@@ -140,6 +143,7 @@ export async function runCommentAutomation(input: CommentAutomationInput): Promi
     commentText,
     commenterId,
     commenterName,
+    commenterUsername,
     account
   } = input;
 
@@ -231,7 +235,18 @@ export async function runCommentAutomation(input: CommentAutomationInput): Promi
 
   let publicReplied = false;
   if (publicText) {
-    publicReplied = await input.sendPublicReply(commentId, publicText, account.access_token);
+    const mentionedPublicText = clampSocialText(
+      withPublicCommentMention(publicText, {
+        platform,
+        commenterId,
+        commenterUsername
+      })
+    );
+    publicReplied = await input.sendPublicReply(
+      commentId,
+      mentionedPublicText,
+      account.access_token
+    );
   }
 
   let conversationId: string | null = null;

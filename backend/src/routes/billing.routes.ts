@@ -7,6 +7,7 @@ import {
   reviewPaymentRequest
 } from '../controllers/billing.controller.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { requireAdminGate } from '../middleware/adminGate.js';
 
 const router = express.Router();
 
@@ -18,12 +19,14 @@ router.get('/payment-requests/me', authenticate, getMyPaymentRequests);
 // Admin routes
 router.get(
   '/admin/payment-requests',
+  requireAdminGate,
   authenticate,
   requireRole('owner', 'admin'),
   getAdminPaymentRequests
 );
 router.put(
   '/admin/payment-requests/:id',
+  requireAdminGate,
   authenticate,
   requireRole('owner', 'admin'),
   reviewPaymentRequest

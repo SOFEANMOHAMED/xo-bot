@@ -464,9 +464,12 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
       try {
         await apiService.disconnectInstagram();
         setIgStatus({ isConnected: false });
-        addLog(generateLog('Facebook', 'تم إلغاء ربط Instagram', 'info'));
+        addLog(generateLog('Instagram', 'تم إلغاء الربط', 'info'));
+        if (showNotification) showNotification('تم إلغاء ربط حساب إنستغرام', 'success');
       } catch (error: any) {
         logger.error('Failed to disconnect Instagram:', error);
+        addLog(generateLog('Instagram', `فشل إلغاء الربط: ${error.message}`, 'error'));
+        if (showNotification) showNotification(error?.message || 'فشل إلغاء ربط إنستغرام', 'error');
       }
     }
     setShowDisconnectModal(false);
@@ -920,7 +923,7 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
                   className="w-full text-center text-xs text-red-500 hover:text-red-700 dark:hover:text-red-400 mt-2 flex items-center justify-center gap-1 py-2 hover:bg-red-50 dark:hover:bg-red-900/10 rounded-lg transition-colors"
                 >
                   <Trash2 size={12} />
-                  إلغاء ربط Instagram
+                  إلغاء ربط إنستغرام
                 </button>
               </div>
             )}
@@ -1288,10 +1291,20 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
         </div>
       </div>
 
-      {/* Disconnect Confirmation Modal */}
-      {showDisconnectModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 border border-gray-100 dark:border-gray-700">
+      {/* Disconnect Confirmation Modal — portal so it centers on the viewport */}
+      {showDisconnectModal && typeof document !== 'undefined' && ReactDOM.createPortal(
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 animate-fade-in"
+          style={{ margin: 0 }}
+          onClick={() => {
+            setShowDisconnectModal(false);
+            setDisconnectTarget(null);
+          }}
+        >
+          <div
+            className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 border border-gray-100 dark:border-gray-700"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center gap-3 text-red-600 mb-4">
               <div className="p-2 bg-red-50 dark:bg-red-900/20 rounded-full">
                 <AlertTriangle size={24} />
@@ -1300,21 +1313,33 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
             </div>
             
             <p className="text-gray-600 dark:text-gray-300 mb-6 leading-relaxed">
-              هل أنت متأكد من رغبتك في إلغاء ربط 
-              <span className="font-bold text-gray-900 dark:text-white mx-1">
-                {disconnectTarget === 'facebook' ? 'صفحة فيسبوك' : 
-                 disconnectTarget === 'shopify' ? 'متجر Shopify' : 
-                 disconnectTarget === 'whatsapp' ? 'حساب WhatsApp' : 'بوت تيليجرام'}
-              </span>؟
+              هل أنت متأكد من رغبتك في إلغاء ربط{' '}
+              <span className="font-bold text-gray-900 dark:text-white">
+                {disconnectTarget === 'facebook'
+                  ? 'صفحة فيسبوك'
+                  : disconnectTarget === 'instagram'
+                    ? 'حساب إنستغرام'
+                    : disconnectTarget === 'shopify'
+                      ? 'متجر Shopify'
+                      : disconnectTarget === 'whatsapp'
+                        ? 'حساب WhatsApp'
+                        : 'بوت تيليجرام'}
+              </span>
+              ؟
               <br/>
               <span className="text-red-500 text-sm font-bold block mt-2">
-                سيتوقف البوت عن الرد فوراً ولن تتم مزامنة البيانات بعد الآن.
+                {disconnectTarget === 'instagram'
+                  ? 'سيتوقف البوت عن الرد على تعليقات ورسائل إنستغرام فوراً ولن تتم مزامنة البيانات بعد الآن.'
+                  : 'سيتوقف البوت عن الرد فوراً ولن تتم مزامنة البيانات بعد الآن.'}
               </span>
             </p>
 
             <div className="flex justify-end gap-3">
               <button 
-                onClick={() => setShowDisconnectModal(false)}
+                onClick={() => {
+                  setShowDisconnectModal(false);
+                  setDisconnectTarget(null);
+                }}
                 className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg font-medium transition-colors"
               >
                 تراجع
@@ -1327,7 +1352,8 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Telegram Bot Modal */}

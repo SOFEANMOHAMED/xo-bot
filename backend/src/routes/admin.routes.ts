@@ -26,14 +26,16 @@ import {
   updateAdminPlanLimits
 } from '../controllers/admin.controller.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { requireAdminGate } from '../middleware/adminGate.js';
 import { enableFullAIMode, disableFullAIMode } from './admin/enable-full-ai.js';
 
 const router = express.Router();
 
-// Public route (no authentication required)
+// Public route (no authentication / no admin gate — used by merchant billing UI)
 router.get('/subscriptions/public', getPublicSubscriptionPlans);
 
-// All admin routes require authentication and owner/admin role
+// Remaining admin routes: obscure gate + JWT + role
+router.use(requireAdminGate);
 router.use(authenticate);
 router.use(requireRole('owner', 'admin'));
 

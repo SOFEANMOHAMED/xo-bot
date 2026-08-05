@@ -10,6 +10,7 @@ import {
 } from '../controllers/support.controller.js';
 import { authenticate } from '../middleware/auth.js';
 import { requireRole } from '../middleware/auth.js';
+import { requireAdminGate } from '../middleware/adminGate.js';
 
 const router = express.Router();
 
@@ -19,10 +20,10 @@ router.get('/my-tickets', authenticate, getUserSupportTickets);
 router.get('/:id', authenticate, getSupportTicket);
 router.post('/:ticketId/reply', authenticate, addSupportTicketReply);
 
-// Admin routes (require authentication and admin/owner role)
-router.get('/admin/all', authenticate, requireRole('owner', 'admin'), getAllSupportTickets);
-router.get('/admin/stats', authenticate, requireRole('owner', 'admin'), getSupportTicketsStats);
-router.put('/admin/:id', authenticate, requireRole('owner', 'admin'), updateSupportTicket);
+// Admin routes (gate + auth + role)
+router.get('/admin/all', requireAdminGate, authenticate, requireRole('owner', 'admin'), getAllSupportTickets);
+router.get('/admin/stats', requireAdminGate, authenticate, requireRole('owner', 'admin'), getSupportTicketsStats);
+router.put('/admin/:id', requireAdminGate, authenticate, requireRole('owner', 'admin'), updateSupportTicket);
 
 export default router;
 

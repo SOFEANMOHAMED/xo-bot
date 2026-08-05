@@ -284,6 +284,36 @@ const sendInstagramComment = async (
   }
 };
 
+/** Resolve Instagram username for @mention when webhook omits `from.username`. */
+const fetchInstagramCommentUsername = async (
+  commentId: string,
+  accessToken: string
+): Promise<string | null> => {
+  try {
+    const url =
+      `https://graph.facebook.com/${INSTAGRAM_GRAPH_VERSION}/${encodeURIComponent(commentId)}` +
+      `?fields=username,from{username}&access_token=${encodeURIComponent(accessToken)}`;
+    const resp = await fetch(url);
+    const data = (await resp.json()) as {
+      username?: string;
+      from?: { username?: string };
+      error?: { message?: string };
+    };
+    if (!resp.ok || data.error) {
+      logger.warn('IG comment username lookup failed', {
+        commentId,
+        err: data.error?.message
+      });
+      return null;
+    }
+    const username = data.username || data.from?.username;
+    return username && String(username).trim() ? String(username).trim().replace(/^@+/, '') : null;
+  } catch (error) {
+    logger.error('IG comment username lookup error', error as Error, { commentId });
+    return null;
+  }
+};
+
 /**
  * أول رسالة خاصة بعد تعليق — يجب استخدام comment_id على مسار الصفحة (Private Replies).
  * لا يعمل استبدالها بـ recipient.id لأن المستخدم لم يبدأ محادثة بعد.
@@ -837,6 +867,11 @@ export const processInstagramCommentFromPageFeed = async (pageId: string, value:
   }
 
   const commenterName = n.fromName || n.fromUsername || 'صديقنا';
+  let commenterUsername = n.fromUsername?.trim().replace(/^@+/, '') || null;
+  if (!commenterUsername && ig.access_token) {
+    commenterUsername = await fetchInstagramCommentUsername(String(commentId), ig.access_token);
+  }
+
   await runCommentAutomation({
     platform: 'instagram',
     accountRef: ig.ig_user_id,
@@ -846,6 +881,7 @@ export const processInstagramCommentFromPageFeed = async (pageId: string, value:
     commentText,
     commenterId,
     commenterName,
+    commenterUsername,
     account: ig,
     sendPublicReply: sendInstagramComment,
     sendPrivateReply: sendInstagramPrivateReplyAfterComment
@@ -959,8 +995,10 @@ const processInstagramCommentWebhook = async (value: any, entryInstagramAccountI
     return;
   }
 
+  const commenterUsername =
+    typeof from.username === 'string' && from.username.trim() ? from.username.trim() : null;
   const commenterName =
-    (from.username as string | undefined) ||
+    commenterUsername ||
     (from.name as string | undefined) ||
     'صديقنا';
 
@@ -982,6 +1020,7 @@ const processInstagramCommentWebhook = async (value: any, entryInstagramAccountI
     commentText: bodyText,
     commenterId: String(from.id),
     commenterName,
+    commenterUsername,
     account: ig,
     sendPublicReply: sendInstagramComment,
     sendPrivateReply: sendInstagramPrivateReplyAfterComment
