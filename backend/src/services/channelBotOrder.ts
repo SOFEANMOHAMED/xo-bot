@@ -7,6 +7,7 @@ import type { Pool } from 'pg';
 import type { ConversationState, Entities } from '../core/types.js';
 import { logger } from '../utils/logger.js';
 import { clearAbandonedCheckoutFromState } from './abandonedCheckout/index.js';
+import { notifyMerchantNewOrderAsync } from './notifyMerchantNewOrder.js';
 
 export type ChannelOrderSettings = {
   store_currency: string;
@@ -331,6 +332,27 @@ export async function persistBotChannelOrder(
       customerId,
       total: orderData.total
     });
+
+    if (!isDuplicateOrder) {
+      notifyMerchantNewOrderAsync({
+        merchantId,
+        orderId,
+        customerName: orderData.customerName,
+        customerPhone: orderData.customerPhone,
+        customerEmail,
+        customerAddress: orderData.customerAddress,
+        deliveryTime: orderData.deliveryTime || null,
+        notes: combinedNotes,
+        total: orderData.total || 0,
+        currency: settings.store_currency || 'USD',
+        source: 'bot',
+        items: (orderData.products || []).map((p: any) => ({
+          productName: p.productName,
+          quantity: p.quantity || 1,
+          price: p.price || 0,
+        })),
+      });
+    }
 
     // 🧹 FULL RESET: After successful order → restart conversation fresh (same as Telegram/Facebook)
     const entities = (updatedState.extracted_entities || {}) as Partial<Entities>;

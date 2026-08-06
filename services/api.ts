@@ -1969,6 +1969,13 @@ class ApiService {
     return this.request<number>(`/admin/email/recipient-count?type=${recipientType}`);
   }
 
+  async searchEmailRecipients(query: string, limit = 20) {
+    const q = encodeURIComponent(query.trim());
+    return this.request<{ email: string; name: string | null }[]>(
+      `/admin/email/search?q=${q}&limit=${limit}`
+    );
+  }
+
   async sendEmailBroadcast(data: {
     subject: string;
     message: string;

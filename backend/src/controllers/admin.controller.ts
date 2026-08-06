@@ -1509,6 +1509,53 @@ export const getEmailRecipientCount = async (
 };
 
 /**
+ * Search merchant emails for custom broadcast recipients (typeahead)
+ */
+export const searchEmailRecipients = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const rawQ = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    if (!rawQ) {
+      return res.json({ success: true, data: [] });
+    }
+
+    // Cap pattern length to avoid pathological LIKE queries
+    const q = rawQ.slice(0, 100);
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit || '20'), 10) || 20, 1), 50);
+
+    const result = await pool.query(
+      `SELECT email, name
+       FROM merchants
+       WHERE email IS NOT NULL
+         AND TRIM(email) <> ''
+         AND (role NOT IN ('owner', 'admin') OR role IS NULL)
+         AND (
+           email ILIKE $1
+           OR COALESCE(name, '') ILIKE $1
+         )
+       ORDER BY
+         CASE WHEN email ILIKE $2 THEN 0 ELSE 1 END,
+         email ASC
+       LIMIT $3`,
+      [`%${q}%`, `${q}%`, limit]
+    );
+
+    res.json({
+      success: true,
+      data: result.rows.map((row) => ({
+        email: row.email as string,
+        name: (row.name as string) || null,
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Send email broadcast
  */
 export const sendEmailBroadcast = async (

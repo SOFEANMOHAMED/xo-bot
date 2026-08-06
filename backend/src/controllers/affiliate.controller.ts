@@ -157,7 +157,7 @@ export const getAffiliateStats = async (
     // Get or create referral code
     const referralCode = await getOrCreateReferralCode(merchantId);
     console.log('Generated referral code for merchant:', merchantId, 'Code:', referralCode);
-    const referralLink = `${process.env.FRONTEND_URL || 'https://almusaid.ai'}/signup?ref=${referralCode}`;
+    const referralLink = `${process.env.FRONTEND_URL || 'https://xo-bot.com'}/signup?ref=${referralCode}`;
     console.log('Generated referral link:', referralLink);
 
     // Get total clicks

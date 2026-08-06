@@ -170,7 +170,7 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
 
   useEffect(() => {
     if (!postPickerOpen) return;
-    const onPointerDown = (e: MouseEvent) => {
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
       if (postPickerRef.current && !postPickerRef.current.contains(e.target as Node)) {
         setPostPickerOpen(false);
       }
@@ -179,12 +179,28 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
       if (e.key === 'Escape') setPostPickerOpen(false);
     };
     document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('touchstart', onPointerDown, { passive: true });
     document.addEventListener('keydown', onKeyDown);
-    const t = window.setTimeout(() => postSearchRef.current?.focus(), 0);
+
+    // Desktop only: focus search. On touch/mobile, autofocus opens the keyboard
+    // and hides the post list — let the user tap search intentionally instead.
+    const canHoverDesktop =
+      typeof window !== 'undefined' &&
+      window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    let t: number | undefined;
+    if (canHoverDesktop) {
+      t = window.setTimeout(() => postSearchRef.current?.focus(), 0);
+    } else {
+      // Ensure no leftover focus keeps the mobile keyboard open
+      const active = document.activeElement;
+      if (active instanceof HTMLElement) active.blur();
+    }
+
     return () => {
       document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('touchstart', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
-      window.clearTimeout(t);
+      if (t !== undefined) window.clearTimeout(t);
     };
   }, [postPickerOpen]);
 
@@ -487,64 +503,85 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
               </button>
 
               {postPickerOpen && (
-                <div
-                  className="absolute z-30 mt-2 w-full rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 shadow-xl overflow-hidden"
-                  role="listbox"
-                >
-                  <div className="p-2 border-b border-gray-100 dark:border-gray-700">
-                    <div className="relative">
-                      <Search
-                        size={14}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
-                      />
-                      <input
-                        ref={postSearchRef}
-                        type="search"
-                        value={postSearch}
-                        onChange={(e) => setPostSearch(e.target.value)}
-                        placeholder="بحث في المنشورات…"
-                        className="w-full rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 pr-9 pl-3 py-2 text-sm text-gray-800 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand"
-                      />
+                <>
+                  {/* Backdrop keeps the list readable and dismisses on outside tap */}
+                  <div
+                    className="fixed inset-0 z-40 bg-black/35 lg:hidden"
+                    aria-hidden
+                    onClick={() => setPostPickerOpen(false)}
+                  />
+                  <div
+                    className="fixed z-50 inset-x-3 bottom-[max(1rem,env(safe-area-inset-bottom))] max-h-[min(70dvh,32rem)] rounded-2xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 shadow-2xl overflow-hidden flex flex-col"
+                    role="listbox"
+                  >
+                    <div className="flex items-center justify-between gap-2 px-3 pt-3 pb-2 border-b border-gray-100 dark:border-gray-700">
+                      <p className="text-sm font-bold text-gray-800 dark:text-gray-100">المنشورات</p>
+                      <button
+                        type="button"
+                        onClick={() => setPostPickerOpen(false)}
+                        className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+                        aria-label="إغلاق"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                    <div className="p-2 border-b border-gray-100 dark:border-gray-700">
+                      <div className="relative">
+                        <Search
+                          size={14}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+                        />
+                        <input
+                          ref={postSearchRef}
+                          type="search"
+                          value={postSearch}
+                          onChange={(e) => setPostSearch(e.target.value)}
+                          placeholder="بحث في المنشورات…"
+                          enterKeyHint="search"
+                          autoFocus={false}
+                          className="w-full rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 pr-9 pl-3 py-2.5 text-sm text-gray-800 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain custom-scrollbar">
+                      {filteredPosts.length === 0 ? (
+                        <p className="text-xs text-gray-400 p-4 text-center">لا نتائج مطابقة</p>
+                      ) : (
+                        filteredPosts.map((p) => {
+                          const active = selectedPostId === p.id;
+                          return (
+                            <button
+                              key={p.id}
+                              type="button"
+                              role="option"
+                              aria-selected={active}
+                              onClick={() => selectPost(p)}
+                              className={`w-full flex items-start gap-3 p-3 text-right transition border-b border-gray-50 dark:border-gray-800 last:border-0 ${
+                                active
+                                  ? 'bg-brand-50 dark:bg-brand-900/30'
+                                  : 'hover:bg-gray-50 dark:hover:bg-gray-800/80 active:bg-gray-100 dark:active:bg-gray-800'
+                              }`}
+                            >
+                              <PostThumbnail url={p.thumbnail_url} />
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-medium text-gray-800 dark:text-gray-100 line-clamp-2">
+                                  {postLabel(p)}
+                                </p>
+                                <p className="text-[10px] text-gray-400 mt-1">
+                                  {p.comment_reply_enabled ? 'مفعّل للرد' : 'غير مفعّل'}
+                                  {p.linked_product_name ? ` · ${p.linked_product_name}` : ''}
+                                </p>
+                              </div>
+                              {active && (
+                                <Check size={16} className="text-brand flex-shrink-0 mt-1" />
+                              )}
+                            </button>
+                          );
+                        })
+                      )}
                     </div>
                   </div>
-                  <div className="max-h-72 overflow-y-auto custom-scrollbar">
-                    {filteredPosts.length === 0 ? (
-                      <p className="text-xs text-gray-400 p-4 text-center">لا نتائج مطابقة</p>
-                    ) : (
-                      filteredPosts.map((p) => {
-                        const active = selectedPostId === p.id;
-                        return (
-                          <button
-                            key={p.id}
-                            type="button"
-                            role="option"
-                            aria-selected={active}
-                            onClick={() => selectPost(p)}
-                            className={`w-full flex items-start gap-3 p-2.5 text-right transition border-b border-gray-50 dark:border-gray-800 last:border-0 ${
-                              active
-                                ? 'bg-brand-50 dark:bg-brand-900/30'
-                                : 'hover:bg-gray-50 dark:hover:bg-gray-800/80'
-                            }`}
-                          >
-                            <PostThumbnail url={p.thumbnail_url} />
-                            <div className="min-w-0 flex-1">
-                              <p className="text-xs font-medium text-gray-800 dark:text-gray-100 line-clamp-2">
-                                {postLabel(p)}
-                              </p>
-                              <p className="text-[10px] text-gray-400 mt-1">
-                                {p.comment_reply_enabled ? 'مفعّل للرد' : 'غير مفعّل'}
-                                {p.linked_product_name ? ` · ${p.linked_product_name}` : ''}
-                              </p>
-                            </div>
-                            {active && (
-                              <Check size={16} className="text-brand flex-shrink-0 mt-1" />
-                            )}
-                          </button>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
+                </>
               )}
             </div>
           </div>

@@ -1,22 +1,52 @@
 import nodemailer from 'nodemailer';
 import { logger } from './logger.js';
 
-// Email configuration
+type MailPayload = {
+  from: string;
+  to: string;
+  subject: string;
+  html?: string;
+  text?: string;
+};
+
+const getFrontendUrl = () => {
+  return process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'https://xo-bot.com';
+};
+
+const getAppName = () => {
+  return process.env.APP_NAME || 'Xo Bot';
+};
+
+const getFromAddress = () => {
+  const appName = getAppName();
+  return process.env.SMTP_FROM || `"${appName}" <noreply@xo-bot.com>`;
+};
+
+const hasMailgunConfig = () =>
+  Boolean(process.env.MAILGUN_API_KEY && process.env.MAILGUN_DOMAIN);
+
+const hasSmtpConfig = () =>
+  Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+
+/** True when a real delivery channel is configured (not console-only). */
+const isEmailDeliveryConfigured = () => hasMailgunConfig() || hasSmtpConfig();
+
 const createTransporter = () => {
-  // Use SMTP if configured, otherwise use Ethereal (for development)
-  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+  if (hasSmtpConfig()) {
     return nodemailer.createTransport({
       host: process.env.SMTP_HOST,
       port: parseInt(process.env.SMTP_PORT || '587'),
-      secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
+      secure: process.env.SMTP_SECURE === 'true',
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
       },
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 20000,
     });
   }
 
-  // For development: use console logging
   return nodemailer.createTransport({
     streamTransport: true,
     newline: 'unix',
@@ -26,14 +56,57 @@ const createTransporter = () => {
 
 const transporter = createTransporter();
 
-// Get frontend URL
-const getFrontendUrl = () => {
-  return process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'https://xo-bot.com';
+/**
+ * Prefer Mailgun HTTP API (works when outbound SMTP ports are blocked).
+ * Fall back to SMTP when Mailgun is not configured.
+ */
+const sendViaMailgun = async (payload: MailPayload): Promise<string> => {
+  const apiKey = process.env.MAILGUN_API_KEY!;
+  const domain = process.env.MAILGUN_DOMAIN!;
+  const apiBase = (process.env.MAILGUN_API_BASE || 'https://api.mailgun.net').replace(/\/$/, '');
+
+  const body = new URLSearchParams();
+  body.set('from', payload.from);
+  body.set('to', payload.to);
+  body.set('subject', payload.subject);
+  if (payload.html) body.set('html', payload.html);
+  if (payload.text) body.set('text', payload.text);
+
+  const response = await fetch(`${apiBase}/v3/${domain}/messages`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${Buffer.from(`api:${apiKey}`).toString('base64')}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body,
+  });
+
+  const raw = await response.text();
+  let parsed: { id?: string; message?: string } = {};
+  try {
+    parsed = JSON.parse(raw) as { id?: string; message?: string };
+  } catch {
+    // non-JSON error body
+  }
+
+  if (!response.ok) {
+    throw new Error(parsed.message || `Mailgun HTTP ${response.status}: ${raw.slice(0, 200)}`);
+  }
+
+  return parsed.id || 'mailgun-ok';
 };
 
-// Get app name
-const getAppName = () => {
-  return process.env.APP_NAME || 'Xo Bot';
+const sendMailMessage = async (payload: MailPayload): Promise<string> => {
+  if (hasMailgunConfig()) {
+    return sendViaMailgun(payload);
+  }
+
+  if (hasSmtpConfig()) {
+    const info = await transporter.sendMail(payload);
+    return info.messageId || 'smtp-ok';
+  }
+
+  throw new Error('Email delivery is not configured');
 };
 
 /**
@@ -48,8 +121,8 @@ export const sendPasswordResetEmail = async (
     const appName = getAppName();
     const resetLink = `${frontendUrl}/reset-password?token=${resetToken}`;
 
-    const mailOptions = {
-      from: process.env.SMTP_FROM || `"${appName}" <noreply@example.com>`,
+    const mailOptions: MailPayload = {
+      from: getFromAddress(),
       to: email,
       subject: 'إعادة تعيين كلمة المرور - Password Reset',
       html: `
@@ -179,8 +252,7 @@ export const sendPasswordResetEmail = async (
       `,
     };
 
-    // In development without SMTP, log the email
-    if (!process.env.SMTP_HOST) {
+    if (!isEmailDeliveryConfigured()) {
       logger.info('Password reset email (development mode)', {
         to: email,
         resetLink,
@@ -191,11 +263,11 @@ export const sendPasswordResetEmail = async (
       return true;
     }
 
-    // Send email
-    const info = await transporter.sendMail(mailOptions);
+    const messageId = await sendMailMessage(mailOptions);
     logger.info('Password reset email sent', {
       to: email,
-      messageId: info.messageId,
+      messageId,
+      provider: hasMailgunConfig() ? 'mailgun' : 'smtp',
     });
 
     return true;
@@ -216,8 +288,8 @@ export const sendWelcomeEmail = async (
     const appName = getAppName();
     const frontendUrl = getFrontendUrl();
 
-    const mailOptions = {
-      from: process.env.SMTP_FROM || `"${appName}" <noreply@example.com>`,
+    const mailOptions: MailPayload = {
+      from: getFromAddress(),
       to: email,
       subject: `مرحباً بك في ${appName} - Welcome to ${appName}`,
       html: `
@@ -305,14 +377,18 @@ export const sendWelcomeEmail = async (
       `,
     };
 
-    if (!process.env.SMTP_HOST) {
+    if (!isEmailDeliveryConfigured()) {
       logger.info('Welcome email (development mode)', { to: email, name });
       console.log(`\n📧 Welcome Email (Development Mode) to: ${email}\n`);
       return true;
     }
 
-    const info = await transporter.sendMail(mailOptions);
-    logger.info('Welcome email sent', { to: email, messageId: info.messageId });
+    const messageId = await sendMailMessage(mailOptions);
+    logger.info('Welcome email sent', {
+      to: email,
+      messageId,
+      provider: hasMailgunConfig() ? 'mailgun' : 'smtp',
+    });
     return true;
   } catch (error) {
     logger.error('Error sending welcome email', error as Error, { email });
@@ -337,11 +413,8 @@ export const sendBroadcastEmail = async (
     return result;
   }
 
-  const mailOptions = {
-    from: process.env.SMTP_FROM || `"${appName}" <noreply@example.com>`,
-    subject,
-    ...(isHtml ? {
-      html: `
+  const htmlBody = isHtml
+    ? `
         <!DOCTYPE html>
         <html dir="rtl" lang="ar">
         <head>
@@ -399,35 +472,35 @@ export const sendBroadcastEmail = async (
         </body>
         </html>
       `
-    } : {
-      text: message
-    })
-  };
+    : undefined;
 
-  // Send emails in batches to avoid overwhelming the SMTP server
   const batchSize = 10;
   for (let i = 0; i < to.length; i += batchSize) {
     const batch = to.slice(i, i + batchSize);
-    
+
     for (const email of batch) {
       try {
-        const emailOptions = {
-          ...mailOptions,
-          to: email
-        };
-
-        if (!process.env.SMTP_HOST) {
-          // Development mode: just log
+        if (!isEmailDeliveryConfigured()) {
           logger.info('Broadcast email (development mode)', { to: email, subject });
           console.log(`\n📧 Broadcast Email (Development Mode):`);
           console.log(`To: ${email}`);
           console.log(`Subject: ${subject}\n`);
           result.sent++;
-        } else {
-          const info = await transporter.sendMail(emailOptions);
-          logger.info('Broadcast email sent', { to: email, messageId: info.messageId });
-          result.sent++;
+          continue;
         }
+
+        const messageId = await sendMailMessage({
+          from: getFromAddress(),
+          to: email,
+          subject,
+          ...(isHtml ? { html: htmlBody } : { text: message }),
+        });
+        logger.info('Broadcast email sent', {
+          to: email,
+          messageId,
+          provider: hasMailgunConfig() ? 'mailgun' : 'smtp',
+        });
+        result.sent++;
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         logger.error('Error sending broadcast email', error as Error, { email });
@@ -436,8 +509,7 @@ export const sendBroadcastEmail = async (
       }
     }
 
-    // Small delay between batches to avoid rate limiting
-    if (i + batchSize < to.length && process.env.SMTP_HOST) {
+    if (i + batchSize < to.length && isEmailDeliveryConfigured()) {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
   }
@@ -445,3 +517,194 @@ export const sendBroadcastEmail = async (
   return result;
 };
 
+export type NewOrderEmailItem = {
+  productName: string;
+  quantity: number;
+  price: number;
+};
+
+export type NewOrderEmailPayload = {
+  orderId: string;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  customerEmail?: string | null;
+  customerAddress?: string | null;
+  deliveryTime?: string | null;
+  notes?: string | null;
+  total: number;
+  currency: string;
+  source?: string | null;
+  items: NewOrderEmailItem[];
+};
+
+const escapeHtml = (value: string): string =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const formatMoney = (amount: number, currency: string): string => {
+  const safeCurrency = (currency || 'USD').toUpperCase();
+  try {
+    return new Intl.NumberFormat('ar-EG', {
+      style: 'currency',
+      currency: safeCurrency,
+      maximumFractionDigits: 2,
+    }).format(amount || 0);
+  } catch {
+    return `${(amount || 0).toFixed(2)} ${safeCurrency}`;
+  }
+};
+
+/**
+ * Notify merchant by email when a new order is created
+ */
+export const sendNewOrderEmail = async (
+  merchantEmail: string,
+  merchantName: string | null | undefined,
+  order: NewOrderEmailPayload
+): Promise<boolean> => {
+  try {
+    const appName = getAppName();
+    const frontendUrl = getFrontendUrl().replace(/\/$/, '');
+    const ordersUrl = `${frontendUrl}/app/orders`;
+    const shortId = order.orderId.length > 8 ? order.orderId.slice(0, 8) : order.orderId;
+    const currency = order.currency || 'USD';
+    const greetingName = merchantName?.trim() || 'عزيزي التاجر';
+
+    const itemsRows =
+      order.items?.length > 0
+        ? order.items
+            .map((item) => {
+              const lineTotal = (item.price || 0) * (item.quantity || 1);
+              return `
+                <tr>
+                  <td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;">${escapeHtml(item.productName || 'منتج')}</td>
+                  <td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">${item.quantity || 1}</td>
+                  <td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;text-align:left;">${escapeHtml(formatMoney(lineTotal, currency))}</td>
+                </tr>`;
+            })
+            .join('')
+        : `
+            <tr>
+              <td colspan="3" style="padding:10px 8px;color:#6b7280;">لا توجد تفاصيل منتجات</td>
+            </tr>`;
+
+    const detailRow = (label: string, value?: string | null) => {
+      if (!value || !String(value).trim()) return '';
+      return `
+        <tr>
+          <td style="padding:6px 0;color:#6b7280;width:35%;vertical-align:top;">${escapeHtml(label)}</td>
+          <td style="padding:6px 0;color:#111827;font-weight:600;">${escapeHtml(String(value))}</td>
+        </tr>`;
+    };
+
+    const sourceLabel =
+      order.source === 'shopify'
+        ? 'Shopify'
+        : order.source === 'bot' || order.source === 'whatsapp' || order.source === 'facebook' || order.source === 'telegram' || order.source === 'instagram'
+          ? 'بوت المحادثة'
+          : order.source || 'المنصة';
+
+    const mailOptions: MailPayload = {
+      from: getFromAddress(),
+      to: merchantEmail,
+      subject: `طلب جديد #${shortId} — ${appName}`,
+      html: `
+        <!DOCTYPE html>
+        <html dir="rtl" lang="ar">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        </head>
+        <body style="margin:0;padding:0;background:#f4f4f5;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;">
+          <div style="max-width:600px;margin:24px auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+            <div style="background:#4f46e5;padding:24px 28px;color:#fff;">
+              <div style="font-size:14px;opacity:0.9;">${escapeHtml(appName)}</div>
+              <h1 style="margin:8px 0 0;font-size:22px;">طلب جديد #${escapeHtml(shortId)}</h1>
+            </div>
+            <div style="padding:28px;">
+              <p style="margin:0 0 16px;color:#374151;line-height:1.6;">مرحباً ${escapeHtml(greetingName)}،</p>
+              <p style="margin:0 0 20px;color:#374151;line-height:1.6;">وصلك طلب جديد عبر ${escapeHtml(sourceLabel)}. تفاصيل الطلب:</p>
+
+              <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
+                ${detailRow('اسم العميل', order.customerName)}
+                ${detailRow('الهاتف', order.customerPhone)}
+                ${detailRow('البريد', order.customerEmail && !String(order.customerEmail).endsWith('@chat-order.com') ? order.customerEmail : null)}
+                ${detailRow('العنوان', order.customerAddress)}
+                ${detailRow('وقت التوصيل', order.deliveryTime)}
+                ${detailRow('ملاحظات', order.notes)}
+              </table>
+
+              <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:8px;overflow:hidden;margin-bottom:16px;">
+                <thead>
+                  <tr style="background:#eef2ff;">
+                    <th style="padding:10px 8px;text-align:right;font-size:13px;color:#4338ca;">المنتج</th>
+                    <th style="padding:10px 8px;text-align:center;font-size:13px;color:#4338ca;">الكمية</th>
+                    <th style="padding:10px 8px;text-align:left;font-size:13px;color:#4338ca;">السعر</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${itemsRows}
+                </tbody>
+              </table>
+
+              <p style="margin:0 0 24px;font-size:18px;font-weight:700;color:#111827;">
+                الإجمالي: ${escapeHtml(formatMoney(order.total || 0, currency))}
+              </p>
+
+              <div style="text-align:center;margin:28px 0 8px;">
+                <a href="${ordersUrl}" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:14px 28px;border-radius:8px;font-weight:700;">
+                  عرض الطلبات
+                </a>
+              </div>
+              <p style="margin:12px 0 0;font-size:12px;color:#9ca3af;text-align:center;word-break:break-all;">
+                أو افتح: ${escapeHtml(ordersUrl)}
+              </p>
+            </div>
+            <div style="padding:16px 28px;border-top:1px solid #e5e7eb;text-align:center;font-size:12px;color:#9ca3af;">
+              © ${new Date().getFullYear()} ${escapeHtml(appName)}
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+      text: `
+طلب جديد #${shortId}
+
+العميل: ${order.customerName || '-'}
+الهاتف: ${order.customerPhone || '-'}
+العنوان: ${order.customerAddress || '-'}
+الإجمالي: ${formatMoney(order.total || 0, currency)}
+
+عرض الطلبات: ${ordersUrl}
+      `.trim(),
+    };
+
+    if (!isEmailDeliveryConfigured()) {
+      logger.info('New order email (development mode)', {
+        to: merchantEmail,
+        orderId: order.orderId,
+        ordersUrl,
+      });
+      return true;
+    }
+
+    const messageId = await sendMailMessage(mailOptions);
+    logger.info('New order email sent', {
+      to: merchantEmail,
+      orderId: order.orderId,
+      messageId,
+      provider: hasMailgunConfig() ? 'mailgun' : 'smtp',
+    });
+    return true;
+  } catch (error) {
+    logger.error('Error sending new order email', error as Error, {
+      merchantEmail,
+      orderId: order.orderId,
+    });
+    return false;
+  }
+};

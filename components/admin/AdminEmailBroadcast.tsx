@@ -1,10 +1,10 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Mail, Send, Users, Loader2, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import apiService from '../../services/api';
 import { useAdminNotifications } from './AdminNotificationContext';
 import { validateEmail, validateRequired } from '../../utils/validation';
 import { handleApiError } from '../../utils/errorHandler';
+import { useDebounce } from '../../hooks/useDebounce';
 
 interface EmailBroadcastRequest {
   subject: string;
@@ -12,6 +12,11 @@ interface EmailBroadcastRequest {
   recipientType: 'all' | 'active' | 'trial' | 'paid' | 'custom';
   customEmails?: string[];
   isHtml?: boolean;
+}
+
+interface EmailSuggestion {
+  email: string;
+  name: string | null;
 }
 
 const AdminEmailBroadcast: React.FC = () => {
@@ -39,11 +44,18 @@ const AdminEmailBroadcast: React.FC = () => {
     customEmails?: string;
   }>({});
 
+  const [suggestions, setSuggestions] = useState<EmailSuggestion[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+  const debouncedEmailQuery = useDebounce(customEmailInput.trim(), 250);
+
   // Fetch recipient count when recipient type changes
   useEffect(() => {
     const fetchRecipientCount = async () => {
-      if (formData.recipientType === 'custom' && formData.customEmails && formData.customEmails.length > 0) {
-        setRecipientCount(formData.customEmails.length);
+      // Custom recipients are counted locally — backend has no DB query for them
+      if (formData.recipientType === 'custom') {
+        setRecipientCount(formData.customEmails?.length ?? 0);
         return;
       }
 
@@ -58,6 +70,65 @@ const AdminEmailBroadcast: React.FC = () => {
 
     fetchRecipientCount();
   }, [formData.recipientType, formData.customEmails]);
+
+  // Typeahead: search merchant emails as the admin types
+  useEffect(() => {
+    if (formData.recipientType !== 'custom') {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+
+    if (!debouncedEmailQuery) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      setIsSearching(false);
+      return;
+    }
+
+    let cancelled = false;
+    const runSearch = async () => {
+      setIsSearching(true);
+      try {
+        const results = await apiService.searchEmailRecipients(debouncedEmailQuery, 20);
+        if (cancelled) return;
+        const selected = new Set(
+          (formData.customEmails || []).map((e) => e.toLowerCase())
+        );
+        const filtered = (results || []).filter(
+          (item) => item.email && !selected.has(item.email.toLowerCase())
+        );
+        setSuggestions(filtered);
+        setShowSuggestions(true);
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Error searching emails:', error);
+          setSuggestions([]);
+        }
+      } finally {
+        if (!cancelled) setIsSearching(false);
+      }
+    };
+
+    runSearch();
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedEmailQuery, formData.recipientType, formData.customEmails]);
+
+  // Close suggestions when clicking outside
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      if (
+        searchContainerRef.current &&
+        !searchContainerRef.current.contains(event.target as Node)
+      ) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
+  }, []);
 
   const validateForm = (): boolean => {
     const newErrors: typeof errors = {};
@@ -85,25 +156,35 @@ const AdminEmailBroadcast: React.FC = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleAddCustomEmail = () => {
-    if (!customEmailInput.trim()) return;
+  const addEmail = (email: string) => {
+    const normalized = email.trim();
+    if (!normalized) return;
 
-    const email = customEmailInput.trim();
-    if (!validateEmail(email)) {
+    if (!validateEmail(normalized)) {
       showError('عنوان البريد الإلكتروني غير صحيح');
       return;
     }
 
-    if (formData.customEmails?.includes(email)) {
+    if (formData.customEmails?.some((e) => e.toLowerCase() === normalized.toLowerCase())) {
       showInfo('هذا البريد الإلكتروني موجود بالفعل');
       return;
     }
 
     setFormData(prev => ({
       ...prev,
-      customEmails: [...(prev.customEmails || []), email]
+      customEmails: [...(prev.customEmails || []), normalized]
     }));
     setCustomEmailInput('');
+    setSuggestions([]);
+    setShowSuggestions(false);
+  };
+
+  const handleAddCustomEmail = () => {
+    addEmail(customEmailInput);
+  };
+
+  const handleSelectSuggestion = (email: string) => {
+    addEmail(email);
   };
 
   const handleRemoveCustomEmail = (email: string) => {
@@ -251,15 +332,66 @@ const AdminEmailBroadcast: React.FC = () => {
             <label className="block text-sm font-medium text-slate-300 mb-2">
               عناوين البريد الإلكتروني
             </label>
-            <div className="flex gap-2 mb-3">
-              <input
-                type="email"
-                value={customEmailInput}
-                onChange={(e) => setCustomEmailInput(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleAddCustomEmail()}
-                placeholder="أدخل عنوان البريد الإلكتروني"
-                className="flex-1 px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-              />
+            <div className="flex gap-2 mb-3" ref={searchContainerRef}>
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={customEmailInput}
+                  onChange={(e) => {
+                    setCustomEmailInput(e.target.value);
+                    setShowSuggestions(true);
+                  }}
+                  onFocus={() => {
+                    if (suggestions.length > 0) setShowSuggestions(true);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (suggestions.length === 1) {
+                        handleSelectSuggestion(suggestions[0].email);
+                      } else {
+                        handleAddCustomEmail();
+                      }
+                    } else if (e.key === 'Escape') {
+                      setShowSuggestions(false);
+                    }
+                  }}
+                  placeholder="ابدأ بالكتابة للبحث عن بريد المشتركين..."
+                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                  autoComplete="off"
+                />
+                {isSearching && (
+                  <Loader2
+                    size={16}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 animate-spin"
+                  />
+                )}
+                {showSuggestions && customEmailInput.trim() && (
+                  <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 shadow-xl">
+                    {suggestions.length > 0 ? (
+                      suggestions.map((item) => (
+                        <button
+                          key={item.email}
+                          type="button"
+                          onClick={() => handleSelectSuggestion(item.email)}
+                          className="w-full px-4 py-2.5 text-right hover:bg-slate-800 transition-colors border-b border-slate-800 last:border-b-0"
+                        >
+                          <p className="text-sm text-slate-200">{item.email}</p>
+                          {item.name && (
+                            <p className="text-xs text-slate-500 mt-0.5">{item.name}</p>
+                          )}
+                        </button>
+                      ))
+                    ) : (
+                      !isSearching && (
+                        <p className="px-4 py-3 text-sm text-slate-500">
+                          لا توجد نتائج مطابقة — يمكنك كتابة البريد يدوياً ثم الضغط على إضافة
+                        </p>
+                      )
+                    )}
+                  </div>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={handleAddCustomEmail}
@@ -357,4 +489,3 @@ const AdminEmailBroadcast: React.FC = () => {
 };
 
 export default AdminEmailBroadcast;
-

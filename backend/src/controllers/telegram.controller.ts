@@ -22,6 +22,7 @@ import {
   voiceTranscriptionFallbackMessage
 } from '../services/voiceTranscription.js';
 import { getCurrencyDisplayName } from '../utils/currencyDisplayName.js';
+import { notifyMerchantNewOrderAsync } from '../services/notifyMerchantNewOrder.js';
 
 // ==================== UUID VALIDATION ====================
 
@@ -1106,6 +1107,27 @@ const processTelegramMessage = async (update: any) => {
           customerId,
           total: orderData.total
         });
+
+        if (!isDuplicateOrder) {
+          notifyMerchantNewOrderAsync({
+            merchantId,
+            orderId,
+            customerName: orderData.customerName,
+            customerPhone: orderData.customerPhone,
+            customerEmail,
+            customerAddress: orderData.customerAddress,
+            deliveryTime: orderData.deliveryTime || null,
+            notes: combinedNotes,
+            total: orderData.total || 0,
+            currency: settings?.store_currency || 'USD',
+            source: 'telegram',
+            items: (orderData.products || []).map((p: any) => ({
+              productName: p.productName,
+              quantity: p.quantity || 1,
+              price: p.price || 0,
+            })),
+          });
+        }
 
         // 🧹 FULL RESET: After successful order → restart conversation fresh
         const confirmedProductName =

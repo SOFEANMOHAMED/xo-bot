@@ -34,6 +34,6 @@ export const SAAS_SUPPORT_DATA = {
       "اكتب أي سؤال في المحادثة لتر كيف سيرد البوت على عملائك."
     ]
   },
-  support_contact: "إذا واجهت أي مشكلة تقنية، يمكنك مراسلتنا على support@almusaid.ai"
+  support_contact: "إذا واجهت أي مشكلة تقنية، يمكنك مراسلتنا على support@xo-bot.com"
 };
 

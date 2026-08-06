@@ -1,7 +1,7 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { PATHS, appPath, adminPath } from './paths';
+import { PATHS, appPath, adminPath, adminLoginPath } from './paths';
 import { AppView, AdminView } from '../types';
 
 interface ProtectedRouteProps {
@@ -26,7 +26,9 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requir
   }
 
   if (!isAuthenticated) {
-    return <Navigate to={PATHS.LOGIN} replace state={{ from: location.pathname }} />;
+    // Keep admins on the secret surface — never bounce them to public /login
+    const loginTo = requireAdmin ? adminLoginPath() : PATHS.LOGIN;
+    return <Navigate to={loginTo} replace state={{ from: location.pathname }} />;
   }
 
   const role = user?.role || 'user';

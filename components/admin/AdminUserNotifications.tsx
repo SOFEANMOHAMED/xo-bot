@@ -44,8 +44,9 @@ const AdminUserNotifications: React.FC = () => {
   // Fetch recipient count when recipient type changes
   useEffect(() => {
     const fetchRecipientCount = async () => {
-      if (formData.recipientType === 'custom' && formData.customUserIds && formData.customUserIds.length > 0) {
-        setRecipientCount(formData.customUserIds.length);
+      // Custom recipients are counted locally — backend has no DB query for them
+      if (formData.recipientType === 'custom') {
+        setRecipientCount(formData.customUserIds?.length ?? 0);
         return;
       }
 

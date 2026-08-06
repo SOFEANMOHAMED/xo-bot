@@ -471,7 +471,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
                     </div>
                     <div>
                       <p className="text-xs text-slate-400">البريد الإلكتروني</p>
-                      <p className="font-semibold">support@almusaid.ai</p>
+                      <p className="font-semibold">support@xo-bot.com</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-4 text-slate-700">

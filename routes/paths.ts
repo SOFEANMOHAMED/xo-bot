@@ -102,6 +102,11 @@ export function adminPath(view: AdminView): string {
   return `${PATHS.ADMIN}/${ADMIN_VIEW_SLUG[view]}`;
 }
 
+/** Login page nested under the secret admin base (not the public /login) */
+export function adminLoginPath(): string {
+  return `${PATHS.ADMIN}/login`;
+}
+
 export function appViewFromSlug(slug: string | undefined): AppView {
   if (!slug) return AppView.DASHBOARD;
   return slugToAppView[slug] ?? AppView.DASHBOARD;

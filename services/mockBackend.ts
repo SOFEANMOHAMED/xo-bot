@@ -167,7 +167,7 @@ export const mockGetAffiliateStats = (storeName: string): Promise<AffiliateStats
     setTimeout(() => {
       resolve({
         referralCode: code,
-        referralLink: `https://almusaid.ai/ref/${code}`,
+        referralLink: `https://xo-bot.com/ref/${code}`,
         totalVisits: 245,
         totalSignups: 12,
         activeConversions: 4,

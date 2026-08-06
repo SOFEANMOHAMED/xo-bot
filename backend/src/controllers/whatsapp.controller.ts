@@ -20,6 +20,7 @@ import {
   conversationIngressQueue,
   type IngressBatch
 } from '../services/conversationIngressQueue.js';
+import { notifyMerchantNewOrderAsync } from '../services/notifyMerchantNewOrder.js';
 
 // ==================== UUID VALIDATION ====================
 
@@ -971,8 +972,10 @@ export const handleWhatsAppWebhook = async (
                         );
 
                         let orderId: string;
+                        let isDuplicateOrder = false;
                         if (duplicateOrderCheck.rows.length > 0) {
                           orderId = duplicateOrderCheck.rows[0].id;
+                          isDuplicateOrder = true;
                         } else {
                           const deliveryTimeColumnCheck = await client.query(`
                             SELECT column_name 
@@ -1074,6 +1077,27 @@ export const handleWhatsAppWebhook = async (
                         );
 
                         await client.query('COMMIT');
+
+                        if (!isDuplicateOrder) {
+                          notifyMerchantNewOrderAsync({
+                            merchantId,
+                            orderId,
+                            customerName: orderData.customerName,
+                            customerPhone: orderData.customerPhone,
+                            customerEmail,
+                            customerAddress: orderData.customerAddress,
+                            deliveryTime: orderData.deliveryTime || null,
+                            notes: combinedNotes,
+                            total: orderData.total || 0,
+                            currency: cachedSettings?.store_currency || 'USD',
+                            source: 'whatsapp',
+                            items: (orderData.products || []).map((p: any) => ({
+                              productName: p.productName,
+                              quantity: p.quantity || 1,
+                              price: p.price || 0,
+                            })),
+                          });
+                        }
                       } catch (orderError) {
                         await client.query('ROLLBACK');
                         logger.error('Failed to process WhatsApp ORDER_DATA', orderError as Error, { merchantId });

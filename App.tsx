@@ -14,6 +14,7 @@ import {
   PATHS,
   appPath,
   adminPath,
+  adminLoginPath,
   RESERVED_ROOT_SEGMENTS,
 } from './routes/paths';
 import { ProtectedRoute, GuestOnlyRoute } from './routes/ProtectedRoute';
@@ -76,6 +77,29 @@ function LoginRoute() {
   );
 }
 
+/** Login under the secret admin base — used when opening the private panel while logged out */
+function AdminLoginRoute() {
+  const navigate = useNavigate();
+
+  return (
+    <GuestOnlyRoute>
+      <LoginPage
+        variant="admin"
+        onLoginSuccess={(role) => {
+          if (role === 'owner' || role === 'admin') {
+            navigate(adminPath(AdminView.OVERVIEW), { replace: true });
+            return;
+          }
+          // Non-admin accounts belong in the merchant app
+          navigate(appPath(AppView.DASHBOARD), { replace: true });
+        }}
+        onBack={() => navigate(adminLoginPath())}
+        onNavigateToSignup={() => navigate(adminLoginPath())}
+      />
+    </GuestOnlyRoute>
+  );
+}
+
 function SignupRoute() {
   const navigate = useNavigate();
   return (
@@ -106,14 +130,13 @@ function ResetPasswordRoute() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token') || undefined;
+  // Do not wrap in GuestOnlyRoute — users may open the email link while still logged in
   return (
-    <GuestOnlyRoute>
-      <ResetPasswordPage
-        token={token}
-        onBack={() => navigate(PATHS.HOME)}
-        onNavigateToLogin={() => navigate(PATHS.LOGIN)}
-      />
-    </GuestOnlyRoute>
+    <ResetPasswordPage
+      token={token}
+      onBack={() => navigate(PATHS.HOME)}
+      onNavigateToLogin={() => navigate(PATHS.LOGIN)}
+    />
   );
 }
 
@@ -178,6 +201,10 @@ function OAuthTokenHandler({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // complete-profile has its own token handling
     if (location.pathname === PATHS.COMPLETE_PROFILE) return;
+    // Password-reset `?token=` is NOT a JWT — must not go through OAuth setToken
+    if (location.pathname === PATHS.RESET_PASSWORD || location.pathname === PATHS.FORGOT_PASSWORD) {
+      return;
+    }
     // Integration OAuth uses different query keys on /app/integrations
     if (location.pathname.startsWith(PATHS.APP) || location.pathname === PATHS.INTEGRATIONS_LEGACY) {
       return;
@@ -275,6 +302,7 @@ const App: React.FC = () => {
         />
 
         {/* Secret super-admin panel (path from VITE_ADMIN_BASE_PATH) */}
+        <Route path={adminLoginPath()} element={<AdminLoginRoute />} />
         <Route path={PATHS.ADMIN} element={<Navigate to={adminPath(AdminView.OVERVIEW)} replace />} />
         <Route path={`${PATHS.ADMIN}/:viewSlug`} element={<AdminLogoutRoute />} />
 

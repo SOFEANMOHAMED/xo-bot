@@ -3,6 +3,7 @@ import pool from '../database/connection.js';
 import { createError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
 import { z } from 'zod';
+import { notifyMerchantNewOrderAsync } from '../services/notifyMerchantNewOrder.js';
 
 const orderItemSchema = z.object({
   productId: z.string().uuid().optional(),
@@ -350,6 +351,25 @@ export const createOrder = async (
         createdAt: orderRow.created_at,
         updatedAt: orderRow.updated_at
       };
+
+      notifyMerchantNewOrderAsync({
+        merchantId: req.merchantId!,
+        orderId: order.id,
+        customerName: order.customerName,
+        customerPhone: order.customerPhone,
+        customerEmail: order.customerEmail,
+        customerAddress: order.customerAddress,
+        deliveryTime: order.deliveryTime,
+        notes: order.notes,
+        total: order.total,
+        currency: order.currency,
+        source: order.source,
+        items: items.map((item) => ({
+          productName: item.productName,
+          quantity: item.quantity,
+          price: item.price,
+        })),
+      });
 
       res.status(201).json({
         success: true,

@@ -7,6 +7,7 @@ import { logger } from '../utils/logger.js';
 import { buildShopifyAdminApiUrl } from '../config/shopify.js';
 import { invalidateProductKeywords } from '../services/cacheService.js';
 import { clearProductKeywordsCache } from '../services/tools/catalogTool.js';
+import { notifyMerchantNewOrderAsync } from '../services/notifyMerchantNewOrder.js';
 
 // =============================================
 // TYPES & INTERFACES
@@ -1254,6 +1255,27 @@ const handleOrderWebhook = async (merchantId: string, order: any): Promise<void>
         [orderResult.rows[0].id, lineItem.name, lineItem.quantity, parseFloat(lineItem.price || '0'), order.currency || 'USD']
       );
     }
+
+    const shippingAddress = order.shipping_address
+      ? `${order.shipping_address.address1 || ''}, ${order.shipping_address.city || ''}, ${order.shipping_address.country || ''}`.trim()
+      : null;
+
+    notifyMerchantNewOrderAsync({
+      merchantId,
+      orderId: orderResult.rows[0].id,
+      customerName: `${order.customer?.first_name || ''} ${order.customer?.last_name || ''}`.trim() || null,
+      customerPhone: order.phone || null,
+      customerEmail: order.email || null,
+      customerAddress: shippingAddress,
+      total: parseFloat(order.total_price || '0'),
+      currency: order.currency || 'USD',
+      source: 'shopify',
+      items: (order.line_items || []).map((lineItem: any) => ({
+        productName: lineItem.name,
+        quantity: lineItem.quantity || 1,
+        price: parseFloat(lineItem.price || '0'),
+      })),
+    });
 
     logger.info('Shopify order synced via webhook', { merchantId, orderId: order.id });
   }

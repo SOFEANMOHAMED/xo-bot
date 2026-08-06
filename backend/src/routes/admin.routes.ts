@@ -19,6 +19,7 @@ import {
   markNotificationAsRead,
   markAllNotificationsAsRead,
   getEmailRecipientCount,
+  searchEmailRecipients,
   sendEmailBroadcast,
   getNotificationRecipientCount,
   sendUserNotification,
@@ -68,6 +69,7 @@ router.put('/notifications/read-all', markAllNotificationsAsRead);
 
 // Email Broadcast
 router.get('/email/recipient-count', getEmailRecipientCount);
+router.get('/email/search', searchEmailRecipients);
 router.post('/email/broadcast', sendEmailBroadcast);
 
 // User Notifications

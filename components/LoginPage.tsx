@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Bot, Mail, Lock, ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { UserRole } from '../types';
@@ -10,15 +9,24 @@ interface LoginPageProps {
   onBack: () => void;
   onNavigateToSignup: () => void;
   onNavigateToForgotPassword?: () => void;
+  /** Quiet login for the secret admin surface (no public signup CTAs) */
+  variant?: 'default' | 'admin';
 }
 
-const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBack, onNavigateToSignup, onNavigateToForgotPassword }) => {
+const LoginPage: React.FC<LoginPageProps> = ({
+  onLoginSuccess,
+  onBack,
+  onNavigateToSignup,
+  onNavigateToForgotPassword,
+  variant = 'default',
+}) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { login } = useAuth();
+  const isAdminVariant = variant === 'admin';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,57 +51,72 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBack, onNavigat
 
   return (
     <AuthLayout
-      onBack={onBack}
+      onBack={isAdminVariant ? undefined : onBack}
+      showNavLinks={!isAdminVariant}
       navActions={
-        <>
-          <button
-            type="button"
-            onClick={onNavigateToSignup}
-            className="text-sm font-semibold text-slate-600 hover:text-brand transition-colors hidden sm:block"
-          >
-            إنشاء حساب
-          </button>
-          <button
-            type="button"
-            onClick={onNavigateToSignup}
-            className="px-5 py-2.5 rounded-xl bg-brand text-white font-bold text-sm hover:bg-brand-600 transition-all shadow-lg shadow-brand/30"
-          >
-            جرب مجاناً 7 أيام
-          </button>
-        </>
+        isAdminVariant ? null : (
+          <>
+            <button
+              type="button"
+              onClick={onNavigateToSignup}
+              className="text-sm font-semibold text-slate-600 hover:text-brand transition-colors hidden sm:block"
+            >
+              إنشاء حساب
+            </button>
+            <button
+              type="button"
+              onClick={onNavigateToSignup}
+              className="px-5 py-2.5 rounded-xl bg-brand text-white font-bold text-sm hover:bg-brand-600 transition-all shadow-lg shadow-brand/30"
+            >
+              جرب مجاناً 7 أيام
+            </button>
+          </>
+        )
       }
     >
       <div className="text-center mb-8 animate-fade-in-up">
         <div
-          onClick={onBack}
-          className="inline-flex items-center justify-center w-16 h-16 bg-brand rounded-2xl mb-4 cursor-pointer hover:bg-brand-600 transition-colors shadow-lg shadow-brand/30"
+          onClick={isAdminVariant ? undefined : onBack}
+          className={`inline-flex items-center justify-center w-16 h-16 bg-brand rounded-2xl mb-4 shadow-lg shadow-brand/30 ${
+            isAdminVariant ? '' : 'cursor-pointer hover:bg-brand-600 transition-colors'
+          }`}
         >
           <Bot size={32} className="text-white" />
         </div>
-        <h2 className="text-3xl font-extrabold text-slate-900 mb-2">مرحباً بك مجدداً</h2>
-        <p className="text-slate-500">سجل الدخول للمتابعة إلى لوحة التحكم</p>
+        <h2 className="text-3xl font-extrabold text-slate-900 mb-2">
+          {isAdminVariant ? 'دخول لوحة الإدارة' : 'مرحباً بك مجدداً'}
+        </h2>
+        <p className="text-slate-500">
+          {isAdminVariant
+            ? 'سجّل الدخول بحساب المسؤول للمتابعة'
+            : 'سجل الدخول للمتابعة إلى لوحة التحكم'}
+        </p>
       </div>
 
-      <div className="space-y-4 mb-8">
-        <button
-          onClick={handleGoogleLogin}
-          disabled={isLoading}
-          className="w-full bg-white text-slate-900 font-semibold py-3 px-4 rounded-xl flex items-center justify-center gap-3 border border-slate-200 hover:border-brand-200 hover:bg-brand-50/40 transition-colors focus:outline-none focus:ring-2 focus:ring-brand/40 disabled:opacity-70 disabled:cursor-not-allowed"
-          aria-label="تسجيل الدخول باستخدام Google"
-        >
-          <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="w-5 h-5" alt="" aria-hidden="true" />
-          <span>المتابعة باستخدام Google</span>
-        </button>
-      </div>
+      {!isAdminVariant && (
+        <>
+          <div className="space-y-4 mb-8">
+            <button
+              onClick={handleGoogleLogin}
+              disabled={isLoading}
+              className="w-full bg-white text-slate-900 font-semibold py-3 px-4 rounded-xl flex items-center justify-center gap-3 border border-slate-200 hover:border-brand-200 hover:bg-brand-50/40 transition-colors focus:outline-none focus:ring-2 focus:ring-brand/40 disabled:opacity-70 disabled:cursor-not-allowed"
+              aria-label="تسجيل الدخول باستخدام Google"
+            >
+              <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="w-5 h-5" alt="" aria-hidden="true" />
+              <span>المتابعة باستخدام Google</span>
+            </button>
+          </div>
 
-      <div className="relative mb-8">
-        <div className="absolute inset-0 flex items-center">
-          <div className="w-full border-t border-slate-200" />
-        </div>
-        <div className="relative flex justify-center text-sm">
-          <span className="px-4 bg-white text-slate-400">أو عن طريق البريد الإلكتروني</span>
-        </div>
-      </div>
+          <div className="relative mb-8">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-slate-200" />
+            </div>
+            <div className="relative flex justify-center text-sm">
+              <span className="px-4 bg-white text-slate-400">أو عن طريق البريد الإلكتروني</span>
+            </div>
+          </div>
+        </>
+      )}
 
       {error && (
         <div id="login-error" className="mb-4 p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm" role="alert" aria-live="polite">
@@ -127,7 +150,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBack, onNavigat
         <div>
           <div className="flex justify-between items-center mb-1.5">
             <label htmlFor="login-password" className="block text-sm font-medium text-slate-600">كلمة المرور</label>
-            {onNavigateToForgotPassword ? (
+            {!isAdminVariant && onNavigateToForgotPassword ? (
               <button
                 type="button"
                 onClick={onNavigateToForgotPassword}
@@ -136,9 +159,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBack, onNavigat
               >
                 نسيت كلمة المرور؟
               </button>
-            ) : (
-              <a href="#" className="text-xs text-brand hover:text-brand-600">نسيت كلمة المرور؟</a>
-            )}
+            ) : null}
           </div>
           <div className="relative">
             <Lock className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} aria-hidden="true" />
@@ -186,12 +207,14 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBack, onNavigat
         </button>
       </form>
 
-      <p className="mt-8 text-center text-slate-500 text-sm">
-        ليس لديك حساب؟{' '}
-        <button onClick={onNavigateToSignup} className="text-brand hover:text-brand-600 font-semibold hover:underline">
-          أنشئ حساباً جديداً
-        </button>
-      </p>
+      {!isAdminVariant && (
+        <p className="mt-8 text-center text-slate-500 text-sm">
+          ليس لديك حساب؟{' '}
+          <button onClick={onNavigateToSignup} className="text-brand hover:text-brand-600 font-semibold hover:underline">
+            أنشئ حساباً جديداً
+          </button>
+        </p>
+      )}
     </AuthLayout>
   );
 };
