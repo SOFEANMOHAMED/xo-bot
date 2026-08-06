@@ -4,6 +4,10 @@ import { createError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
 import { updateGeminiServicePrompt } from '../utils/updateGeminiService.js';
 import { getPlanConfig, calculateCommission } from '../utils/planConfig.js';
+import {
+  createMerchantNotification,
+  type MerchantNotificationType,
+} from '../services/merchantNotifications.js';
 // Note: PRODUCT_BOT_SYSTEM_PROMPT and SERVICE_BOT_SYSTEM_PROMPT are now in utils/prompts
 // Legacy prompt helpers removed; orchestrator is the single source of truth.
 const PRODUCT_BOT_SYSTEM_PROMPT = 'You are a helpful product assistant.';
@@ -1802,19 +1806,17 @@ export const sendUserNotification = async (
       
       for (const merchantId of batch) {
         try {
-          const result = await pool.query(
-            `INSERT INTO user_notifications (merchant_id, type, title, message, data, is_read)
-             VALUES ($1, $2, $3, $4, $5::jsonb, FALSE)
-             RETURNING id`,
-            [
-              merchantId,
-              type || 'info',
-              title,
-              message,
-              data ? JSON.stringify(data) : null
-            ]
-          );
-          console.log(`sendUserNotification: Created notification ${result.rows[0].id} for merchant ${merchantId}`);
+          const notificationId = await createMerchantNotification({
+            merchantId,
+            type: (type || 'info') as MerchantNotificationType,
+            title,
+            message,
+            data: data && typeof data === 'object' ? data : { kind: 'admin_broadcast' },
+          });
+          if (!notificationId) {
+            throw new Error('Failed to create notification');
+          }
+          console.log(`sendUserNotification: Created notification ${notificationId} for merchant ${merchantId}`);
           sent++;
         } catch (error: any) {
           console.error(`sendUserNotification: Failed to create notification for merchant ${merchantId}:`, error);

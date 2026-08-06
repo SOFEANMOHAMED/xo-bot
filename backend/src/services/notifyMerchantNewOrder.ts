@@ -1,5 +1,6 @@
 /**
- * Notify the owning merchant (tenant) about a newly created order via email.
+ * Notify the owning merchant (tenant) about a newly created order:
+ * in-app notification + Web Push + email.
  * Fire-and-forget safe: never throws to callers.
  */
 
@@ -10,6 +11,7 @@ import {
   type NewOrderEmailItem,
   type NewOrderEmailPayload,
 } from '../utils/emailService.js';
+import { createMerchantNotification } from './merchantNotifications.js';
 
 export type NotifyNewOrderInput = {
   merchantId: string;
@@ -37,6 +39,43 @@ export type NotifyNewOrderInput = {
 export async function notifyMerchantNewOrder(input: NotifyNewOrderInput): Promise<void> {
   const { merchantId, orderId } = input;
   if (!merchantId || !orderId) return;
+
+  const customerName = (input.customerName || '').trim() || 'عميل';
+  const total =
+    typeof input.total === 'number' ? input.total : parseFloat(String(input.total || 0)) || 0;
+  const currency = input.currency || 'USD';
+  const source = input.source || null;
+
+  // In-app + Web Push (merchant-scoped) — always, even if email is missing
+  try {
+    const messageParts = [
+      `اسم العميل: ${customerName}`,
+      `الإجمالي: ${total} ${currency}`,
+    ];
+    if (source) messageParts.push(`المصدر: ${source}`);
+    if (input.customerPhone?.trim()) messageParts.push(`الهاتف: ${input.customerPhone.trim()}`);
+
+    await createMerchantNotification({
+      merchantId,
+      type: 'success',
+      title: `طلب جديد — ${customerName}`,
+      message: messageParts.join('\n'),
+      data: {
+        kind: 'new_order',
+        orderId,
+        customerName,
+        customerPhone: input.customerPhone || null,
+        total,
+        currency,
+        source,
+      },
+    });
+  } catch (error) {
+    logger.error('Failed to create in-app/push new-order notification', error as Error, {
+      merchantId,
+      orderId,
+    });
+  }
 
   try {
     const merchantResult = await pool.query(
@@ -74,9 +113,9 @@ export async function notifyMerchantNewOrder(input: NotifyNewOrderInput): Promis
       customerAddress: input.customerAddress || null,
       deliveryTime: input.deliveryTime || null,
       notes: input.notes || null,
-      total: typeof input.total === 'number' ? input.total : parseFloat(String(input.total || 0)) || 0,
-      currency: input.currency || 'USD',
-      source: input.source || null,
+      total,
+      currency,
+      source,
       items,
     };
 

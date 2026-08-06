@@ -67,6 +67,7 @@
     "passport-google-oauth20": "^2.0.0",
     "pg": "^8.11.3",
     "sharp": "^0.34.5",
+    "web-push": "^3.6.7",
     "zod": "^3.22.4"
   },
   "devDependencies": {
@@ -82,6 +83,7 @@
     "@types/sharp": "^0.31.1",
     "@types/swagger-jsdoc": "^6.0.4",
     "@types/swagger-ui-express": "^4.1.8",
+    "@types/web-push": "^3.6.4",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
     "tsx": "^4.7.0",

@@ -721,19 +721,42 @@ class ApiService {
     }>('/settings/dashboard-stats');
   }
 
-  // Conversation endpoints
-  async getConversations() {
+  // Conversation endpoints (merchant inbox)
+  async getConversations(params?: {
+    platform?: string;
+    status?: string;
+    search?: string;
+    includeWeb?: boolean;
+    limit?: number;
+    offset?: number;
+  }) {
+    const qs = new URLSearchParams();
+    if (params?.platform) qs.set('platform', params.platform);
+    if (params?.status) qs.set('status', params.status);
+    if (params?.search) qs.set('search', params.search);
+    if (params?.includeWeb) qs.set('includeWeb', 'true');
+    if (params?.limit != null) qs.set('limit', String(params.limit));
+    if (params?.offset != null) qs.set('offset', String(params.offset));
+    const query = qs.toString() ? `?${qs.toString()}` : '';
     return this.request<{
       conversations: Array<{
         id: string;
         platform: string;
-        userId?: string;
-        userName?: string;
+        userId?: string | null;
+        userName?: string | null;
         lastMessageAt: string;
         createdAt: string;
+        botDisabled: boolean;
+        status: string;
+        lastHumanResponseAt?: string | null;
+        lastMessagePreview?: string | null;
+        lastSenderType?: string | null;
         messageCount: number;
       }>;
-    }>('/conversations');
+      total: number;
+      limit: number;
+      offset: number;
+    }>(`/conversations${query}`);
   }
 
   async getConversation(id: string) {
@@ -741,19 +764,79 @@ class ApiService {
       conversation: {
         id: string;
         platform: string;
-        userId?: string;
-        userName?: string;
+        userId?: string | null;
+        userName?: string | null;
         lastMessageAt: string;
         createdAt: string;
+        botDisabled: boolean;
+        status: string;
+        lastHumanResponseAt?: string | null;
         messages: Array<{
           id: string;
           role: string;
           content: string;
+          senderType?: string;
+          source?: string | null;
+          imageUrl?: string | null;
+          metadata?: Record<string, unknown> | null;
+          readAt?: string | null;
+          deliveredAt?: string | null;
           timestamp: string;
           createdAt: string;
         }>;
       };
     }>(`/conversations/${id}`);
+  }
+
+  async disableBotForConversation(conversationId: string) {
+    return this.request<{ success?: boolean; message?: string }>(
+      `/conversations/${conversationId}/disable-bot`,
+      { method: 'PUT' }
+    );
+  }
+
+  async enableBotForConversation(conversationId: string) {
+    return this.request<{ success?: boolean; message?: string }>(
+      `/conversations/${conversationId}/enable-bot`,
+      { method: 'PUT' }
+    );
+  }
+
+  async sendHumanMessage(conversationId: string, message: string, imageUrl?: string | null) {
+    return this.request<{
+      conversationId: string;
+      delivered: boolean;
+      message: {
+        id: string;
+        role: string;
+        content: string;
+        senderType: string;
+        source?: string | null;
+        imageUrl?: string | null;
+        metadata?: Record<string, unknown> | null;
+        createdAt: string;
+        timestamp: string;
+      };
+      botDisabled: boolean;
+      status: string;
+    }>(`/conversations/${conversationId}/send-human-message`, {
+      method: 'POST',
+      body: JSON.stringify({ message, imageUrl: imageUrl || undefined }),
+    });
+  }
+
+  async setInboxTyping(conversationId: string, isTyping: boolean) {
+    return this.request<{ ok: boolean }>(`/conversations/${conversationId}/typing`, {
+      method: 'POST',
+      body: JSON.stringify({ isTyping }),
+    });
+  }
+
+  async markInboxRead(conversationId: string) {
+    return this.request<{ ok: boolean }>(`/conversations/${conversationId}/mark-read`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
   }
 
   async getOrCreateConversation(platform: string, userId: string) {
@@ -2050,6 +2133,42 @@ class ApiService {
   async deleteUserNotification(id: string) {
     return this.request<{ success: boolean; message: string }>(`/notifications/${id}`, {
       method: 'DELETE',
+    });
+  }
+
+  // Web Push (PWA)
+  async getPushVapidPublicKey() {
+    return this.request<{ publicKey: string }>('/notifications/push/vapid-public-key');
+  }
+
+  async getPushStatus() {
+    return this.request<{ subscribed: boolean; configured: boolean }>('/notifications/push/status');
+  }
+
+  async subscribePush(subscription: {
+    endpoint: string;
+    keys: { p256dh: string; auth: string };
+    expirationTime?: number | null;
+  }) {
+    return this.request<{ subscribed: boolean }>('/notifications/push/subscribe', {
+      method: 'POST',
+      body: JSON.stringify({
+        subscription,
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+      }),
+    });
+  }
+
+  async unsubscribePush(endpoint: string) {
+    return this.request<{ removed: boolean }>('/notifications/push/unsubscribe', {
+      method: 'DELETE',
+      body: JSON.stringify({ endpoint }),
+    });
+  }
+
+  async sendTestPush() {
+    return this.request<{ sent: number; failed: number }>('/notifications/push/test', {
+      method: 'POST',
     });
   }
 

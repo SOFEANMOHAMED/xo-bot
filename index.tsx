@@ -6,6 +6,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { AuthProvider } from './contexts/AuthContext';
 import ErrorBoundary from './components/ErrorBoundary';
+import { registerServiceWorker } from './utils/webPush';
 
 // Global error handler for unhandled errors (e.g. from external scripts)
 window.addEventListener('error', (event) => {
@@ -23,6 +24,17 @@ window.addEventListener('unhandledrejection', (event) => {
   }
   event.preventDefault();
 });
+
+// Register PWA service worker early (push notifications)
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+  void registerServiceWorker();
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    const data = event.data;
+    if (data?.type === 'XOBOT_NAVIGATE' && typeof data.url === 'string') {
+      window.location.href = data.url;
+    }
+  });
+}
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

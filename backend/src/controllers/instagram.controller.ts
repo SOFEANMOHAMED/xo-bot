@@ -1104,6 +1104,22 @@ const handleInstagramHumanEcho = async (event: any, entryIgUserId?: string | nul
     return;
   }
 
+  // Dashboard send may not have stored Meta mid — skip near-duplicate human text
+  if (messageText) {
+    const recentDup = await pool.query(
+      `SELECT id FROM messages
+       WHERE conversation_id = $1
+         AND sender_type = 'human'
+         AND content = $2
+         AND created_at > NOW() - INTERVAL '90 seconds'
+       LIMIT 1`,
+      [conversationId, messageText]
+    );
+    if (recentDup.rows.length > 0) {
+      return;
+    }
+  }
+
   const attachmentType = attachments[0]?.type || 'attachment';
   const content = messageText || `[human ${attachmentType}]`;
 
@@ -1374,9 +1390,19 @@ const processInstagramDM = async (event: any) => {
 
     if (shouldSkipBotReply) {
       await pool.query(
-        `INSERT INTO messages (conversation_id, role, content, sender_type, external_message_id, source)
-         VALUES ($1, 'user', $2, 'user', $3, 'instagram')`,
-        [conversationId, messageText, externalMessageId || null]
+        `INSERT INTO messages (conversation_id, role, content, sender_type, external_message_id, source, metadata)
+         VALUES ($1, 'user', $2, 'user', $3, 'instagram', $4::jsonb)`,
+        [
+          conversationId,
+          messageText,
+          externalMessageId || null,
+          JSON.stringify({
+            platform: 'instagram',
+            ...(igImageAttachmentUrl
+              ? { type: 'image', imageUrl: igImageAttachmentUrl }
+              : { type: 'text' }),
+          }),
+        ]
       );
       logger.info('Bot reply skipped for Instagram', {
         conversationId,
@@ -1546,7 +1572,10 @@ const processInstagramDM = async (event: any) => {
           JSON.stringify({
             platform: 'instagram',
             timestamp: new Date().toISOString(),
-            externalId: externalMessageId || null
+            externalId: externalMessageId || null,
+            ...(igImageAttachmentUrl
+              ? { type: 'image', imageUrl: igImageAttachmentUrl }
+              : { type: 'text' }),
           }),
           result.meta.intent,
           JSON.stringify({})

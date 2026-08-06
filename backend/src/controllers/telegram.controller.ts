@@ -413,9 +413,31 @@ const processTelegramMessage = async (update: any) => {
     }
 
     // ==================== IMAGE RECOGNITION ====================
+    let inboundImageUrl: string | null = null;
     if (photoFileId && botToken) {
       const fileUrl = await getTelegramFileUrl(photoFileId, botToken);
       if (fileUrl) {
+        // Persist under merchant uploads — never store bot-token URLs in DB (SaaS secret leak).
+        try {
+          const imgResp = await fetch(fileUrl, { signal: AbortSignal.timeout(20_000) });
+          if (imgResp.ok) {
+            const buf = Buffer.from(await imgResp.arrayBuffer());
+            const mimeType = imgResp.headers.get('content-type') || 'image/jpeg';
+            const { persistInboundImageBuffer } = await import('../services/inbox/messageMedia.js');
+            inboundImageUrl = await persistInboundImageBuffer({
+              merchantId,
+              buffer: buf,
+              mimeType,
+              source: 'telegram',
+            });
+          }
+        } catch (persistErr) {
+          logger.warn('Telegram inbound image persist failed', {
+            merchantId,
+            error: persistErr instanceof Error ? persistErr.message : String(persistErr),
+          });
+        }
+
         const dataUrl = await imageUrlToBase64(fileUrl);
         if (dataUrl) {
           const analysis = await analyzeImageAndSearch(
@@ -486,9 +508,18 @@ const processTelegramMessage = async (update: any) => {
       const conv = convStatus.rows[0] || { bot_disabled: false, status: 'bot' };
       if (conv.bot_disabled || conv.status === 'human') {
         await pool.query(
-          `INSERT INTO messages (conversation_id, role, content, sender_type, source)
-           VALUES ($1, 'user', $2, 'user', 'telegram')`,
-          [conversationId, messageText]
+          `INSERT INTO messages (conversation_id, role, content, sender_type, source, metadata)
+           VALUES ($1, 'user', $2, 'user', 'telegram', $3::jsonb)`,
+          [
+            conversationId,
+            messageText,
+            JSON.stringify({
+              platform: 'telegram',
+              ...(inboundImageUrl
+                ? { type: 'image', imageUrl: inboundImageUrl }
+                : { type: 'text' }),
+            }),
+          ]
         );
         await pool.query(
           `UPDATE conversations
@@ -707,7 +738,10 @@ const processTelegramMessage = async (update: any) => {
             JSON.stringify({
               platform: 'telegram',
               timestamp: new Date().toISOString(),
-              externalId: update.message?.message_id?.toString() || null
+              externalId: update.message?.message_id?.toString() || null,
+              ...(inboundImageUrl
+                ? { type: 'image', imageUrl: inboundImageUrl }
+                : { type: 'text' }),
             }),
             result.meta.intent,
             JSON.stringify({})

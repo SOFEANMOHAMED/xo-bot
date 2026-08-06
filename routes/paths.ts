@@ -60,6 +60,7 @@ export const APP_VIEW_SLUG: Record<AppView, string> = {
   [AppView.SETTINGS]: 'settings',
   [AppView.AFFILIATE]: 'affiliate',
   [AppView.NOTIFICATIONS]: 'notifications',
+  [AppView.INBOX]: 'inbox',
   [AppView.CRM]: 'crm',
   [AppView.ANALYTICS]: 'analytics',
   [AppView.SUPPORT_TICKETS]: 'support',

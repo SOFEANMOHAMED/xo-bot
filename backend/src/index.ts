@@ -39,6 +39,7 @@ import { swaggerSpec } from './config/swagger.js';
 import { initializeTools } from './services/tools/index.js';
 import { startSyncScheduler } from './services/syncScheduler.js';
 import { startAbandonedCheckoutScheduler } from './services/abandonedCheckout/index.js';
+import { startInboxRealtime, stopInboxRealtime } from './services/inbox/inboxRealtime.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -100,8 +101,15 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Compression & Logging
-app.use(compression());
+// Compression & Logging (skip SSE stream — must not buffer)
+app.use(
+  compression({
+    filter: (req, res) => {
+      if (req.path.includes('/conversations/stream')) return false;
+      return compression.filter(req, res);
+    },
+  })
+);
 app.use(morgan('combined'));
 
 // Rate Limiting
@@ -263,6 +271,7 @@ async function connectDatabaseWithRetry(maxAttempts = 15, delayMs = 3000): Promi
 
 async function shutdown(signal: string) {
   logger.info(`Received ${signal}, shutting down gracefully`);
+  await stopInboxRealtime().catch(() => undefined);
   if (server) {
     await new Promise<void>((resolve) => server!.close(() => resolve()));
   }
@@ -289,6 +298,13 @@ async function startServer() {
 
     await initializeTools();
     console.log('🔧 Tools system initialized');
+
+    try {
+      await startInboxRealtime();
+      console.log('📥 Inbox realtime (LISTEN/NOTIFY + SSE) ready');
+    } catch (error) {
+      logger.error('Inbox realtime failed to start (inbox will fall back to polling)', error as Error);
+    }
 
     server = app.listen(PORT, () => {
       logger.info(`Server started successfully`, {

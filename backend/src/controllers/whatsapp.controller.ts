@@ -21,6 +21,7 @@ import {
   type IngressBatch
 } from '../services/conversationIngressQueue.js';
 import { notifyMerchantNewOrderAsync } from '../services/notifyMerchantNewOrder.js';
+import { persistInboundImageBuffer, toPublicMediaUrl } from '../services/inbox/messageMedia.js';
 
 // ==================== UUID VALIDATION ====================
 
@@ -613,13 +614,17 @@ export const handleWhatsAppWebhook = async (
             const phoneNumberId = metadata?.phone_number_id;
             const audioMediaId: string | null =
               messageType === 'audio' && message.audio?.id ? String(message.audio.id) : null;
+            const imageMediaId: string | null =
+              messageType === 'image' && message.image?.id ? String(message.image.id) : null;
+            let inboundImageUrl: string | null = null;
 
             logger.info('Received WhatsApp message', {
               from,
               messageId,
               messageType,
               phoneNumberId,
-              hasAudio: !!audioMediaId
+              hasAudio: !!audioMediaId,
+              hasImage: !!imageMediaId
             });
 
             // Find merchant by phone number ID
@@ -636,6 +641,25 @@ export const handleWhatsAppWebhook = async (
             const merchantId = merchantResult.rows[0].merchant_id;
             const autoReplyEnabled = merchantResult.rows[0].auto_reply_enabled;
             const welcomeMessage = merchantResult.rows[0].welcome_message;
+
+            // ==================== INBOUND IMAGE (persist for inbox) ====================
+            if (imageMediaId) {
+              const accessToken = await getWhatsAppAccessToken(merchantId);
+              if (accessToken) {
+                const media = await downloadWhatsAppMedia(imageMediaId, accessToken);
+                if (media?.buffer) {
+                  inboundImageUrl = await persistInboundImageBuffer({
+                    merchantId,
+                    buffer: media.buffer,
+                    mimeType: media.mimeType || message.image?.mime_type || 'image/jpeg',
+                    source: 'whatsapp',
+                  });
+                }
+              }
+              if (!messageText.trim()) {
+                messageText = '📷 صورة';
+              }
+            }
 
             // ==================== VOICE TRANSCRIPTION (OpenAI STT) ====================
             if (audioMediaId) {
@@ -695,6 +719,7 @@ export const handleWhatsAppWebhook = async (
               value: any;
               autoReplyEnabled: boolean;
               welcomeMessage: string;
+              imageUrl?: string | null;
             };
 
             const waIngressPayload: WaIngressPayload = {
@@ -706,7 +731,8 @@ export const handleWhatsAppWebhook = async (
               contact,
               value,
               autoReplyEnabled,
-              welcomeMessage
+              welcomeMessage,
+              imageUrl: inboundImageUrl,
             };
 
             conversationIngressQueue
@@ -730,6 +756,12 @@ export const handleWhatsAppWebhook = async (
                   const messageId =
                     batch.externalMessageIds[batch.externalMessageIds.length - 1] ||
                     latest.messageId;
+                  const inboundImageUrl =
+                    [...batch.payloads]
+                      .reverse()
+                      .find((p) => typeof p?.imageUrl === 'string' && p.imageUrl)?.imageUrl ||
+                    latest.imageUrl ||
+                    null;
 
               // Get or create conversation
               let conversationResult = await pool.query(
@@ -820,9 +852,19 @@ export const handleWhatsAppWebhook = async (
 
               if (!autoReplyEnabled || shouldSkipBotReply) {
               await pool.query(
-                `INSERT INTO messages (conversation_id, role, content, sender_type, external_message_id, source)
-                 VALUES ($1, 'user', $2, 'user', $3, 'whatsapp')`,
-                [conversationId, messageText, messageId]
+                `INSERT INTO messages (conversation_id, role, content, sender_type, external_message_id, source, metadata)
+                 VALUES ($1, 'user', $2, 'user', $3, 'whatsapp', $4::jsonb)`,
+                [
+                  conversationId,
+                  messageText || (inboundImageUrl ? '📷 صورة' : ''),
+                  messageId,
+                  JSON.stringify({
+                    platform: 'whatsapp',
+                    ...(inboundImageUrl
+                      ? { type: 'image', imageUrl: toPublicMediaUrl(inboundImageUrl) }
+                      : { type: 'text' }),
+                  }),
+                ]
               );
 
                 if (shouldSkipBotReply) {
@@ -832,7 +874,7 @@ export const handleWhatsAppWebhook = async (
                     merchantId
                   });
                 }
-              } else if (messageText.trim()) {
+              } else if (messageText.trim() || inboundImageUrl) {
                 try {
                   const { getMerchantPlanLimits, getMonthlyAIResponseCount, isWithinLimit } = await import('../utils/planLimits.js');
                   const limits = await getMerchantPlanLimits(merchantId);
@@ -863,7 +905,12 @@ export const handleWhatsAppWebhook = async (
                       userName: contact.profile?.name || from,
                       messageText,
                       externalMessageId: messageId,
-                      rawEventMetadata: value,
+                      rawEventMetadata: {
+                        ...(value && typeof value === 'object' ? value : {}),
+                        ...(inboundImageUrl
+                          ? { type: 'image', imageUrl: inboundImageUrl }
+                          : {}),
+                      },
                       merchantPolicies: {
                         storeName: cachedSettings?.store_name || 'المتجر',
                         storeCurrency: cachedSettings?.store_currency || 'USD',

@@ -3,6 +3,12 @@ import pool from '../database/connection.js';
 import { createError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
 import { z } from 'zod';
+import {
+  sendMerchantReply,
+  inboxSourceForPlatform,
+} from '../services/inbox/sendMerchantReply.js';
+import { setConversationTyping, markConversationSeen } from '../services/inbox/presence.js';
+import { toPublicMediaUrl, buildInboxMetadata } from '../services/inbox/messageMedia.js';
 
 const messageSchema = z.object({
   role: z.enum(['user', 'assistant', 'system']),
@@ -17,7 +23,15 @@ const conversationSchema = z.object({
   messages: z.array(messageSchema).min(1)
 });
 
-// Get all conversations for a merchant
+/** Platforms shown in merchant inbox (exclude internal playground-only noise by default). */
+const INBOX_PLATFORMS = [
+  'facebook_messenger',
+  'instagram',
+  'telegram',
+  'whatsapp',
+] as const;
+
+// Get all conversations for a merchant (inbox list)
 export const getConversations = async (
   req: AuthRequest,
   res: Response,
@@ -28,36 +42,107 @@ export const getConversations = async (
       return next(createError('Unauthorized', 401));
     }
 
+    const platform = typeof req.query.platform === 'string' ? req.query.platform.trim() : '';
+    const status = typeof req.query.status === 'string' ? req.query.status.trim() : '';
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const includeWeb = req.query.includeWeb === 'true';
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit || '50'), 10) || 50, 1), 100);
+    const offset = Math.max(parseInt(String(req.query.offset || '0'), 10) || 0, 0);
+
+    const params: unknown[] = [req.merchantId];
+    let where = `c.merchant_id = $1`;
+
+    if (platform && platform !== 'all') {
+      params.push(platform);
+      where += ` AND c.platform = $${params.length}`;
+    } else if (!includeWeb) {
+      params.push([...INBOX_PLATFORMS]);
+      where += ` AND c.platform = ANY($${params.length}::text[])`;
+    }
+
+    if (status === 'human' || status === 'bot' || status === 'hybrid') {
+      params.push(status);
+      where += ` AND COALESCE(c.status, 'bot') = $${params.length}`;
+    } else if (status === 'needs_attention') {
+      where += ` AND (COALESCE(c.bot_disabled, false) = true OR COALESCE(c.status, 'bot') = 'human')`;
+    }
+
+    if (search) {
+      params.push(`%${search}%`);
+      where += ` AND (c.user_name ILIKE $${params.length} OR c.user_id ILIKE $${params.length})`;
+    }
+
+    params.push(limit);
+    const limitIdx = params.length;
+    params.push(offset);
+    const offsetIdx = params.length;
+
     const result = await pool.query(
-      `SELECT 
+      `SELECT
         c.id,
         c.platform,
         c.user_id as "userId",
         c.user_name as "userName",
         c.last_message_at as "lastMessageAt",
         c.created_at as "createdAt",
-        COUNT(m.id)::int as "messageCount"
+        COALESCE(c.bot_disabled, false) as "botDisabled",
+        COALESCE(c.status, 'bot') as status,
+        c.last_human_response_at as "lastHumanResponseAt",
+        (
+          SELECT m.content
+          FROM messages m
+          WHERE m.conversation_id = c.id
+          ORDER BY m.created_at DESC
+          LIMIT 1
+        ) as "lastMessagePreview",
+        (
+          SELECT COALESCE(m.sender_type, CASE WHEN m.role = 'user' THEN 'user' ELSE 'bot' END)
+          FROM messages m
+          WHERE m.conversation_id = c.id
+          ORDER BY m.created_at DESC
+          LIMIT 1
+        ) as "lastSenderType",
+        (
+          SELECT COUNT(*)::int FROM messages m WHERE m.conversation_id = c.id
+        ) as "messageCount"
        FROM conversations c
-       LEFT JOIN messages m ON m.conversation_id = c.id
-       WHERE c.merchant_id = $1
-       GROUP BY c.id, c.platform, c.user_id, c.user_name, c.last_message_at, c.created_at
-       ORDER BY c.last_message_at DESC`,
-      [req.merchantId]
+       WHERE ${where}
+       ORDER BY c.last_message_at DESC NULLS LAST
+       LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+      params
     );
 
-    const conversations = result.rows.map(row => ({
-      id: row.id,
+    const countParams = params.slice(0, -2);
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int as total FROM conversations c WHERE ${where}`,
+      countParams
+    );
+
+    const conversations = result.rows.map((row) => ({
+      id: String(row.id),
       platform: row.platform,
-      userId: row.userId,
-      userName: row.userName,
+      userId: row.userId || null,
+      userName: row.userName || null,
       lastMessageAt: row.lastMessageAt,
       createdAt: row.createdAt,
-      messageCount: row.messageCount
+      botDisabled: !!row.botDisabled,
+      status: row.status || 'bot',
+      lastHumanResponseAt: row.lastHumanResponseAt || null,
+      lastMessagePreview: row.lastMessagePreview
+        ? String(row.lastMessagePreview).slice(0, 180)
+        : null,
+      lastSenderType: row.lastSenderType || null,
+      messageCount: row.messageCount || 0,
     }));
 
     res.json({
       success: true,
-      data: { conversations }
+      data: {
+        conversations,
+        total: countResult.rows[0]?.total || 0,
+        limit,
+        offset,
+      },
     });
   } catch (error: any) {
     console.error('Error fetching conversations:', error);
@@ -78,7 +163,6 @@ export const getConversation = async (
 
     const { id } = req.params;
 
-    // Get conversation
     const convResult = await pool.query(
       `SELECT 
         c.id,
@@ -86,7 +170,10 @@ export const getConversation = async (
         c.user_id as "userId",
         c.user_name as "userName",
         c.last_message_at as "lastMessageAt",
-        c.created_at as "createdAt"
+        c.created_at as "createdAt",
+        COALESCE(c.bot_disabled, false) as "botDisabled",
+        COALESCE(c.status, 'bot') as status,
+        c.last_human_response_at as "lastHumanResponseAt"
        FROM conversations c
        WHERE c.id = $1 AND c.merchant_id = $2`,
       [id, req.merchantId]
@@ -98,35 +185,65 @@ export const getConversation = async (
 
     const conversation = convResult.rows[0];
 
-    // Get messages
     const messagesResult = await pool.query(
       `SELECT 
         id,
         role,
         content,
+        COALESCE(sender_type, CASE WHEN role = 'user' THEN 'user' ELSE 'bot' END) as "senderType",
+        source,
+        metadata,
         created_at as "createdAt"
        FROM messages
        WHERE conversation_id = $1
-       ORDER BY created_at DESC`,
+       ORDER BY created_at ASC`,
       [id]
     );
 
-    const messages = messagesResult.rows.map(row => ({
-      id: row.id,
-      role: row.role,
-      content: row.content,
-      timestamp: row.createdAt,
-      createdAt: row.createdAt
-    }));
+    const messages = messagesResult.rows.map((row) => {
+      const metadata =
+        row.metadata && typeof row.metadata === 'object' ? row.metadata : {};
+      const imageUrl =
+        typeof metadata.imageUrl === 'string'
+          ? metadata.imageUrl
+          : typeof metadata.image_url === 'string'
+            ? metadata.image_url
+            : null;
+      const createdAtIso =
+        row.createdAt instanceof Date
+          ? row.createdAt.toISOString()
+          : new Date(row.createdAt).toISOString();
+      return {
+        id: String(row.id),
+        role: row.role,
+        content: row.content,
+        senderType: row.senderType || (row.role === 'user' ? 'user' : 'bot'),
+        source: row.source || null,
+        metadata,
+        imageUrl,
+        readAt: metadata.readAt || null,
+        deliveredAt: metadata.deliveredAt || null,
+        timestamp: createdAtIso,
+        createdAt: createdAtIso,
+      };
+    });
 
     res.json({
       success: true,
       data: {
         conversation: {
-          ...conversation,
-          messages
-        }
-      }
+          id: String(conversation.id),
+          platform: conversation.platform,
+          userId: conversation.userId || null,
+          userName: conversation.userName || null,
+          lastMessageAt: conversation.lastMessageAt,
+          createdAt: conversation.createdAt,
+          botDisabled: !!conversation.botDisabled,
+          status: conversation.status || 'bot',
+          lastHumanResponseAt: conversation.lastHumanResponseAt || null,
+          messages,
+        },
+      },
     });
   } catch (error: any) {
     console.error('Error fetching conversation:', error);
@@ -465,27 +582,36 @@ export const enableBotForConversation = async (
   }
 };
 
-// Send human message (manually)
+// Send human message from merchant inbox (persists + delivers on channel)
 export const sendHumanMessage = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ) => {
   try {
-    const { conversationId, message, platform, recipientId } = req.body;
     const merchantId = req.merchantId;
-    
     if (!merchantId) {
       return next(createError('Unauthorized', 401));
     }
 
-    if (!conversationId || !message) {
-      return next(createError('Conversation ID and message are required', 400));
+    const conversationId = String(
+      req.params.conversationId || req.body?.conversationId || ''
+    ).trim();
+    const message = String(req.body?.message || '').trim();
+    const imageUrl = toPublicMediaUrl(
+      typeof req.body?.imageUrl === 'string' ? req.body.imageUrl : null
+    );
+
+    if (!conversationId || (!message && !imageUrl)) {
+      return next(createError('Conversation ID and message or image are required', 400));
+    }
+    if (message.length > 4000) {
+      return next(createError('Message is too long (max 4000 characters)', 400));
     }
 
-    // Verify conversation belongs to merchant
     const convCheck = await pool.query(
-      `SELECT id, platform, user_id FROM conversations 
+      `SELECT id, platform, user_id, user_name
+       FROM conversations
        WHERE id = $1 AND merchant_id = $2`,
       [conversationId, merchantId]
     );
@@ -495,42 +621,155 @@ export const sendHumanMessage = async (
     }
 
     const conversation = convCheck.rows[0];
-    const convPlatform = platform || conversation.platform;
+    const convPlatform = String(conversation.platform || '');
+    const recipientId = String(
+      req.body?.recipientId || conversation.user_id || ''
+    ).trim();
 
-    // Save message as human message
-    await pool.query(
-      `INSERT INTO messages (conversation_id, role, content, sender_type, source)
-       VALUES ($1, 'assistant', $2, 'human', $3)`,
-      [conversationId, message, convPlatform === 'whatsapp' ? 'whatsapp_manager' : 'facebook_inbox']
+    if (!recipientId) {
+      return next(createError('Conversation has no recipient user id', 400));
+    }
+
+    const source = inboxSourceForPlatform(convPlatform);
+    const delivery = await sendMerchantReply({
+      merchantId,
+      conversationId,
+      platform: convPlatform,
+      recipientUserId: recipientId,
+      text: message,
+      imageUrl,
+    });
+
+    if (!delivery.delivered) {
+      return res.status(502).json({
+        success: false,
+        error: {
+          message: delivery.errorMessage || 'Failed to deliver message',
+          code: delivery.errorCode || 'SEND_FAILED',
+        },
+      });
+    }
+
+    const contentForDb = message || (imageUrl ? '📷 صورة' : '');
+    const metadata = buildInboxMetadata(
+      { platform: convPlatform, outbound: true },
+      imageUrl ? { type: 'image', imageUrl } : { type: 'text' }
     );
 
-    // Update conversation: disable bot and update last_human_response_at
+    const insertResult = await pool.query(
+      `INSERT INTO messages (conversation_id, role, content, sender_type, source, metadata)
+       VALUES ($1, 'assistant', $2, 'human', $3, $4::jsonb)
+       RETURNING id, role, content, sender_type as "senderType", source, metadata, created_at as "createdAt"`,
+      [conversationId, contentForDb, source, JSON.stringify(metadata)]
+    );
+
     await pool.query(
-      `UPDATE conversations 
+      `UPDATE conversations
        SET bot_disabled = TRUE,
            status = 'human',
            last_human_response_at = CURRENT_TIMESTAMP,
            last_message_at = CURRENT_TIMESTAMP,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $1`,
-      [conversationId]
+       WHERE id = $1 AND merchant_id = $2`,
+      [conversationId, merchantId]
     );
 
-    // Send message via platform API (if recipientId provided)
-    // Note: This would require platform-specific sending logic
-    // For now, we just save it in the database
+    const saved = insertResult.rows[0];
+    const savedMeta = saved.metadata || metadata;
+    const createdAtIso =
+      saved.createdAt instanceof Date
+        ? saved.createdAt.toISOString()
+        : new Date(saved.createdAt).toISOString();
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: 'Message sent',
       data: {
         conversationId,
-        message,
-        senderType: 'human'
-      }
+        delivered: true,
+        message: {
+          id: String(saved.id),
+          role: saved.role,
+          content: saved.content,
+          senderType: saved.senderType || 'human',
+          source: saved.source,
+          metadata: savedMeta,
+          imageUrl: savedMeta?.imageUrl || imageUrl || null,
+          createdAt: createdAtIso,
+          timestamp: createdAtIso,
+        },
+        botDisabled: true,
+        status: 'human',
+      },
     });
   } catch (error: any) {
     console.error('Error sending human message:', error);
+    next(error);
+  }
+};
+
+/** Merchant is typing in inbox → forward typing indicator to channel */
+export const setInboxTyping = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const merchantId = req.merchantId;
+    if (!merchantId) return next(createError('Unauthorized', 401));
+
+    const conversationId = String(req.params.conversationId || '').trim();
+    const isTyping = req.body?.isTyping !== false && req.body?.isTyping !== 'false';
+
+    const conv = await pool.query(
+      `SELECT id, platform, user_id FROM conversations WHERE id = $1 AND merchant_id = $2`,
+      [conversationId, merchantId]
+    );
+    if (conv.rows.length === 0) return next(createError('Conversation not found', 404));
+    if (!conv.rows[0].user_id) {
+      return res.json({ success: true, data: { ok: false } });
+    }
+
+    const result = await setConversationTyping({
+      merchantId,
+      conversationId,
+      platform: conv.rows[0].platform,
+      recipientUserId: conv.rows[0].user_id,
+      isTyping: !!isTyping,
+    });
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** Merchant opened thread → mark_seen on channel + mark inbound messages read */
+export const markInboxRead = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const merchantId = req.merchantId;
+    if (!merchantId) return next(createError('Unauthorized', 401));
+
+    const conversationId = String(req.params.conversationId || '').trim();
+    const conv = await pool.query(
+      `SELECT id, platform, user_id FROM conversations WHERE id = $1 AND merchant_id = $2`,
+      [conversationId, merchantId]
+    );
+    if (conv.rows.length === 0) return next(createError('Conversation not found', 404));
+
+    const result = await markConversationSeen({
+      merchantId,
+      conversationId,
+      platform: conv.rows[0].platform,
+      recipientUserId: String(conv.rows[0].user_id || ''),
+    });
+
+    res.json({ success: true, data: result });
+  } catch (error) {
     next(error);
   }
 };

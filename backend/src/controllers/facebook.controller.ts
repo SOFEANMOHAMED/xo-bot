@@ -769,10 +769,20 @@ const processFacebookMessage = async (event: any) => {
     // Skip bot reply if needed (before processing)
     if (shouldSkipBotReply) {
       // Still save user message even if bot is disabled
-      await pool.query(
-        `INSERT INTO messages (conversation_id, role, content, sender_type, external_message_id, source)
-         VALUES ($1, 'user', $2, 'user', $3, 'facebook_messenger')`,
-        [conversationId, messageText, externalMessageId]
+        await pool.query(
+        `INSERT INTO messages (conversation_id, role, content, sender_type, external_message_id, source, metadata)
+         VALUES ($1, 'user', $2, 'user', $3, 'facebook_messenger', $4::jsonb)`,
+        [
+          conversationId,
+          messageText,
+          externalMessageId,
+          JSON.stringify({
+            platform: 'facebook_messenger',
+            ...(imageAttachmentUrl
+              ? { type: 'image', imageUrl: imageAttachmentUrl }
+              : { type: 'text' }),
+          }),
+        ]
       );
       
       logger.info('Bot reply skipped for Facebook', {
@@ -990,7 +1000,10 @@ const processFacebookMessage = async (event: any) => {
             JSON.stringify({
               platform: 'facebook_messenger',
               timestamp: new Date().toISOString(),
-              externalId: externalMessageId || null
+              externalId: externalMessageId || null,
+              ...(imageAttachmentUrl
+                ? { type: 'image', imageUrl: imageAttachmentUrl }
+                : { type: 'text' }),
             }),
             result.meta.intent,
             JSON.stringify({})
@@ -1724,6 +1737,22 @@ export const facebookWebhook = async (
                   continue; // Already stored (e.g. race) — do not double-disable noise
                 }
 
+                // Dashboard send may not have stored Meta mid yet — skip near-duplicate human text
+                if (messageText) {
+                  const recentDup = await pool.query(
+                    `SELECT id FROM messages
+                     WHERE conversation_id = $1
+                       AND sender_type = 'human'
+                       AND content = $2
+                       AND created_at > NOW() - INTERVAL '90 seconds'
+                     LIMIT 1`,
+                    [conversationId, messageText]
+                  );
+                  if (recentDup.rows.length > 0) {
+                    continue;
+                  }
+                }
+
                 const attachmentType = attachments[0]?.type || 'attachment';
                 const content =
                   messageText ||
@@ -1761,6 +1790,59 @@ export const facebookWebhook = async (
                   userPsid,
                   messageId
                 });
+              }
+            } else if (event.read) {
+              // Customer read our messages (Messenger read receipt)
+              const pageId = String(event.recipient?.id || entry.id || '');
+              const userPsid = String(event.sender?.id || '');
+              const watermark = Number(event.read?.watermark || 0);
+              if (pageId && userPsid && watermark > 0) {
+                void (async () => {
+                  try {
+                    const merchantResult = await pool.query(
+                      'SELECT merchant_id FROM facebook_pages WHERE page_id = $1 LIMIT 1',
+                      [pageId]
+                    );
+                    if (merchantResult.rows.length === 0) return;
+                    const merchantId = String(merchantResult.rows[0].merchant_id);
+                    const convResult = await pool.query(
+                      `SELECT id FROM conversations
+                       WHERE merchant_id = $1 AND platform = 'facebook_messenger' AND user_id = $2
+                       ORDER BY last_message_at DESC LIMIT 1`,
+                      [merchantId, userPsid]
+                    );
+                    if (convResult.rows.length === 0) return;
+                    const conversationId = String(convResult.rows[0].id);
+                    const readAt = new Date(watermark).toISOString();
+                    await pool.query(
+                      `UPDATE messages
+                       SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('readAt', to_jsonb($2::text), 'deliveredAt', COALESCE(metadata->>'deliveredAt', $2::text))
+                       WHERE conversation_id = $1
+                         AND role = 'assistant'
+                         AND created_at <= to_timestamp($3::double precision / 1000.0)
+                         AND (metadata->>'readAt' IS NULL OR metadata->>'readAt' = '')`,
+                      [conversationId, readAt, watermark]
+                    );
+                    const { publishMerchantInboxEvent } = await import('../services/inbox/inboxRealtime.js');
+                    publishMerchantInboxEvent({
+                      type: 'read',
+                      merchantId,
+                      conversationId,
+                      platform: 'facebook_messenger',
+                      read: {
+                        conversationId,
+                        reader: 'customer',
+                        readAt,
+                        watermark,
+                      },
+                      at: readAt,
+                    });
+                  } catch (err) {
+                    logger.debug('Facebook message_reads handling failed', {
+                      error: err instanceof Error ? err.message : String(err),
+                    });
+                  }
+                })();
               }
             } else if (event.message && !event.message.is_echo) {
               // Per-conversation queue: merge rapid messages (4–6s) then process once

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Bell, X, CheckCircle, AlertCircle, Info, XCircle, CheckCheck, Calendar, UserRound, User, Share2 } from 'lucide-react';
 import apiService from '../services/api';
 import { logger } from '../utils/logger';
+import PushNotificationSetup from './PushNotificationSetup';
 
 interface UserNotification {
   id: string;
@@ -241,6 +242,8 @@ const UserNotifications: React.FC = () => {
           </div>
         </div>
       </div>
+
+      <PushNotificationSetup />
 
       {loadError && (
         <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 text-red-700 dark:text-red-300 text-sm">

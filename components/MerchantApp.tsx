@@ -15,6 +15,7 @@ import ImageStudio from './ImageStudio';
 import OnboardingWizard from './OnboardingWizard';
 import ErrorBoundary from './ErrorBoundary';
 import UserNotifications from './UserNotifications';
+import ConversationsInbox from './ConversationsInbox';
 import CrmPage from './CrmPage';
 import AnalyticsPage from './AnalyticsPage';
 import UserSupportTickets from './UserSupportTickets';
@@ -1070,6 +1071,8 @@ const MerchantApp: React.FC = () => {
         );
       case AppView.NOTIFICATIONS:
         return <UserNotifications />;
+      case AppView.INBOX:
+        return <ConversationsInbox />;
       case AppView.CRM:
         return <CrmPage storeCurrency={settings?.storeCurrency || 'USD'} />;
       case AppView.ANALYTICS:

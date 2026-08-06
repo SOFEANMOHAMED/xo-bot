@@ -23,7 +23,8 @@ import {
   X,
   Share2,
   HelpCircle,
-  Bot
+  Bot,
+  Inbox
 } from 'lucide-react';
 import TrialBanner from './TrialBanner';
 import SubscriptionModal from './SubscriptionModal';
@@ -31,6 +32,7 @@ import TrialExpiredBlock from './TrialExpiredBlock';
 import SupportTicketModal from './SupportTicketModal';
 import DashboardAssistant from './DashboardAssistant';
 import ConfirmDialog from './admin/ConfirmDialog';
+import InstallAppButton from './InstallAppButton';
 import { useAuth } from '../contexts/AuthContext';
 import { useSubscriptionCheck } from '../hooks/useSubscriptionCheck';
 import apiService from '../services/api';
@@ -98,6 +100,7 @@ const Layout: React.FC<LayoutProps> = ({ currentView, onChangeView, children, is
     comingSoon?: boolean;
   }> = [
     { id: AppView.DASHBOARD, label: 'لوحة التحكم', icon: LayoutDashboard },
+    { id: AppView.INBOX, label: 'صندوق الوارد', icon: Inbox },
     { id: AppView.PRODUCTS, label: 'إدارة المنتجات', icon: Package },
     { id: AppView.ORDERS, label: 'الطلبات', icon: ShoppingCart, badge: newOrdersCount > 0 ? newOrdersCount.toString() : undefined },
     { id: AppView.IMAGE_STUDIO, label: 'ستوديو التصميم', icon: Palette, badge: 'HOT' },
@@ -255,6 +258,8 @@ const Layout: React.FC<LayoutProps> = ({ currentView, onChangeView, children, is
             {isDarkMode ? <Sun size={20} aria-hidden="true" /> : <Moon size={20} aria-hidden="true" />}
             <span>{isDarkMode ? 'الوضع النهاري' : 'الوضع الليلي'}</span>
           </button>
+
+          <InstallAppButton variant="sidebar" />
           
           <button 
             onClick={handleLogoutClick}
@@ -282,6 +287,7 @@ const Layout: React.FC<LayoutProps> = ({ currentView, onChangeView, children, is
            </div>
          </div>
          <div className="flex items-center gap-1">
+            <InstallAppButton variant="header-icon" />
             <button
               onClick={() => goToView(AppView.NOTIFICATIONS)}
               className={`relative p-2 rounded-lg transition-colors ${
@@ -338,6 +344,7 @@ const Layout: React.FC<LayoutProps> = ({ currentView, onChangeView, children, is
       >
         {/* Desktop top bar: notifications + help + assistant (top-left) */}
         <div className="hidden md:flex sticky top-0 z-20 items-center justify-end gap-2 px-8 py-3 bg-[#FFFBF7]/90 dark:bg-gray-900/90 backdrop-blur-sm border-b border-brand-100/60 dark:border-gray-700/60">
+          <InstallAppButton variant="header" />
           <button
             onClick={() => goToView(AppView.NOTIFICATIONS)}
             className={`relative inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-brand ${

@@ -362,6 +362,19 @@ CREATE TABLE IF NOT EXISTS user_notifications (
     read_at TIMESTAMP
 );
 
+-- Web Push subscriptions (PWA) — one row per device per merchant
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+    endpoint TEXT NOT NULL,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    user_agent TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (merchant_id, endpoint)
+);
+
 -- Customers Table (CRM)
 CREATE TABLE IF NOT EXISTS customers (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -431,6 +444,7 @@ CREATE INDEX IF NOT EXISTS idx_user_notifications_merchant_id ON user_notificati
 CREATE INDEX IF NOT EXISTS idx_user_notifications_is_read ON user_notifications(is_read);
 CREATE INDEX IF NOT EXISTS idx_user_notifications_created_at ON user_notifications(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_user_notifications_unread ON user_notifications(merchant_id, is_read, created_at DESC) WHERE is_read = FALSE;
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_merchant_id ON push_subscriptions(merchant_id);
 
 -- CRM Indexes
 CREATE INDEX IF NOT EXISTS idx_customers_merchant_id ON customers(merchant_id);
