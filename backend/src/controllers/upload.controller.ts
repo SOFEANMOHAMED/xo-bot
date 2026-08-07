@@ -25,10 +25,10 @@ const storage = multer.diskStorage({
     cb(null, targetDir);
   },
   filename: (_req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const name = path.basename(file.originalname, path.extname(file.originalname));
-    // Keep original extension temporarily; convertToWebP will rename
-    cb(null, `${name}-${uniqueSuffix}${path.extname(file.originalname)}`);
+    // ASCII-only names: Meta Graph rejects poorly encoded unicode/space paths
+    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    const ext = (path.extname(file.originalname) || '.bin').toLowerCase();
+    cb(null, `file-${uniqueSuffix}${ext}`);
   }
 });
 
@@ -108,7 +108,11 @@ export const uploadFile = async (
     // ✅ Security: Include merchantId in the URL path for tenant isolation
     const merchantId = req.merchantId;
     const urlPath = merchantId ? `${merchantId}/${webpFilename}` : webpFilename;
-    const fileUrl = `${baseUrl}/uploads/${urlPath}`;
+    const encodedPath = urlPath
+      .split('/')
+      .map((segment) => encodeURIComponent(segment))
+      .join('/');
+    const fileUrl = `${baseUrl.replace(/\/$/, '')}/uploads/${encodedPath}`;
 
     res.json({
       success: true,
@@ -201,12 +205,16 @@ export const uploadFiles = async (
       (req.files as Express.Multer.File[]).map(async (file) => {
         const { webpFilename, webpSize } = await convertToWebP(file.path, file.filename);
         const urlPath = merchantId ? `${merchantId}/${webpFilename}` : webpFilename;
+        const encodedPath = urlPath
+          .split('/')
+          .map((segment) => encodeURIComponent(segment))
+          .join('/');
         return {
           filename: webpFilename,
           originalName: file.originalname,
           mimetype: 'image/webp',
           size: webpSize,
-          url: `${baseUrl}/uploads/${urlPath}`,
+          url: `${baseUrl.replace(/\/$/, '')}/uploads/${encodedPath}`,
           path: `/uploads/${urlPath}`
         };
       })

@@ -26,6 +26,7 @@
     "migrate-product-image-embeddings": "tsx src/database/migrations/run_product_image_embeddings_migration.ts",
     "backfill-visual-embeddings": "tsx src/scripts/backfill-visual-embeddings.ts",
     "migrate-social-comment-templates": "tsx src/database/migrations/run_social_comment_templates_migration.ts",
+    "migrate-content-publishing": "tsx src/database/migrations/run_content_publishing_migration.ts",
     "add-viewed-at-column": "tsx src/database/add_viewed_at_column.ts",
     "add-colors-column": "tsx src/database/add-colors-column.ts",
     "clear-conversation": "tsx src/database/clear-conversation.ts",

@@ -22,6 +22,7 @@ import {
   Menu,
   X,
   Share2,
+  Megaphone,
   HelpCircle,
   Bot,
   Inbox
@@ -107,6 +108,7 @@ const Layout: React.FC<LayoutProps> = ({ currentView, onChangeView, children, is
     { id: AppView.ANALYTICS, label: 'التحليلات والتقارير', icon: BarChart3 },
     { id: AppView.INTEGRATIONS, label: 'الربط والتكامل', icon: Link2 },
     { id: AppView.SOCIAL_AUTOMATION, label: 'إدارة التعليقات والمنشورات', icon: Share2 },
+    { id: AppView.CONTENT_PUBLISHING, label: 'نشر المحتوى', icon: Megaphone },
     { id: AppView.CRM, label: 'إدارة العملاء', icon: UserCircle },
     { id: AppView.CHAT_TEST, label: 'تجربة البوت', icon: MessageSquare },
     { id: AppView.AFFILIATE, label: 'التسويق بالعمولة', icon: Users, badge: '$' },

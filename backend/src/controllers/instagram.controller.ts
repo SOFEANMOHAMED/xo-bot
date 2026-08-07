@@ -163,7 +163,8 @@ const INSTAGRAM_OAUTH_SCOPES = [
   'business_management',
   'instagram_basic',
   'instagram_manage_comments',
-  'instagram_manage_messages'
+  'instagram_manage_messages',
+  'instagram_content_publish'
 ].join(',');
 
 type ManagedFacebookPage = {

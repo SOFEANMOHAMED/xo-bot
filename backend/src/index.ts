@@ -39,6 +39,8 @@ import { swaggerSpec } from './config/swagger.js';
 import { initializeTools } from './services/tools/index.js';
 import { startSyncScheduler } from './services/syncScheduler.js';
 import { startAbandonedCheckoutScheduler } from './services/abandonedCheckout/index.js';
+import { startContentPublishingScheduler } from './services/contentPublishing/index.js';
+import contentPublishingRoutes from './routes/contentPublishing.routes.js';
 import { startInboxRealtime, stopInboxRealtime } from './services/inbox/inboxRealtime.js';
 
 const app = express();
@@ -221,6 +223,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/services', serviceRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/integrations', integrationRoutes);
+  app.use('/api/content', contentPublishingRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/affiliate', affiliateRoutes);
 app.use('/api/conversations', conversationRoutes);
@@ -334,6 +337,9 @@ async function startServer() {
 
       startAbandonedCheckoutScheduler(5);
       console.log('🛒 Abandoned checkout reminder scheduler started (every 5 minutes)');
+
+      startContentPublishingScheduler(1);
+      console.log('📣 Content publishing scheduler started (every 1 minute)');
     });
   } catch (error) {
     console.error('❌ Failed to connect to database:', error);

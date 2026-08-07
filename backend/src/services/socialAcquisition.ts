@@ -27,6 +27,11 @@ export type AcquisitionContext = {
   platform?: string;
   account_ref?: string;
   captured_at: string;
+  /** Durable snapshot for inbox banner (filled at capture time when available) */
+  post_caption?: string | null;
+  post_thumbnail_url?: string | null;
+  post_permalink?: string | null;
+  product_name?: string | null;
 };
 
 export async function resolveProductForExternalContent(params: {
@@ -119,8 +124,46 @@ export async function applyAcquisitionToConversation(params: {
   acquisition: AcquisitionContext;
   conversationState?: ConversationState;
 }): Promise<ConversationState> {
-  const { conversationId, merchantId, acquisition } = params;
+  const { conversationId, merchantId } = params;
+  const acquisition: AcquisitionContext = { ...params.acquisition };
   let state: ConversationState = params.conversationState || { message_count: 0 };
+
+  // Snapshot post preview for inbox banner (merchant-scoped)
+  if (acquisition.post_id && (!acquisition.post_caption || !acquisition.post_thumbnail_url)) {
+    try {
+      const postResult = await pool.query(
+        `SELECT caption, thumbnail_url, permalink, platform
+         FROM social_posts
+         WHERE merchant_id = $1
+           AND external_post_id = $2
+           AND ($3::text IS NULL OR platform = $3)
+         LIMIT 1`,
+        [
+          merchantId,
+          String(acquisition.post_id),
+          acquisition.platform === 'facebook' || acquisition.platform === 'instagram'
+            ? acquisition.platform
+            : null
+        ]
+      );
+      const post = postResult.rows[0];
+      if (post) {
+        acquisition.post_caption = acquisition.post_caption || post.caption || null;
+        acquisition.post_thumbnail_url =
+          acquisition.post_thumbnail_url || post.thumbnail_url || null;
+        acquisition.post_permalink = acquisition.post_permalink || post.permalink || null;
+        if (!acquisition.platform && post.platform) {
+          acquisition.platform = post.platform;
+        }
+      }
+    } catch (error) {
+      logger.warn('Failed to snapshot social post for acquisition', {
+        merchantId,
+        postId: acquisition.post_id,
+        error: (error as Error).message
+      });
+    }
+  }
 
   if (acquisition.product_id) {
     const product = await getProductById(merchantId, acquisition.product_id);
@@ -131,7 +174,9 @@ export async function applyAcquisitionToConversation(params: {
       });
       acquisition.product_id = null;
       acquisition.linked_recommended = false;
+      acquisition.product_name = null;
     } else {
+      acquisition.product_name = acquisition.product_name || product.name || null;
       state = seedConversationStateWithProduct(state, product.id);
     }
   }

@@ -771,6 +771,20 @@ class ApiService {
         botDisabled: boolean;
         status: string;
         lastHumanResponseAt?: string | null;
+        sourcePost?: {
+          source: string;
+          sourceLabel: string;
+          platform: string | null;
+          externalPostId: string | null;
+          caption: string | null;
+          thumbnailUrl: string | null;
+          permalink: string | null;
+          productId: string | null;
+          productName: string | null;
+          commentId: string | null;
+          adId: string | null;
+          capturedAt: string | null;
+        } | null;
         messages: Array<{
           id: string;
           role: string;
@@ -1275,6 +1289,97 @@ class ApiService {
         body: JSON.stringify(payload),
       }
     );
+  }
+
+  // ── Content publishing (FB / IG) ──────────────────────────────────────────
+
+  async getContentPublishAccounts() {
+    return this.request<{ accounts: import('../types/contentPublishing').ContentPublishAccount[] }>(
+      '/content/accounts'
+    );
+  }
+
+  async listContentPublications(params?: {
+    status?: string;
+    platform?: 'facebook' | 'instagram';
+    limit?: number;
+    offset?: number;
+  }) {
+    const q = new URLSearchParams();
+    if (params?.status) q.set('status', params.status);
+    if (params?.platform) q.set('platform', params.platform);
+    if (params?.limit) q.set('limit', String(params.limit));
+    if (params?.offset) q.set('offset', String(params.offset));
+    const qs = q.toString();
+    return this.request<{
+      publications: import('../types/contentPublishing').ContentPublication[];
+      total: number;
+    }>(`/content/publications${qs ? `?${qs}` : ''}`);
+  }
+
+  async getContentPublication(id: string) {
+    return this.request<{ publication: import('../types/contentPublishing').ContentPublication }>(
+      `/content/publications/${id}`
+    );
+  }
+
+  async createContentPublication(
+    payload: import('../types/contentPublishing').CreateContentPublicationPayload
+  ) {
+    return this.request<{
+      message: string;
+      publication: import('../types/contentPublishing').ContentPublication;
+    }>('/content/publications', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateContentPublication(
+    id: string,
+    payload: Partial<import('../types/contentPublishing').CreateContentPublicationPayload>
+  ) {
+    return this.request<{
+      message: string;
+      publication: import('../types/contentPublishing').ContentPublication;
+    }>(`/content/publications/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteContentPublication(id: string) {
+    return this.request<{ message: string }>(`/content/publications/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async publishContentPublicationNow(id: string) {
+    return this.request<{
+      message: string;
+      publication: import('../types/contentPublishing').ContentPublication;
+    }>(`/content/publications/${id}/publish`, {
+      method: 'POST',
+    });
+  }
+
+  async scheduleContentPublication(id: string, scheduledAt: string) {
+    return this.request<{
+      message: string;
+      publication: import('../types/contentPublishing').ContentPublication;
+    }>(`/content/publications/${id}/schedule`, {
+      method: 'POST',
+      body: JSON.stringify({ scheduledAt }),
+    });
+  }
+
+  async cancelContentPublication(id: string) {
+    return this.request<{
+      message: string;
+      publication: import('../types/contentPublishing').ContentPublication;
+    }>(`/content/publications/${id}/cancel`, {
+      method: 'POST',
+    });
   }
 
   async getSocialKeywordRules(platform?: 'facebook' | 'instagram', socialPostId?: string) {

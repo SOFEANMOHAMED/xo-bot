@@ -249,19 +249,43 @@ export class FacebookAdapter implements ChannelAdapter {
         logger.warn('Could not check sales bot plan flag', { error: planErr });
       }
 
-      // Get user name if available
+      // Get user name if available (Profile API, then Conversations API fallback)
       let userName: string | undefined;
       try {
         const userInfoResponse = await fetch(
           `https://graph.facebook.com/v21.0/${senderId}?fields=name,first_name,last_name&access_token=${access_token}`
         );
-        const userInfo = await userInfoResponse.json() as { name?: string; first_name?: string; last_name?: string };
-        if (userInfo.name || userInfo.first_name) {
+        const userInfo = await userInfoResponse.json() as {
+          name?: string;
+          first_name?: string;
+          last_name?: string;
+          error?: unknown;
+        };
+        if (!userInfo.error && (userInfo.name || userInfo.first_name)) {
           userName = (userInfo.name || `${userInfo.first_name || ''} ${userInfo.last_name || ''}`).trim();
         }
       } catch (error) {
-        // Ignore error, userName is optional
-        logger.debug('Could not fetch Facebook user name', { error });
+        logger.debug('Could not fetch Facebook user name via profile API', { error });
+      }
+
+      if (!userName) {
+        try {
+          const convResp = await fetch(
+            `https://graph.facebook.com/v21.0/${encodeURIComponent(pageId)}/conversations` +
+              `?platform=MESSENGER&user_id=${encodeURIComponent(senderId)}` +
+              `&fields=participants&limit=1&access_token=${encodeURIComponent(access_token)}`
+          );
+          const convData = (await convResp.json()) as {
+            data?: Array<{ participants?: { data?: Array<{ id?: string; name?: string }> } }>;
+          };
+          const participants = convData.data?.[0]?.participants?.data || [];
+          const match = participants.find(
+            (p) => String(p.id) === String(senderId) && (p.name || '').trim()
+          );
+          if (match?.name) userName = match.name.trim();
+        } catch (error) {
+          logger.debug('Could not fetch Facebook user name via conversations API', { error });
+        }
       }
 
       return {

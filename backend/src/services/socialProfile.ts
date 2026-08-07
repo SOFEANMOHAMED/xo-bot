@@ -103,29 +103,86 @@ async function getInstagramCredentials(
 
 async function fetchFacebookUserName(
   userId: string,
-  accessToken: string
+  accessToken: string,
+  pageId?: string | null
 ): Promise<string | null> {
-  const url =
+  // 1) User Profile API (works for many PSIDs)
+  const profileUrl =
     `https://graph.facebook.com/v21.0/${encodeURIComponent(userId)}` +
     `?fields=name,first_name,last_name&access_token=${encodeURIComponent(accessToken)}`;
-  const resp = await fetch(url);
-  const data = (await resp.json()) as {
-    name?: string;
-    first_name?: string;
-    last_name?: string;
-    error?: { message?: string };
-  };
-  if (!resp.ok || data.error) {
-    logger.warn('Facebook profile name fetch failed', {
+  try {
+    const resp = await fetch(profileUrl);
+    const data = (await resp.json()) as {
+      name?: string;
+      first_name?: string;
+      last_name?: string;
+      error?: { message?: string; code?: number; error_subcode?: number };
+    };
+    if (resp.ok && !data.error) {
+      const full =
+        (data.name || '').trim() ||
+        `${data.first_name || ''} ${data.last_name || ''}`.trim();
+      if (full) return full;
+    } else {
+      logger.warn('Facebook profile name fetch failed', {
+        userId,
+        error: data.error?.message || `HTTP ${resp.status}`,
+        code: data.error?.code,
+        subcode: data.error?.error_subcode,
+      });
+    }
+  } catch (error) {
+    logger.warn('Facebook profile name fetch threw', {
       userId,
-      error: data.error?.message || `HTTP ${resp.status}`,
+      error: (error as Error).message,
     });
-    return null;
   }
-  const full =
-    (data.name || '').trim() ||
-    `${data.first_name || ''} ${data.last_name || ''}`.trim();
-  return full || null;
+
+  // 2) Fallback: Page Conversations API (often works when Profile API returns #100/33)
+  if (!pageId) return null;
+  try {
+    const convUrl =
+      `https://graph.facebook.com/v21.0/${encodeURIComponent(pageId)}/conversations` +
+      `?platform=MESSENGER&user_id=${encodeURIComponent(userId)}` +
+      `&fields=participants&limit=1` +
+      `&access_token=${encodeURIComponent(accessToken)}`;
+    const resp = await fetch(convUrl);
+    const data = (await resp.json()) as {
+      data?: Array<{
+        participants?: { data?: Array<{ id?: string; name?: string }> };
+      }>;
+      error?: { message?: string };
+    };
+    if (!resp.ok || data.error) {
+      logger.warn('Facebook conversations name fallback failed', {
+        userId,
+        pageId,
+        error: data.error?.message || `HTTP ${resp.status}`,
+      });
+      return null;
+    }
+    const participants = data.data?.[0]?.participants?.data || [];
+    const match = participants.find(
+      (p) => String(p.id) === String(userId) && (p.name || '').trim()
+    );
+    const name = (match?.name || '').trim();
+    if (name) {
+      logger.info('Resolved Facebook customer name via conversations API', {
+        userId,
+        pageId,
+        name,
+      });
+      return name;
+    }
+  } catch (error) {
+    logger.warn('Facebook conversations name fallback threw', {
+      userId,
+      pageId,
+      error: (error as Error).message,
+    });
+  }
+
+  return null;
 }
 
 async function fetchInstagramUserName(
@@ -173,7 +230,7 @@ export async function resolveSocialCustomerName(params: {
     if (platform === 'facebook_messenger' || platform === 'facebook') {
       const creds = await getFacebookPageCredentials(merchantId, preferredPageId);
       if (!creds) return null;
-      return await fetchFacebookUserName(userId, creds.accessToken);
+      return await fetchFacebookUserName(userId, creds.accessToken, creds.pageId);
     }
 
     if (platform === 'instagram') {

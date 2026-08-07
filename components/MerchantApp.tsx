@@ -10,6 +10,7 @@ import BotPlayground from './BotPlayground';
 import SettingsPanel from './SettingsPanel';
 import IntegrationsPanel from './IntegrationsPanel';
 import SocialAutomationPage from './SocialAutomationPage';
+import ContentPublishingPage from './ContentPublishingPage';
 import AffiliateDashboard from './AffiliateDashboard';
 import ImageStudio from './ImageStudio';
 import OnboardingWizard from './OnboardingWizard';
@@ -1061,6 +1062,13 @@ const MerchantApp: React.FC = () => {
                 setIsLoadingSettings(false);
               }
             }}
+            showNotification={showNotification}
+            onGoToIntegrations={() => navigateToView(AppView.INTEGRATIONS)}
+          />
+        );
+      case AppView.CONTENT_PUBLISHING:
+        return (
+          <ContentPublishingPage
             showNotification={showNotification}
             onGoToIntegrations={() => navigateToView(AppView.INTEGRATIONS)}
           />

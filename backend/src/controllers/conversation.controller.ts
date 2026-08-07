@@ -9,6 +9,11 @@ import {
 } from '../services/inbox/sendMerchantReply.js';
 import { setConversationTyping, markConversationSeen } from '../services/inbox/presence.js';
 import { toPublicMediaUrl, buildInboxMetadata } from '../services/inbox/messageMedia.js';
+import {
+  ensureConversationCustomerName,
+  isPlaceholderCustomerName,
+} from '../services/socialProfile.js';
+import { resolveConversationSourcePost } from '../services/conversationSourcePost.js';
 
 const messageSchema = z.object({
   role: z.enum(['user', 'assistant', 'system']),
@@ -135,6 +140,32 @@ export const getConversations = async (
       messageCount: row.messageCount || 0,
     }));
 
+    // Lazily resolve Meta display names for placeholder rows (bounded concurrency)
+    const needsName = conversations.filter(
+      (c) =>
+        c.userId &&
+        (c.platform === 'facebook_messenger' || c.platform === 'instagram') &&
+        isPlaceholderCustomerName(c.userName)
+    );
+    if (needsName.length > 0) {
+      await Promise.all(
+        needsName.slice(0, 8).map(async (c) => {
+          try {
+            const resolved = await ensureConversationCustomerName({
+              merchantId: req.merchantId!,
+              conversationId: c.id,
+              platform: c.platform,
+              userId: c.userId!,
+              currentName: c.userName,
+            });
+            c.userName = resolved;
+          } catch {
+            /* non-fatal — keep placeholder */
+          }
+        })
+      );
+    }
+
     res.json({
       success: true,
       data: {
@@ -185,6 +216,25 @@ export const getConversation = async (
 
     const conversation = convResult.rows[0];
 
+    let resolvedUserName = conversation.userName || null;
+    if (
+      conversation.userId &&
+      (conversation.platform === 'facebook_messenger' || conversation.platform === 'instagram') &&
+      isPlaceholderCustomerName(resolvedUserName)
+    ) {
+      try {
+        resolvedUserName = await ensureConversationCustomerName({
+          merchantId: req.merchantId,
+          conversationId: String(conversation.id),
+          platform: conversation.platform,
+          userId: conversation.userId,
+          currentName: resolvedUserName,
+        });
+      } catch {
+        /* keep existing */
+      }
+    }
+
     const messagesResult = await pool.query(
       `SELECT 
         id,
@@ -228,6 +278,12 @@ export const getConversation = async (
       };
     });
 
+    const sourcePost = await resolveConversationSourcePost({
+      merchantId: req.merchantId,
+      conversationId: String(conversation.id),
+      conversationPlatform: conversation.platform,
+    });
+
     res.json({
       success: true,
       data: {
@@ -235,12 +291,13 @@ export const getConversation = async (
           id: String(conversation.id),
           platform: conversation.platform,
           userId: conversation.userId || null,
-          userName: conversation.userName || null,
+          userName: resolvedUserName || null,
           lastMessageAt: conversation.lastMessageAt,
           createdAt: conversation.createdAt,
           botDisabled: !!conversation.botDisabled,
           status: conversation.status || 'bot',
           lastHumanResponseAt: conversation.lastHumanResponseAt || null,
+          sourcePost,
           messages,
         },
       },

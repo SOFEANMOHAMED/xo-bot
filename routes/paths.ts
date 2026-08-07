@@ -57,6 +57,7 @@ export const APP_VIEW_SLUG: Record<AppView, string> = {
   [AppView.CHAT_TEST]: 'chat-test',
   [AppView.INTEGRATIONS]: 'integrations',
   [AppView.SOCIAL_AUTOMATION]: 'social-automation',
+  [AppView.CONTENT_PUBLISHING]: 'content-publishing',
   [AppView.SETTINGS]: 'settings',
   [AppView.AFFILIATE]: 'affiliate',
   [AppView.NOTIFICATIONS]: 'notifications',

@@ -12,11 +12,28 @@ import {
   X,
   Check,
   CheckCheck,
+  ExternalLink,
+  Megaphone,
 } from 'lucide-react';
 import apiService from '../services/api';
 import { logger } from '../utils/logger';
 import { useInboxRealtime, type InboxStreamEvent } from '../hooks/useInboxRealtime';
 import EmojiPicker from './EmojiPicker';
+
+type ConversationSourcePost = {
+  source: string;
+  sourceLabel: string;
+  platform: string | null;
+  externalPostId: string | null;
+  caption: string | null;
+  thumbnailUrl: string | null;
+  permalink: string | null;
+  productId: string | null;
+  productName: string | null;
+  commentId: string | null;
+  adId: string | null;
+  capturedAt: string | null;
+};
 
 type InboxConversation = {
   id: string;
@@ -31,6 +48,7 @@ type InboxConversation = {
   lastMessagePreview?: string | null;
   lastSenderType?: string | null;
   messageCount: number;
+  sourcePost?: ConversationSourcePost | null;
 };
 
 type InboxMessage = {
@@ -122,9 +140,20 @@ function formatRelative(dateStr: string | Date): string {
   return date.toLocaleDateString('ar-SA-u-nu-latn');
 }
 
+function isPlaceholderInboxName(name: string): boolean {
+  const n = name.trim().toLowerCase();
+  if (!n) return true;
+  if (n === 'unknown' || n === 'user' || n === 'عميل') return true;
+  // Placeholders like «عميل فيسبوك» / «عميل إنستغرام» / «عميل غير معروف»
+  if (n.startsWith('عميل')) return true;
+  if (n === 'facebook user' || n === 'instagram user') return true;
+  if (/^\d{8,}$/.test(n)) return true;
+  return false;
+}
+
 function displayName(c: Pick<InboxConversation, 'userName' | 'userId'>): string {
   const name = (c.userName || '').trim();
-  if (name && !/^unknown|عميل|user$/i.test(name)) return name;
+  if (name && !isPlaceholderInboxName(name)) return name;
   if (c.userId) return `عميل · ${String(c.userId).slice(-6)}`;
   return 'عميل';
 }
@@ -218,6 +247,7 @@ const ConversationsInbox: React.FC = () => {
         lastMessagePreview: null,
         lastSenderType: null,
         messageCount: msgs.length,
+        sourcePost: c.sourcePost ?? null,
         messages: msgs,
       });
       const lastOutboundRead =
@@ -776,6 +806,54 @@ const ConversationsInbox: React.FC = () => {
                   )}
                 </div>
               </header>
+
+              {thread.sourcePost && (
+                <div className="shrink-0 mx-3 mt-2 mb-1 rounded-xl border border-brand/20 bg-brand-50/70 dark:bg-brand-900/20 dark:border-brand/30 px-3 py-2.5 flex items-start gap-3">
+                  <div className="w-12 h-12 rounded-lg overflow-hidden bg-white dark:bg-gray-800 border border-gray-200/80 dark:border-gray-700 flex-shrink-0 flex items-center justify-center text-brand">
+                    {thread.sourcePost.thumbnailUrl ? (
+                      <img
+                        src={thread.sourcePost.thumbnailUrl}
+                        alt=""
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <Megaphone size={18} />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] font-bold text-brand">
+                        {thread.sourcePost.sourceLabel}
+                      </span>
+                      {thread.sourcePost.productName && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-white/80 dark:bg-gray-900/60 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700">
+                          منتج: {thread.sourcePost.productName}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-700 dark:text-gray-200 mt-0.5 line-clamp-2">
+                      {thread.sourcePost.caption?.trim() ||
+                        (thread.sourcePost.externalPostId
+                          ? `منشور ${thread.sourcePost.externalPostId}`
+                          : thread.sourcePost.adId
+                            ? `إعلان ${thread.sourcePost.adId}`
+                            : 'منشور مرتبط بهذه المحادثة')}
+                    </p>
+                  </div>
+                  {thread.sourcePost.permalink && (
+                    <a
+                      href={thread.sourcePost.permalink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="shrink-0 inline-flex items-center gap-1 text-[11px] font-medium text-brand hover:underline px-2 py-1"
+                      title="فتح المنشور"
+                    >
+                      <ExternalLink size={13} />
+                      فتح
+                    </a>
+                  )}
+                </div>
+              )}
 
               {threadError && (
                 <div className="mx-4 mt-3 text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl px-3 py-2">
