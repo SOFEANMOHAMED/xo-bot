@@ -293,7 +293,9 @@ const generateAIResponse = async (
           products[0].category ? `Category: ${products[0].category}` : null,
           products[0].description ? `Description: ${products[0].description}` : null,
           products[0].sizes?.length ? `Sizes: ${products[0].sizes.join(', ')}` : null,
-          products[0].colors?.length ? `Colors: ${products[0].colors.join(', ')}` : null,
+          products[0].colors?.length
+            ? `Color options: ${products[0].colors.map((c, i) => `${i + 1}) ${c}`).join(' — ')}`
+            : null,
           typeof products[0].stock === 'number' ? `Stock: ${products[0].stock}` : null
         ]
           .filter(Boolean)

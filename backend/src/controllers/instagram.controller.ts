@@ -12,8 +12,10 @@ import {
 } from '../bot/index.js';
 import { checkRateLimit, getCachedMerchantSettings } from '../services/cacheService.js';
 import { persistBotChannelOrder } from '../services/channelBotOrder.js';
-import { botReplyAsksForConfirmation } from '../services/salesgpt/index.js';
-import { buildMerchantBotConfig } from '../services/buildMerchantBotConfig.js';
+import {
+  buildMerchantBotConfig,
+  appendOrderDataIfConfirmed
+} from '../services/buildMerchantBotConfig.js';
 import { escalateConversationToHuman } from '../services/escalation.js';
 import { stripInternalControlMarkers } from '../response/sanitize-reply.js';
 import {
@@ -1515,38 +1517,24 @@ const processInstagramDM = async (event: any) => {
       responseText = result.replyText;
       updatedState = result.updatedState;
 
+      // Shared gate: ORDER_DATA only when pipeline next_action === confirm_order
       const entities = updatedState.extracted_entities || {};
       const products = updatedState.last_recommended_products || [];
-      const isOrderConfirmed = result.next_action === 'confirm_order';
-      const hasAllOrderInfo = !!(
-        entities.name &&
-        entities.phone &&
-        entities.address &&
-        products.length > 0
-      );
+      responseText = appendOrderDataIfConfirmed({
+        responseText,
+        nextAction: result.next_action,
+        entities,
+        productIds: products,
+        storeCurrency: settings?.store_currency || 'USD',
+        channelLabel: 'Instagram (Full AI Mode)',
+      });
 
-      const replyStillAsks = botReplyAsksForConfirmation(responseText);
-
-      if (hasAllOrderInfo && isOrderConfirmed && !replyStillAsks) {
-        if (entities.name && entities.phone && entities.address && products.length > 0) {
-          const fullAIOrderData = {
-            customerName: entities.name,
-            customerPhone: entities.phone,
-            customerAddress: entities.address,
-            customerEmail: entities.email || null,
-            deliveryTime: entities.delivery_time || null,
-            notes: `Order via Instagram (Full AI Mode) | Product: ${entities.product_query || 'N/A'}${entities.color ? ` | Color: ${entities.color}` : ''}${entities.size ? ` | Size: ${entities.size}` : ''}`,
-            products: products.map((productId: string) => ({
-              productId: productId,
-              productName: entities.product_query || 'Product',
-              quantity: entities.quantity || 1,
-              price: 0,
-              currency: settings?.store_currency || 'USD'
-            })),
-            total: 0
-          };
-          responseText = `${responseText}\n[ORDER_DATA]${JSON.stringify(fullAIOrderData)}[/ORDER_DATA]`;
-        }
+      if (result.next_action === 'confirm_order' && responseText.includes('[ORDER_DATA]')) {
+        console.log('[processInstagramDM] Full AI Mode: Order confirmed, ORDER_DATA attached:', {
+          name: entities.name,
+          productsCount: products.length,
+          next_action: result.next_action
+        });
       }
 
       if (result.shouldEscalate) {

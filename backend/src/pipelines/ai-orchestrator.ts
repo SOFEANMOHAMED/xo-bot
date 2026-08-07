@@ -15,6 +15,7 @@ import type {
 } from '../core/types.js';
 import { logger } from '../utils/logger.js';
 import { getCurrencyDisplayName } from '../utils/currencyDisplayName.js';
+import { formatColorOptionsForDisplay } from '../catalog/color-options.js';
 
 // ==================== TYPES ====================
 
@@ -114,10 +115,9 @@ const buildPrompt = (context: AIConversationContext): string => {
         } else {
           // Fallback to simple arrays
           if (p.colors && p.colors.length > 0) {
-            const separator = isArabic ? '، ' : ', ';
             info += isArabic
-              ? `   🎨 الألوان: ${p.colors.join(separator)}\n`
-              : `   🎨 Colors: ${p.colors.join(separator)}\n`;
+              ? `   🎨 خيارات الألوان (كل رقم = خيار واحد، قد يكون لونين معاً): ${formatColorOptionsForDisplay(p.colors, 'arabic')}\n`
+              : `   🎨 Color options (each number = one option, may combine colors): ${formatColorOptionsForDisplay(p.colors, 'english')}\n`;
           }
           if (p.sizes && p.sizes.length > 0) {
             const separator = isArabic ? '، ' : ', ';
@@ -150,7 +150,7 @@ const buildPrompt = (context: AIConversationContext): string => {
 5. **الإقناع**: كن لطيفاً ومتحمساً، امدح المنتج، وأبرز قيمته
 6. **الاعتراضات**: تعامل مع الاعتراضات بذكاء (السعر، الجودة، التوصيل)
 7. **جمع المعلومات**: إذا العميل يريد الطلب، اجمع المعلومات بالترتيب:
-   - إذا المنتج له ألوان → اسأل عن اللون
+   - إذا المنتج له خيارات ألوان → اسأل عن خيار اللون (كل عنصر في القائمة خيار واحد؛ قد يحتوي لونين معاً مثل «أسود وبني» — لا تفصلها)
    - إذا المنتج له مقاسات → اسأل عن المقاس
    - اسأل عن العنوان
    - اسأل عن رقم الهاتف

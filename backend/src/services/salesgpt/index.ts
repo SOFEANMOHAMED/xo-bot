@@ -21,6 +21,7 @@ import {
     getCatalogMeta
 } from '../../catalog/product-search.js';
 import { resolveProductImageForBot } from '../../catalog/resolve-product-image.js';
+import { resolveColorEntity, formatColorOptionsForDisplay } from '../../catalog/color-options.js';
 import {
     sanitizeCaptionWhenImageSent,
     stripFalseImageDeliveryClaims
@@ -38,6 +39,25 @@ import type {
     RecommendationStrategy
 } from '../../core/types.js';
 import { logger } from '../../utils/logger.js';
+import {
+    isAffirmativeReply,
+    isNegativeReply,
+    botReplyAsksForConfirmation,
+    buildOrderConfirmedMessage,
+    AWAIT_CONFIRMATION_ACTION,
+    CONFIRM_ORDER_ACTION,
+    shouldAppendOrderData
+} from './orderConfirmationPolicy.js';
+
+// Re-export confirmation helpers so channel controllers keep a stable import path
+export {
+    isAffirmativeReply,
+    isNegativeReply,
+    botReplyAsksForConfirmation,
+    shouldAppendOrderData,
+    AWAIT_CONFIRMATION_ACTION,
+    CONFIRM_ORDER_ACTION
+} from './orderConfirmationPolicy.js';
 
 // ==================== TYPES ====================
 
@@ -123,99 +143,7 @@ const isCatalogExploreRequest = (text: string): boolean => {
     return CATALOG_EXPLORE_PATTERNS.some(p => p.test(text));
 };
 
-// ==================== DETERMINISTIC ORDER CONFIRMATION GATE ====================
-
-/**
- * Detect if the user's message is affirmative (yes / confirm / agree / correct).
- * Intentionally permissive: must not *require* strict end-of-string matching.
- */
-const AFFIRMATIVE_TOKENS = [
-    'نعم', 'أيوا', 'ايوا', 'أي', 'اي', 'تمام', 'موافق', 'ماشي', 'طيب',
-    'أكيد', 'اكيد', 'بالتأكيد', 'اوكي', 'اوكيه', 'ممتاز', 'صح', 'صحيح',
-    'ok', 'okay', 'yes', 'yep', 'yeah', 'sure', 'agree', 'agreed', 'correct', 'right'
-];
-
-const NEGATIVE_TOKENS = [
-    'لا', 'لأ', 'مش', 'مو', 'ما بدي', 'لا بدي', 'ارفض', 'إرفض', 'إلغاء', 'الغي',
-    'no', 'not', 'nope', 'cancel', 'reject', 'stop'
-];
-
-const CONFIRM_VERB_PATTERNS: RegExp[] = [
-    /(أكد|اكد|أأكد|اؤكد|أؤكد|تأكيد)\s*(الطلب|طلبي|الأوردر)?/i,
-    /(بدي|أريد|ابي|عاوز|رح)\s*(أكد|اكد|أأكد|اؤكد|أؤكد|تأكيد)/i,
-    /(confirm|place|submit|finalize)\s*(the\s+)?(order|it|my\s+order)?/i
-];
-
-function normalizeArabic(text: string): string {
-    return text
-        .trim()
-        .toLowerCase()
-        .replace(/[\u064B-\u0652]/g, '') // remove diacritics
-        .replace(/[إأآا]/g, 'ا')
-        .replace(/ى/g, 'ي')
-        .replace(/ة/g, 'ه')
-        .replace(/[!,.،؟?]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
-
-function containsAnyToken(text: string, tokens: string[]): boolean {
-    const normalized = normalizeArabic(text);
-    const normalizedTokens = tokens.map(t => normalizeArabic(t));
-    const words = new Set(normalized.split(' '));
-    return normalizedTokens.some(token =>
-        token.includes(' ')
-            ? normalized.includes(token)
-            : words.has(token)
-    );
-}
-
-/** Permissive affirmative detection that covers "اي صحيح", "اي تمام", "اي بدي أكد الطلب", "ok", "sure", … */
-export function isAffirmativeReply(messageText: string): boolean {
-    if (!messageText) return false;
-    if (containsAnyToken(messageText, NEGATIVE_TOKENS)) return false;
-    if (containsAnyToken(messageText, AFFIRMATIVE_TOKENS)) return true;
-    return CONFIRM_VERB_PATTERNS.some(p => p.test(messageText));
-}
-
-/**
- * Permissive negative detection ("لا", "لا شكرا", "nope", …).
- * Used when the customer declines an upsell / "anything else?" while still finalizing the order.
- */
-export function isNegativeReply(messageText: string): boolean {
-    if (!messageText) return false;
-    if (containsAnyToken(messageText, AFFIRMATIVE_TOKENS)) return false;
-    return containsAnyToken(messageText, NEGATIVE_TOKENS);
-}
-
-/**
- * True when an assistant text is still *asking* the customer to confirm
- * (e.g. "جاهز للتأكيد. هل ترغب في تأكيد الطلب؟" / "Would you like to confirm…?")
- * — as opposed to actually announcing the confirmation ("تم تأكيد طلبك" / "order confirmed").
- */
-export function botReplyAsksForConfirmation(text: string): boolean {
-    if (!text) return false;
-    const normalized = normalizeArabic(text);
-
-    // If it's already an *announcement* of confirmation, it is NOT a question.
-    if (/تم\s+(تاكيد|تأكيد|تأكيدُ)\s+(طلبك|الطلب)/.test(normalized)) return false;
-    if (/تأكدنا|تم\s+تسجيل\s+طلبك/.test(normalized)) return false;
-    if (/order\s+(has\s+been\s+)?confirmed|order\s+placed|order\s+received/i.test(text)) return false;
-
-    // Arabic question cues
-    if (/جاهز\s*(ة)?\s*(للتاكيد|للتأكيد)/.test(text)) return true;
-    if (/(هل\s+(ترغب|تريد|تود)|تحب).{0,20}(تاكيد|تأكيد)/.test(normalized)) return true;
-    if (/(هل\s+(ترغب|تريد|تود)).{0,15}(الطلب)/.test(normalized)) return true;
-    if (/(تاكيد|تأكيد)\s+الطلب\??\s*$/.test(normalized)) return true;
-    if (/اكد\s+الطلب\??\s*$/.test(normalized)) return true;
-
-    // English question cues
-    if (/confirm\s+(your\s+|the\s+)?order\s*\??/i.test(text) && /\?/.test(text)) return true;
-    if (/would\s+you\s+like\s+to\s+(confirm|place)/i.test(text)) return true;
-    if (/shall\s+i\s+(confirm|place)/i.test(text)) return true;
-
-    return false;
-}
+// ==================== ORDER COMPLETENESS ====================
 
 /** True when the most recent assistant message explicitly asked for order confirmation. */
 export function lastBotMessageAsksForConfirmation(recentMessages: Message[]): boolean {
@@ -452,11 +380,11 @@ export const processWithSalesGPT = async (
     let salesResult: SalesGPTResult;
 
     // ==================== DETERMINISTIC CONFIRMATION FAST-PATH ====================
-    // Closing/order-collection stages (or legacy text cue) + yes OR "no more additions"
-    // with complete fields → emit confirm_order locally (0 AI calls).
-    // Stage id is primary: AI closing questions drift ("قبل ما أكمل الطلب؟") and break text-regex.
+    // Completeness is read from state *before* this turn — providing the last field
+    // never finalizes here. Only an explicit yes/no while already ready does.
     const stageId = conversationState.salesgpt_stage_id?.trim();
     const wasInClosingFlow =
+        !!conversationState.awaiting_order_confirmation ||
         (!!stageId && ['6', '7', '8'].includes(stageId)) ||
         lastBotMessageAsksForConfirmation(recentMessages);
     const userSaidYes = isAffirmativeReply(messageText);
@@ -467,9 +395,15 @@ export const processWithSalesGPT = async (
     if (wasInClosingFlow && completeness.complete && (userSaidYes || userSaidNo)) {
         const e = conversationState.extracted_entities || {};
         const productName = products[0]?.name || e.product_query || '';
-        const thankMsg = language === 'arabic'
-            ? `تم تأكيد طلبك ${e.name ? `يا ${e.name}` : ''} 🎉 رح نتواصل معك قريباً لترتيب التوصيل.`
-            : `Your order has been confirmed${e.name ? `, ${e.name}` : ''}! 🎉 We'll contact you shortly to arrange delivery.`;
+        const thankMsg = buildOrderConfirmedMessage(language, {
+            name: e.name,
+            phone: e.phone,
+            address: e.address,
+            product_name: productName,
+            color: e.color,
+            size: e.size,
+            quantity: e.quantity
+        });
 
         logger.info('⚡ SalesGPT: deterministic confirm_order fast-path', {
             merchantId,
@@ -502,17 +436,17 @@ export const processWithSalesGPT = async (
                 phone: e.phone,
                 address: e.address
             },
-            nextAction: 'confirm_order',
+            nextAction: CONFIRM_ORDER_ACTION,
             aiCallsCount: 0
         };
 
-        // short-circuit
         const updatedStateFast: ConversationState = {
             ...conversationState,
             last_intent: 'order',
             current_stage: 'close',
             salesgpt_stage_id: '8',
             language,
+            awaiting_order_confirmation: false,
             last_order: isReturningAfterOrder ? undefined : conversationState.last_order,
             extracted_entities: {
                 ...(conversationState.extracted_entities || {}),
@@ -561,7 +495,7 @@ export const processWithSalesGPT = async (
             updatedState: updatedStateFast,
             aiCallsCount: 0,
             language,
-            next_action: 'confirm_order'
+            next_action: CONFIRM_ORDER_ACTION
         };
     }
 
@@ -643,6 +577,30 @@ export const processWithSalesGPT = async (
     }
 
     // ==================== STEP 4: Build Updated Conversation State ====================
+    // Resolve color against product options (compound options stay whole)
+    let resolvedColor =
+        salesResult.collectedInfo.color || conversationState.extracted_entities?.color || null;
+    if (products[0]?.colors?.length && (resolvedColor || messageText)) {
+        const colorResolution = resolveColorEntity(
+            resolvedColor,
+            products[0].colors,
+            messageText
+        );
+        if (colorResolution.needsClarification && colorResolution.ambiguous.length > 1) {
+            const options = formatColorOptionsForDisplay(
+                colorResolution.ambiguous,
+                language === 'english' ? 'english' : 'arabic'
+            );
+            finalReplyText = language === 'arabic'
+                ? `تقصد أي خيار لون؟ 🎨\n${options}`
+                : `Which color option did you mean? 🎨\n${options}`;
+            resolvedColor = null;
+        } else if (colorResolution.color) {
+            resolvedColor = colorResolution.color;
+            salesResult.collectedInfo.color = colorResolution.color;
+        }
+    }
+
     const updatedState: ConversationState = {
         ...conversationState,
         last_intent: salesResult.intent,
@@ -650,10 +608,11 @@ export const processWithSalesGPT = async (
         salesgpt_stage_id: salesResult.stageId,
         language,
         last_order: isReturningAfterOrder ? undefined : conversationState.last_order,
+        awaiting_order_confirmation: salesResult.nextAction === AWAIT_CONFIRMATION_ACTION,
         extracted_entities: {
             ...(conversationState.extracted_entities || {}),
             product_query: salesResult.collectedInfo.product_name || conversationState.extracted_entities?.product_query,
-            color: salesResult.collectedInfo.color || conversationState.extracted_entities?.color,
+            color: resolvedColor || undefined,
             size: salesResult.collectedInfo.size || conversationState.extracted_entities?.size,
             quantity: salesResult.collectedInfo.quantity || conversationState.extracted_entities?.quantity,
             name: salesResult.collectedInfo.name || conversationState.extracted_entities?.name,
@@ -670,6 +629,18 @@ export const processWithSalesGPT = async (
     }
 
     // ==================== STEP 5: Return Result ====================
+    // next_action is already policy-gated in the agent: confirm_order only after
+    // explicit customer finalization; otherwise await_confirmation.
+    const effectiveNextAction = salesResult.nextAction;
+    if (effectiveNextAction === AWAIT_CONFIRMATION_ACTION) {
+        updatedState.salesgpt_stage_id = '8';
+        updatedState.current_stage = 'close';
+        updatedState.awaiting_order_confirmation = true;
+    }
+    if (effectiveNextAction === CONFIRM_ORDER_ACTION) {
+        updatedState.awaiting_order_confirmation = false;
+    }
+
     const processingTime = Date.now() - startTime;
 
     logger.info('🧠 SalesGPT pipeline completed', {
@@ -677,7 +648,7 @@ export const processWithSalesGPT = async (
         intent: salesResult.intent,
         stage: salesResult.stage,
         stageId: salesResult.stageId,
-        nextAction: salesResult.nextAction,
+        nextAction: effectiveNextAction,
         aiCallsCount: salesResult.aiCallsCount,
         processingTimeMs: processingTime
     });
@@ -685,11 +656,13 @@ export const processWithSalesGPT = async (
     console.log('✅ SalesGPT decision:', {
         intent: salesResult.intent,
         stage: salesResult.stage,
-        stageId: salesResult.stageId,
-        nextAction: salesResult.nextAction,
+        stageId: updatedState.salesgpt_stage_id || salesResult.stageId,
+        nextAction: effectiveNextAction,
         collectedInfo: salesResult.collectedInfo,
         aiCalls: salesResult.aiCallsCount
     });
+
+    const isFinalConfirm = effectiveNextAction === CONFIRM_ORDER_ACTION;
 
     return {
         replyText: finalReplyText,
@@ -705,9 +678,9 @@ export const processWithSalesGPT = async (
         missingFields: [],
         products,
         plan: {
-            nextAction: (salesResult.nextAction === 'confirm_order' ? 'confirm_order' : 'recommend_products') as NextAction,
+            nextAction: (isFinalConfirm ? 'confirm_order' : 'recommend_products') as NextAction,
             oneQuestion: salesResult.responseText,
-            ctaType: (salesResult.nextAction === 'confirm_order' ? 'confirm' : 'choose') as CtaType,
+            ctaType: (isFinalConfirm ? 'confirm' : 'choose') as CtaType,
             recommendationStrategy: 'match_query' as RecommendationStrategy,
             shouldOfferDiscount: false,
             handoffReason: ''
@@ -715,7 +688,7 @@ export const processWithSalesGPT = async (
         updatedState,
         aiCallsCount: salesResult.aiCallsCount,
         language,
-        next_action: salesResult.nextAction
+        next_action: effectiveNextAction
     };
 };
 

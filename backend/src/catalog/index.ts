@@ -33,16 +33,27 @@ export {
 
 export type { FormatOptions } from './product-formatter.js';
 
+// ==================== COLOR OPTIONS (compound-safe) ====================
+export {
+  canonicalizeColor,
+  colorsMatch,
+  extractColorFromText,
+  normalizeColorToken,
+  matchColorOption,
+  formatColorOptionsForDisplay,
+  resolveColorEntity,
+  extractAtomicColors,
+  isCompoundColorOption
+} from './color-options.js';
+
+export type { ColorOptionMatch } from './color-options.js';
+
 // ==================== COLOR-AWARE IMAGE RESOLUTION ====================
 export {
   resolveProductImageForBot,
   resolveImageSrcForServing,
   fetchProductGallery,
-  pickGalleryImageForColor,
-  canonicalizeColor,
-  colorsMatch,
-  extractColorFromText,
-  normalizeColorToken
+  pickGalleryImageForColor
 } from './resolve-product-image.js';
 
 export type {
@@ -50,6 +61,21 @@ export type {
   ResolveProductImageInput,
   ResolveProductImageResult
 } from './resolve-product-image.js';
+
+// ==================== VISUAL (CLIP) IMAGE EMBEDDINGS ====================
+export {
+  ensureProductImageEmbeddingsTable,
+  embedImageBuffer,
+  searchProductsByImageEmbedding,
+  searchProductsByImageRef,
+  reindexProductImages,
+  scheduleProductImageReindex,
+  backfillProductImageEmbeddings,
+  VISUAL_EMBEDDING_MODEL,
+  VISUAL_EMBEDDING_DIMS
+} from './visual-embeddings.js';
+
+export type { VisualMatch } from './visual-embeddings.js';
 
 // ==================== CACHE MANAGER ====================
 export {

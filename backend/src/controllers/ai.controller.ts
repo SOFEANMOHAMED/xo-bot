@@ -8,7 +8,6 @@ import pool from '../database/connection.js';
 import { createError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
 import { handleIncomingMessage } from '../bot/index.js';
-import { botReplyAsksForConfirmation } from '../services/salesgpt/index.js';
 import {
   buildMerchantBotConfig,
   appendOrderDataIfConfirmed
@@ -227,7 +226,6 @@ export const generateChatResponse = async (
           productIds,
           storeCurrency: p.storeCurrency,
           channelLabel: `Bot Playground (${p.botPlatform})`,
-          replyStillAsks: botReplyAsksForConfirmation(responseText)
         });
 
         if (result.shouldEscalate) {

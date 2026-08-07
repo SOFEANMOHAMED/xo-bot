@@ -5,6 +5,7 @@
 
 import type { Product, Language } from '../core/types.js';
 import { getCurrencyDisplayName } from '../utils/currencyDisplayName.js';
+import { formatColorOptionsForDisplay } from './color-options.js';
 
 // ==================== TYPES ====================
 
@@ -66,12 +67,15 @@ export const formatProduct = (
       : `\n- 📏 **Sizes:** ${sizesStr}`;
   }
 
-  // Colors
+  // Colors — each array entry is one sellable option (may be compound e.g. أسود وبني)
   if (product.colors && product.colors.length > 0) {
-    const colorsStr = product.colors.join(', ');
+    const colorsStr = formatColorOptionsForDisplay(
+      product.colors,
+      language === 'english' ? 'english' : 'arabic'
+    );
     result += language === 'arabic'
-      ? `\n- 🎨 **الألوان:** ${colorsStr}`
-      : `\n- 🎨 **Colors:** ${colorsStr}`;
+      ? `\n- 🎨 **خيارات الألوان:** ${colorsStr}`
+      : `\n- 🎨 **Color options:** ${colorsStr}`;
   }
 
   // Stock

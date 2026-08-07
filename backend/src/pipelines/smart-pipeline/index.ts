@@ -17,6 +17,7 @@ import { detectIntent, type IntentDetectionResult } from './intent-detector.js';
 import { buildContext, updateContext, getProductIdFromContext } from './context-manager.js';
 import { searchProducts, getTopProducts, getProductById } from '../../catalog/product-search.js';
 import { resolveProductImageForBot } from '../../catalog/resolve-product-image.js';
+import { resolveColorEntity } from '../../catalog/color-options.js';
 import { planSalesAction, type SalesPlan } from '../../sales/sales-rules.js';
 import { buildResponse } from '../../response/response-builder.js';
 import { logger } from '../../utils/logger.js';
@@ -299,6 +300,16 @@ export const processSmartPipeline = async (
     firstProductSizes: products[0]?.sizes,
     firstProductColors: products[0]?.colors
   });
+
+  // Resolve color entity against product options (compound = one option)
+  if (products[0]?.colors?.length) {
+    const colorResolution = resolveColorEntity(entities.color, products[0].colors, messageText);
+    if (colorResolution.needsClarification) {
+      entities.color = undefined;
+    } else if (colorResolution.color) {
+      entities.color = colorResolution.color;
+    }
+  }
 
   // ==================== STEP 4: Sales Planning ====================
   const plan: SalesPlan = planSalesAction({

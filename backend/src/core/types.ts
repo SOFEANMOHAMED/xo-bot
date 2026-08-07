@@ -148,6 +148,8 @@ export interface ConversationState {
   missing_fields?: string[];
   objection?: Objection;
   last_order?: LastOrderSummary; // Triggers fresh-start greeting on next message
+  /** True while fields are complete and we are waiting for an explicit customer yes */
+  awaiting_order_confirmation?: boolean;
   abandoned_checkout?: AbandonedCheckoutState;
   channel_binding?: ChannelBinding;
 }

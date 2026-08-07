@@ -7,6 +7,25 @@
 import pool from '../database/connection.js';
 import type { Product } from '../core/types.js';
 import { logger } from '../utils/logger.js';
+import {
+  canonicalizeColor,
+  colorsMatch,
+  extractColorFromText,
+  matchColorOption,
+  normalizeColorToken
+} from './color-options.js';
+
+export {
+  canonicalizeColor,
+  colorsMatch,
+  extractColorFromText,
+  normalizeColorToken,
+  matchColorOption,
+  formatColorOptionsForDisplay,
+  resolveColorEntity,
+  extractAtomicColors,
+  isCompoundColorOption
+} from './color-options.js';
 
 export interface ProductGalleryImage {
   id: string;
@@ -31,78 +50,6 @@ export interface ResolveProductImageResult {
   matchedColor: string | null;
   galleryImageId: string | null;
   strategy: 'variant' | 'alt' | 'color_index' | 'primary' | 'none';
-}
-
-const COLOR_CANONICAL: Array<{ canonical: string; aliases: string[] }> = [
-  { canonical: 'احمر', aliases: ['احمر', 'أحمر', 'حمرا', 'حمراء', 'حمره', 'red', 'maroon', 'burgundy'] },
-  { canonical: 'ازرق', aliases: ['ازرق', 'أزرق', 'زرقا', 'زرقاء', 'زرقه', 'blue', 'navy', 'كحلي', 'كحليه'] },
-  { canonical: 'اخضر', aliases: ['اخضر', 'أخضر', 'خضرا', 'خضراء', 'خضره', 'green', 'olive'] },
-  { canonical: 'اصفر', aliases: ['اصفر', 'أصفر', 'صفرا', 'صفراء', 'صفره', 'yellow', 'gold', 'ذهبي', 'ذهبيه'] },
-  { canonical: 'اسود', aliases: ['اسود', 'أسود', 'سودا', 'سوداء', 'سوده', 'black'] },
-  { canonical: 'ابيض', aliases: ['ابيض', 'أبيض', 'بيضا', 'بيضاء', 'بيضه', 'white', 'offwhite', 'ivory'] },
-  { canonical: 'بني', aliases: ['بني', 'بنيه', 'brown', 'beige', 'بيج', 'بيجه'] },
-  { canonical: 'رمادي', aliases: ['رمادي', 'رماديه', 'gray', 'grey', 'silver', 'فضي', 'فضيه'] },
-  { canonical: 'برتقالي', aliases: ['برتقالي', 'برتقاليه', 'orange'] },
-  { canonical: 'وردي', aliases: ['وردي', 'ورديه', 'زهري', 'زهريه', 'روز', 'pink', 'rose'] },
-  { canonical: 'بنفسجي', aliases: ['بنفسجي', 'بنفسجيه', 'موف', 'purple', 'violet', 'lilac'] }
-];
-
-export function normalizeColorToken(input: string): string {
-  return input
-    .trim()
-    .toLowerCase()
-    .replace(/[\u064B-\u0652]/g, '')
-    .replace(/[إأآا]/g, 'ا')
-    .replace(/ى/g, 'ي')
-    .replace(/ة/g, 'ه')
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-export function canonicalizeColor(input: string | null | undefined): string | null {
-  if (!input?.trim()) return null;
-  const n = normalizeColorToken(input);
-  for (const entry of COLOR_CANONICAL) {
-    for (const alias of entry.aliases) {
-      const a = normalizeColorToken(alias);
-      if (n === a || n.includes(a) || a.includes(n)) {
-        return entry.canonical;
-      }
-    }
-  }
-  return n;
-}
-
-/** Fuzzy match between requested color and a catalog color/option/alt string */
-export function colorsMatch(requested: string, candidate: string): boolean {
-  const a = canonicalizeColor(requested);
-  const b = canonicalizeColor(candidate);
-  if (!a || !b) return false;
-  if (a === b) return true;
-  const an = normalizeColorToken(requested);
-  const bn = normalizeColorToken(candidate);
-  return an === bn || an.includes(bn) || bn.includes(an);
-}
-
-/** Extract a color mention from free text (Arabic/English) */
-export function extractColorFromText(text: string | null | undefined): string | null {
-  if (!text?.trim()) return null;
-  for (const entry of COLOR_CANONICAL) {
-    for (const alias of entry.aliases) {
-      const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const re = new RegExp(`(^|\\s|[,،/])${escaped}(?=$|\\s|[,،/.!?])`, 'i');
-      if (re.test(text) || text.toLowerCase().includes(alias.toLowerCase())) {
-        // Prefer whole-word-ish for short English tokens
-        if (/^[a-z]+$/i.test(alias)) {
-          const wordRe = new RegExp(`\\b${escaped}\\b`, 'i');
-          if (!wordRe.test(text)) continue;
-        }
-        return entry.canonical;
-      }
-    }
-  }
-  return null;
 }
 
 export async function fetchProductGallery(
@@ -165,6 +112,7 @@ function variantOptionColors(product: ResolveProductImageInput['product']): Arra
 
 /**
  * Pick gallery image matching color, or null if no match.
+ * Resolves against product.colors as whole options (compound colors stay one option).
  */
 export function pickGalleryImageForColor(
   gallery: ProductGalleryImage[],
@@ -173,9 +121,14 @@ export function pickGalleryImageForColor(
 ): { image: ProductGalleryImage; strategy: 'variant' | 'alt' | 'color_index' } | null {
   if (!gallery.length || !requestedColor.trim()) return null;
 
+  const colors = product.colors || [];
+  const optionMatch = matchColorOption(requestedColor, colors);
+  if (optionMatch.ambiguous.length > 1) return null;
+  const resolvedColor = optionMatch.matched || requestedColor;
+
   // 1) Variant-linked images (Shopify)
   const colorVariants = variantOptionColors(product).filter((v) =>
-    colorsMatch(requestedColor, v.colorText)
+    colorsMatch(resolvedColor, v.colorText)
   );
   if (colorVariants.length > 0) {
     const variantIdSet = new Set(colorVariants.map((v) => v.variantId));
@@ -188,15 +141,14 @@ export function pickGalleryImageForColor(
   }
 
   // 2) Alt text contains the color (manual products after alt=color sync)
-  const byAlt = gallery.find((img) => img.alt && colorsMatch(requestedColor, img.alt));
+  const byAlt = gallery.find((img) => img.alt && colorsMatch(resolvedColor, img.alt));
   if (byAlt) {
     return { image: byAlt, strategy: 'alt' };
   }
 
   // 3) Parallel colors[] ↔ gallery[] by index (only when counts match)
-  const colors = product.colors || [];
   if (colors.length > 0 && gallery.length === colors.length) {
-    const colorIndex = colors.findIndex((c) => colorsMatch(requestedColor, c));
+    const colorIndex = colors.findIndex((c) => colorsMatch(resolvedColor, c));
     if (colorIndex >= 0 && gallery[colorIndex]) {
       return { image: gallery[colorIndex], strategy: 'color_index' };
     }
@@ -223,9 +175,14 @@ export async function resolveProductImageForBot(
     };
   }
 
+  const fromMessage = extractColorFromText(input.messageText, product.colors);
+  const optionResolved = input.requestedColor
+    ? matchColorOption(input.requestedColor, product.colors).matched
+    : null;
   const requestedColor =
-    canonicalizeColor(input.requestedColor) ||
-    extractColorFromText(input.messageText) ||
+    optionResolved ||
+    fromMessage ||
+    (input.requestedColor ? canonicalizeColor(input.requestedColor) : null) ||
     null;
 
   try {

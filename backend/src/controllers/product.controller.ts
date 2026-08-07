@@ -8,6 +8,7 @@ import { invalidateProductKeywords } from '../services/cacheService.js';
 import { clearProductKeywordsCache } from '../services/tools/catalogTool.js';
 import { clearProductCache } from '../catalog/product-search.js';
 import { resolveImageSrcForServing } from '../catalog/resolve-product-image.js';
+import { scheduleProductImageReindex } from '../catalog/visual-embeddings.js';
 
 const MAX_PRODUCT_IMAGES = 10;
 
@@ -288,6 +289,7 @@ export const createProduct = async (
     invalidateProductKeywords(req.merchantId!);
     clearProductKeywordsCache(req.merchantId!);
     clearProductCache(req.merchantId!);
+    scheduleProductImageReindex(req.merchantId!, row.id);
 
     res.status(201).json({
       success: true,
@@ -458,6 +460,9 @@ export const updateProduct = async (
     invalidateProductKeywords(req.merchantId!);
     clearProductKeywordsCache(req.merchantId!);
     clearProductCache(req.merchantId!);
+    if (hasImagesUpdate || validated.imageUrl !== undefined) {
+      scheduleProductImageReindex(req.merchantId!, id);
+    }
 
     res.json({
       success: true,

@@ -1,12 +1,20 @@
 /**
  * Image Recognition Service
- * Analyzes customer-sent images via OpenAI Vision, then searches the merchant catalog.
+ * Primary path: CLIP visual similarity against the merchant's product images.
+ * Fallback: OpenAI Vision description + text catalog search.
+ *
  * Used by Telegram / Messenger / Instagram DM controllers.
  */
 
 import OpenAI from 'openai';
 import { logger } from '../utils/logger.js';
 import { searchProducts } from '../catalog/product-search.js';
+import {
+  embedImageBuffer,
+  searchProductsByImageEmbedding,
+  loadProductsByIdsOrdered,
+  resolveImageToBuffer
+} from '../catalog/visual-embeddings.js';
 import type { Product } from '../core/types.js';
 
 const API_KEY = process.env.OPENAI_API_KEY || '';
@@ -22,6 +30,9 @@ export interface ImageAnalysisResult {
   description: string;
   searchQuery: string;
   products: Product[];
+  /** visual | vision_text | none */
+  matchMethod?: 'visual' | 'vision_text' | 'none';
+  visualScores?: Array<{ productId: string; score: number }>;
 }
 
 /**
@@ -41,76 +52,155 @@ export async function imageUrlToBase64(url: string): Promise<string | null> {
   }
 }
 
-/**
- * Analyze an image and search the merchant catalog for matching products.
- *
- * @param imageDataUrl  base64 data-URL (data:image/…;base64,…) OR a public https URL
- * @param merchantId    merchant whose catalog to search
- * @param userMessage   optional text the user sent alongside the photo
- * @param storeCurrency for context in the prompt
- */
-export async function analyzeImageAndSearch(
-  imageDataUrl: string,
-  merchantId: string,
-  userMessage?: string,
-  storeCurrency?: string
-): Promise<ImageAnalysisResult | null> {
-  const ai = getClient();
-  if (!ai) {
-    logger.warn('imageRecognition: OpenAI key not configured');
-    return null;
+async function dataUrlOrUrlToBuffer(imageDataUrl: string): Promise<Buffer | null> {
+  if (imageDataUrl.startsWith('data:image/')) {
+    const match = imageDataUrl.match(/^data:image\/[^;]+;base64,(.+)$/);
+    if (!match?.[1]) return null;
+    return Buffer.from(match[1], 'base64');
   }
+  return resolveImageToBuffer(imageDataUrl);
+}
 
-  try {
-    const systemPrompt = `You are a product recognition assistant for an online store.
+async function describeImageWithVision(
+  imageDataUrl: string,
+  userMessage?: string
+): Promise<{ description: string; searchQuery: string } | null> {
+  const ai = getClient();
+  if (!ai) return null;
+
+  const systemPrompt = `You are a product recognition assistant for an online store.
 The user sent a photo — possibly of a product they want to buy.
 1. Describe the item briefly (type, color, brand if visible, material).
 2. Return a concise JSON object with:
    { "description": "<short Arabic description>", "searchQuery": "<1-3 Arabic keywords suitable for searching a product catalog>" }
 Only output the JSON, no markdown fences.`;
 
-    const userContent: OpenAI.Chat.ChatCompletionContentPart[] = [];
+  const userContent: OpenAI.Chat.ChatCompletionContentPart[] = [];
+  if (userMessage && userMessage.trim()) {
+    userContent.push({ type: 'text', text: `رسالة العميل: ${userMessage}` });
+  }
+  userContent.push({
+    type: 'image_url',
+    image_url: { url: imageDataUrl, detail: 'low' }
+  });
 
-    if (userMessage && userMessage.trim()) {
-      userContent.push({ type: 'text', text: `رسالة العميل: ${userMessage}` });
+  const completion = await ai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userContent }
+    ],
+    temperature: 0.3,
+    max_tokens: 300
+  });
+
+  let raw = completion.choices?.[0]?.message?.content?.trim() || '';
+  if (raw.startsWith('```')) {
+    raw = raw.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as { description?: string; searchQuery?: string };
+    return {
+      description: parsed.description || 'منتج',
+      searchQuery: parsed.searchQuery || parsed.description || 'منتج'
+    };
+  } catch {
+    return { description: raw || 'منتج', searchQuery: (raw || 'منتج').substring(0, 40) };
+  }
+}
+
+/**
+ * Analyze an image and match against the merchant catalog.
+ * Prefer CLIP visual similarity; fall back to Vision + text search.
+ */
+export async function analyzeImageAndSearch(
+  imageDataUrl: string,
+  merchantId: string,
+  userMessage?: string,
+  _storeCurrency?: string
+): Promise<ImageAnalysisResult | null> {
+  try {
+    const buffer = await dataUrlOrUrlToBuffer(imageDataUrl);
+    if (!buffer) {
+      logger.warn('imageRecognition: could not decode customer image', { merchantId });
+      return null;
     }
 
-    userContent.push({
-      type: 'image_url',
-      image_url: { url: imageDataUrl, detail: 'low' }
+    // ---------- Primary: CLIP visual match (tenant-scoped) ----------
+    const queryEmbedding = await embedImageBuffer(buffer);
+    if (queryEmbedding) {
+      const matches = await searchProductsByImageEmbedding(merchantId, queryEmbedding, {
+        limit: 5,
+        minScore: Number(process.env.VISUAL_MATCH_MIN_SCORE || '0.28')
+      });
+
+      if (matches.length > 0) {
+        const products = await loadProductsByIdsOrdered(
+          merchantId,
+          matches.map((m) => m.productId)
+        );
+
+        // Optional short Arabic description for bot UX (non-blocking on failure)
+        let description = products[0]?.name || 'منتج مشابه';
+        let searchQuery = products[0]?.name || description;
+        try {
+          const vision = await describeImageWithVision(imageDataUrl, userMessage);
+          if (vision?.description) description = vision.description;
+          if (vision?.searchQuery) searchQuery = vision.searchQuery;
+        } catch {
+          /* keep product-name fallback */
+        }
+
+        logger.info('imageRecognition: visual CLIP match', {
+          merchantId,
+          matchCount: products.length,
+          topScore: matches[0]?.score,
+          topProduct: products[0]?.name
+        });
+
+        return {
+          description,
+          searchQuery,
+          products,
+          matchMethod: 'visual',
+          visualScores: matches.map((m) => ({ productId: m.productId, score: m.score }))
+        };
+      }
+
+      logger.info('imageRecognition: no visual match above threshold', { merchantId });
+    } else {
+      logger.warn('imageRecognition: CLIP embed failed — falling back to vision text', {
+        merchantId
+      });
+    }
+
+    // ---------- Fallback: Vision caption + lexical catalog search ----------
+    const vision = await describeImageWithVision(imageDataUrl, userMessage);
+    if (!vision) {
+      logger.warn('imageRecognition: vision fallback unavailable', { merchantId });
+      return {
+        description: 'صورة منتج',
+        searchQuery: '',
+        products: [],
+        matchMethod: 'none'
+      };
+    }
+
+    const products = await searchProducts(merchantId, vision.searchQuery, undefined, 5);
+    logger.info('imageRecognition: vision text fallback', {
+      merchantId,
+      description: vision.description,
+      searchQuery: vision.searchQuery,
+      productCount: products.length
     });
 
-    const completion = await ai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userContent }
-      ],
-      temperature: 0.3,
-      max_tokens: 300
-    });
-
-    let raw = completion.choices?.[0]?.message?.content?.trim() || '';
-    if (raw.startsWith('```')) {
-      raw = raw.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
-    }
-
-    let parsed: { description?: string; searchQuery?: string };
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      logger.warn('imageRecognition: could not parse vision JSON', { raw });
-      parsed = { description: raw, searchQuery: raw.substring(0, 40) };
-    }
-
-    const description = parsed.description || 'منتج';
-    const searchQuery = parsed.searchQuery || description;
-
-    logger.info('imageRecognition: vision result', { description, searchQuery, merchantId });
-
-    const products = await searchProducts(merchantId, searchQuery, undefined, 5);
-
-    return { description, searchQuery, products };
+    return {
+      description: vision.description,
+      searchQuery: vision.searchQuery,
+      products,
+      matchMethod: products.length > 0 ? 'vision_text' : 'none'
+    };
   } catch (e) {
     logger.error('imageRecognition: analysis failed', e as Error, { merchantId });
     return null;

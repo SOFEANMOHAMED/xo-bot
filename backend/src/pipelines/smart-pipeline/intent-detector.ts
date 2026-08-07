@@ -734,16 +734,19 @@ Extract intent and entities. Return ONLY valid JSON.`;
         { pattern: /\b(xxxl|3xl)\b/i, size: 'xxxl' }
       ];
       
-      let detectedColor: string | undefined;
-      let detectedSize: string | undefined;
-      
-      // البحث عن اللون
+      // Collect ALL mentioned colors (supports compound options like أسود وبني)
+      const detectedColors: string[] = [];
       for (const { pattern, color } of colorPatterns) {
-        if (pattern.test(text)) {
-          detectedColor = color;
-          break;
+        if (pattern.test(text) && !detectedColors.includes(color)) {
+          detectedColors.push(color);
         }
       }
+      const detectedColor =
+        detectedColors.length >= 2
+          ? detectedColors.join(' و ')
+          : detectedColors[0];
+      
+      let detectedSize: string | undefined;
       
       // البحث عن المقاس
       for (const { pattern, size } of sizePatterns) {

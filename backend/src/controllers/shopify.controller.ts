@@ -8,6 +8,7 @@ import { buildShopifyAdminApiUrl } from '../config/shopify.js';
 import { invalidateProductKeywords } from '../services/cacheService.js';
 import { clearProductKeywordsCache } from '../services/tools/catalogTool.js';
 import { notifyMerchantNewOrderAsync } from '../services/notifyMerchantNewOrder.js';
+import { scheduleProductImageReindex } from '../catalog/visual-embeddings.js';
 
 // =============================================
 // TYPES & INTERFACES
@@ -570,6 +571,7 @@ export const syncShopifyProducts = async (
           if (shopifyProduct.images && shopifyProduct.images.length > 0) {
             await saveProductImages(productId, req.merchantId, shopifyProduct.images);
           }
+          scheduleProductImageReindex(req.merchantId!, productId);
 
           // Save options
           if (shopifyProduct.options && shopifyProduct.options.length > 0) {
@@ -1197,6 +1199,8 @@ const handleProductWebhook = async (merchantId: string, product: any): Promise<v
   if (product.options?.length > 0) {
     await saveProductOptions(productId, merchantId, product.options);
   }
+
+  scheduleProductImageReindex(merchantId, productId);
 
   // ✅ إبطال كاش المنتجات بعد تحديث/إضافة منتج عبر webhook
   invalidateProductKeywords(merchantId);

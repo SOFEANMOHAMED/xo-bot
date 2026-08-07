@@ -4,6 +4,7 @@
  */
 
 import type { MerchantConfig, Persona } from '../core/types.js';
+import { shouldAppendOrderData } from './salesgpt/orderConfirmationPolicy.js';
 
 export type MerchantSettingsLike = {
   store_name?: string | null;
@@ -54,7 +55,8 @@ export function buildMerchantBotConfig(options: BuildMerchantBotConfigOptions): 
 }
 
 /**
- * Append [ORDER_DATA] when the bot confirms an order — same gate as FB/IG/Telegram.
+ * Append [ORDER_DATA] when the pipeline finalized the order (next_action = confirm_order).
+ * Shared by every channel — do not duplicate this gate in controllers.
  */
 export function appendOrderDataIfConfirmed(params: {
   responseText: string;
@@ -63,7 +65,8 @@ export function appendOrderDataIfConfirmed(params: {
   productIds: string[];
   storeCurrency: string;
   channelLabel: string;
-  replyStillAsks: boolean;
+  /** @deprecated Ignored — finalization is decided solely by next_action in SalesGPT policy */
+  replyStillAsks?: boolean;
 }): string {
   const {
     responseText,
@@ -72,10 +75,8 @@ export function appendOrderDataIfConfirmed(params: {
     productIds,
     storeCurrency,
     channelLabel,
-    replyStillAsks,
   } = params;
 
-  const isOrderConfirmed = nextAction === 'confirm_order';
   const hasAllOrderInfo = !!(
     entities.name &&
     entities.phone &&
@@ -83,7 +84,7 @@ export function appendOrderDataIfConfirmed(params: {
     productIds.length > 0
   );
 
-  if (!hasAllOrderInfo || !isOrderConfirmed || replyStillAsks) {
+  if (!hasAllOrderInfo || !shouldAppendOrderData(nextAction, responseText)) {
     return responseText;
   }
 
@@ -106,3 +107,4 @@ export function appendOrderDataIfConfirmed(params: {
 
   return `${responseText}\n[ORDER_DATA]${JSON.stringify(fullAIOrderData)}[/ORDER_DATA]`;
 }
+

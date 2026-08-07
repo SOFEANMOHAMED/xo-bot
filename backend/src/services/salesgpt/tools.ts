@@ -12,6 +12,7 @@ import {
 import type { Product, MerchantConfig } from '../../core/types.js';
 import { logger } from '../../utils/logger.js';
 import { getCurrencyDisplayName } from '../../utils/currencyDisplayName.js';
+import { formatColorOptionsForDisplay } from '../../catalog/color-options.js';
 
 // ==================== TOOL DEFINITIONS ====================
 
@@ -50,7 +51,7 @@ const productSearchTool = async (query: string, context: ToolContext): Promise<s
                 info += p.stock > 0 ? ` (متوفر: ${p.stock})` : ` (غير متوفر)`;
             }
             if (p.colors && p.colors.length > 0) {
-                info += ` | ألوان: ${p.colors.join('، ')}`;
+                info += ` | خيارات الألوان: ${formatColorOptionsForDisplay(p.colors, 'arabic')}`;
             }
             if (p.sizes && p.sizes.length > 0) {
                 info += ` | مقاسات: ${p.sizes.join('، ')}`;
@@ -100,7 +101,7 @@ const productDetailsTool = async (productName: string, context: ToolContext): Pr
             details += `📊 المخزون: ${product.stock > 0 ? `${product.stock} قطعة` : 'غير متوفر'}\n`;
         }
         if (product.colors && product.colors.length > 0) {
-            details += `🎨 الألوان: ${product.colors.join('، ')}\n`;
+            details += `🎨 خيارات الألوان (كل رقم = خيار واحد): ${formatColorOptionsForDisplay(product.colors, 'arabic')}\n`;
         }
         if (product.sizes && product.sizes.length > 0) {
             details += `📏 المقاسات: ${product.sizes.join('، ')}\n`;

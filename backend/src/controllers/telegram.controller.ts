@@ -7,9 +7,9 @@ import { logger } from '../utils/logger.js';
 // ✅ النظام الجديد - Modular Architecture v2.0
 import { handleIncomingMessage } from '../bot/index.js';
 import type { Message, ConversationState, MerchantConfig } from '../bot/index.js';
-import { botReplyAsksForConfirmation } from '../services/salesgpt/index.js';
 import { escalateConversationToHuman } from '../services/escalation.js';
 import { stripInternalControlMarkers } from '../response/sanitize-reply.js';
+import { appendOrderDataIfConfirmed } from '../services/buildMerchantBotConfig.js';
 import { telegramAdapter, sendTelegramTyping } from '../services/channels/telegram.adapter.js';
 import { startTypingKeepalive } from '../services/channels/replyDelivery.js';
 import {
@@ -627,69 +627,24 @@ const processTelegramMessage = async (update: any) => {
       responseText = result.replyText;
       updatedState = result.updatedState;
 
-      // ==================== FULL AI MODE: Check if order should be created ====================
-      // If AI decided to confirm order, build orderData from conversationState
-      // Check if all required order info is present (name, phone, address, product)
+      // Shared gate: ORDER_DATA only when pipeline next_action === confirm_order
       const entities = updatedState.extracted_entities || {};
       const products = updatedState.last_recommended_products || [];
-      
-      // 🚨 CRITICAL: Only create order when AI explicitly confirms (next_action = confirm_order)
-      const isOrderConfirmed = result.next_action === 'confirm_order';
+      responseText = appendOrderDataIfConfirmed({
+        responseText,
+        nextAction: result.next_action,
+        entities,
+        productIds: products,
+        storeCurrency: settings?.store_currency || 'USD',
+        channelLabel: 'Telegram (Full AI Mode)',
+      });
 
-      const hasAllOrderInfo = !!(
-        entities.name &&
-        entities.phone &&
-        entities.address &&
-        products.length > 0
-      );
-
-      // 🛡️ Guard: if the bot's reply is *still asking* for confirmation (not announcing it),
-      // postpone order creation to the next user turn. Prevents the "auto-confirm + then ask again" loop
-      // that caused the post-reset returning-customer fast-path to misfire.
-      const replyStillAsks = botReplyAsksForConfirmation(responseText);
-
-      // ✅ Create order ONLY when AI confirms + has all info + reply is an *announcement*
-      if (hasAllOrderInfo && isOrderConfirmed && !replyStillAsks) {
-        console.log('[processTelegramMessage] Full AI Mode: Order confirmed by AI, creating order:', {
-          entities,
-          products,
+      if (result.next_action === 'confirm_order' && responseText.includes('[ORDER_DATA]')) {
+        console.log('[processTelegramMessage] Full AI Mode: Order confirmed, ORDER_DATA attached:', {
+          name: entities.name,
+          productsCount: products.length,
           next_action: result.next_action
         });
-        
-        // Build orderData from extracted entities
-        if (entities.name && entities.phone && entities.address && products.length > 0) {
-          const fullAIOrderData = {
-            customerName: entities.name,
-            customerPhone: entities.phone,
-            customerAddress: entities.address,
-            customerEmail: entities.email || null,
-            deliveryTime: entities.delivery_time || null,
-            notes: `Order via Telegram (Full AI Mode) | Product: ${entities.product_query || 'N/A'}${entities.color ? ` | Color: ${entities.color}` : ''}${entities.size ? ` | Size: ${entities.size}` : ''}`,
-            products: products.map((productId: string) => ({
-              productId: productId,
-              productName: entities.product_query || 'Product',
-              quantity: entities.quantity || 1,
-              price: 0, // Will be updated from database
-              currency: settings?.store_currency || 'USD'
-            })),
-            total: 0 // Will be calculated
-          };
-          
-          // Add ORDER_DATA to response text so it's processed later
-          responseText = `${responseText}\n[ORDER_DATA]${JSON.stringify(fullAIOrderData)}[/ORDER_DATA]`;
-          
-          console.log('[processTelegramMessage] Full AI Mode: orderData added to response:', {
-            customerName: fullAIOrderData.customerName,
-            productsCount: fullAIOrderData.products.length
-          });
-        } else {
-          console.warn('[processTelegramMessage] Full AI Mode: Missing required order information:', {
-            hasName: !!entities.name,
-            hasPhone: !!entities.phone,
-            hasAddress: !!entities.address,
-            hasProducts: products.length > 0
-          });
-        }
       }
 
       if (result.shouldEscalate) {
@@ -1183,6 +1138,7 @@ const processTelegramMessage = async (update: any) => {
         updatedState.salesgpt_stage_id = '1';
         updatedState.last_intent = 'greeting';
         updatedState.message_count = 0;
+        updatedState.awaiting_order_confirmation = false;
         delete updatedState.abandoned_checkout;
 
         console.log('🧹 Telegram: Full state reset after order. last_order saved:', {

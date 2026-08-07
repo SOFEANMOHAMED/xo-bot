@@ -375,6 +375,7 @@ export async function persistBotChannelOrder(
     updatedState.salesgpt_stage_id = '1';
     updatedState.last_intent = 'greeting';
     updatedState.message_count = 0;
+    updatedState.awaiting_order_confirmation = false;
     clearAbandonedCheckoutFromState(updatedState);
 
     console.log(`[${logPrefix}] Full state reset after order. last_order saved:`, {

@@ -476,7 +476,7 @@ const ProductManager: React.FC<ProductManagerProps> = ({ products, onAddProduct,
                 <th scope="col" className="px-6 py-4">السعر</th>
                 <th scope="col" className="px-6 py-4">المخزون</th>
                 <th scope="col" className="px-6 py-4">المقاسات</th>
-                <th scope="col" className="px-6 py-4">الألوان</th>
+                <th scope="col" className="px-6 py-4">خيارات الألوان</th>
                 <th scope="col" className="px-6 py-4">الإجراءات</th>
               </tr>
             </thead>
@@ -652,19 +652,34 @@ const ProductManager: React.FC<ProductManagerProps> = ({ products, onAddProduct,
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{newProduct.name.length}/200</p>
               </div>
 
-              {/* Colors — before images so merchant can link each photo to a color */}
+              {/* Color options — each comma-separated entry is ONE sellable option (may combine colors) */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">الألوان (مفصولة بفاصلة)</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  خيارات الألوان
+                </label>
                 <input 
                   type="text" 
                   className="w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-brand outline-none"
-                  placeholder="أسود، بيج، أزرق"
+                  placeholder="أسود وبني، أصفر وأحمر"
                   value={colorsInput}
                   onChange={e => handleColorsInputChange(e.target.value)}
                 />
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  أدخل الألوان أولاً، ثم اربط كل صورة بلون من القائمة أسفلها.
+                  افصل الخيارات بفاصلة فقط. التركيبة الواحدة = خيار واحد (مثال: «أسود وبني» قطعة واحدة، وليست لونين منفصلين).
                 </p>
+                {availableColors.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {availableColors.map((c) => (
+                      <span
+                        key={c}
+                        className="inline-flex items-center px-2 py-0.5 text-xs rounded-md bg-brand/10 text-brand border border-brand/20"
+                        title="خيار لون واحد للبيع"
+                      >
+                        {c}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Image Upload */}
@@ -676,7 +691,7 @@ const ProductManager: React.FC<ProductManagerProps> = ({ products, onAddProduct,
                   </span>
                 </label>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-                  يمكنك رفع حتى {MAX_PRODUCT_IMAGES} صور. الصورة الأولى هي الرئيسية. اختر لون كل صورة من القائمة.
+                  يمكنك رفع حتى {MAX_PRODUCT_IMAGES} صور. الصورة الأولى هي الرئيسية. اربط كل صورة بخيار لون من القائمة (التركيبة الكاملة مثل «أسود وبني»).
                 </p>
                 <div className="flex flex-wrap items-start gap-3">
                   {productImages.map((img, index) => {
@@ -766,7 +781,7 @@ const ProductManager: React.FC<ProductManagerProps> = ({ products, onAddProduct,
                 </div>
                 {productImages.length > 0 && availableColors.length === 0 && (
                   <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
-                    أضف ألواناً أعلاه لتظهر في قائمة ربط كل صورة.
+                    أضف خيارات ألوان أعلاه لتظهر في قائمة ربط كل صورة.
                   </p>
                 )}
               </div>

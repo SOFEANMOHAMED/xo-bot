@@ -642,7 +642,7 @@ export const handleWhatsAppWebhook = async (
             const autoReplyEnabled = merchantResult.rows[0].auto_reply_enabled;
             const welcomeMessage = merchantResult.rows[0].welcome_message;
 
-            // ==================== INBOUND IMAGE (persist for inbox) ====================
+            // ==================== INBOUND IMAGE (persist + visual recognition) ====================
             if (imageMediaId) {
               const accessToken = await getWhatsAppAccessToken(merchantId);
               if (accessToken) {
@@ -654,6 +654,35 @@ export const handleWhatsAppWebhook = async (
                     mimeType: media.mimeType || message.image?.mime_type || 'image/jpeg',
                     source: 'whatsapp',
                   });
+
+                  try {
+                    const { analyzeImageAndSearch } = await import('../services/imageRecognition.js');
+                    const mime = media.mimeType || message.image?.mime_type || 'image/jpeg';
+                    const dataUrl = `data:${mime};base64,${media.buffer.toString('base64')}`;
+                    const analysis = await analyzeImageAndSearch(
+                      dataUrl,
+                      merchantId,
+                      messageText && messageText !== '📷 صورة' ? messageText : undefined
+                    );
+                    if (analysis) {
+                      const productList = analysis.products
+                        .slice(0, 3)
+                        .map((p, i) => `${i + 1}. ${p.name} — ${p.price} ${p.currency || ''}`)
+                        .join('\n');
+                      if (analysis.products.length > 0) {
+                        messageText = `[تحليل صورة العميل: "${analysis.description}" — المنتجات المطابقة في المتجر:\n${productList}]\n${messageText && messageText !== '📷 صورة' ? messageText : 'كم سعر هذا المنتج؟'}`;
+                      } else {
+                        messageText = `[تحليل صورة العميل: "${analysis.description}" — لم يُعثر على منتج مطابق في المتجر]\n${messageText && messageText !== '📷 صورة' ? messageText : 'كم سعر هذا المنتج؟'}`;
+                      }
+                      logger.info('WhatsApp image analyzed', {
+                        merchantId,
+                        method: analysis.matchMethod,
+                        products: analysis.products.length
+                      });
+                    }
+                  } catch (imgErr) {
+                    logger.error('WhatsApp image analysis failed', imgErr as Error, { merchantId });
+                  }
                 }
               }
               if (!messageText.trim()) {

@@ -16,6 +16,7 @@ import type {
 } from '../core/types.js';
 import { logger } from '../utils/logger.js';
 import { getCurrencyDisplayName } from '../utils/currencyDisplayName.js';
+import { formatColorOptionsForDisplay, resolveColorEntity } from '../catalog/color-options.js';
 
 // ==================== TYPES ====================
 
@@ -267,6 +268,27 @@ export const planSalesAction = (input: SalesPlanInput): SalesPlan => {
     const hasSizes = Array.isArray(product.sizes) && product.sizes.length > 0;
     const hasColors = Array.isArray(product.colors) && product.colors.length > 0;
 
+    // Normalize extracted color against product options (compound-safe)
+    if (hasColors && entities.color) {
+      const resolved = resolveColorEntity(entities.color, product.colors);
+      if (resolved.needsClarification) {
+        const options = formatColorOptionsForDisplay(resolved.ambiguous, language === 'english' ? 'english' : 'arabic');
+        return {
+          nextAction: 'ask_clarify',
+          oneQuestion: language === 'arabic'
+            ? `تقصد أي خيار؟ 🎨\n${options}`
+            : `Which color option did you mean? 🎨\n${options}`,
+          ctaType: 'choose',
+          recommendationStrategy: null,
+          shouldOfferDiscount: false,
+          handoffReason: ''
+        };
+      }
+      if (resolved.color) {
+        entities.color = resolved.color;
+      }
+    }
+
     console.log('🎯 INSIDE RULE 3.5 - Smart color/size detection', {
       hasColors,
       hasSizes,
@@ -325,12 +347,15 @@ export const planSalesAction = (input: SalesPlanInput): SalesPlan => {
         productName: product.name,
         availableColors: product.colors
       });
-      const options = product.colors!.join('، ');
+      const options = formatColorOptionsForDisplay(
+        product.colors!,
+        language === 'english' ? 'english' : 'arabic'
+      );
       return {
         nextAction: 'ask_clarify',
         oneQuestion: language === 'arabic'
-          ? `تمام! المقاس ${entities.size} 📏\nوما اللون المفضل؟ 🎨\n(المتاح: ${options})`
-          : `Perfect! Size ${entities.size} 📏\nWhich color would you like? 🎨\n(Available: ${options})`,
+          ? `تمام! المقاس ${entities.size} 📏\nوما خيار اللون المفضل؟ 🎨\n(المتاح: ${options})`
+          : `Perfect! Size ${entities.size} 📏\nWhich color option would you like? 🎨\n(Available: ${options})`,
         ctaType: 'choose',
         recommendationStrategy: null,
         shouldOfferDiscount: false,
@@ -348,12 +373,15 @@ export const planSalesAction = (input: SalesPlanInput): SalesPlan => {
         productName: product.name,
         availableColors: product.colors
       });
-      const options = product.colors!.join('، ');
+      const options = formatColorOptionsForDisplay(
+        product.colors!,
+        language === 'english' ? 'english' : 'arabic'
+      );
       return {
         nextAction: 'ask_clarify',
         oneQuestion: language === 'arabic'
-          ? `قبل ما نجهز الطلب، ما اللون المفضل؟ 🎨\n(المتاح: ${options})`
-          : `Before we prepare your order, which color? 🎨\n(Available: ${options})`,
+          ? `قبل ما نجهز الطلب، ما خيار اللون المفضل؟ 🎨\n(المتاح: ${options})`
+          : `Before we prepare your order, which color option? 🎨\n(Available: ${options})`,
         ctaType: 'choose',
         recommendationStrategy: null,
         shouldOfferDiscount: false,

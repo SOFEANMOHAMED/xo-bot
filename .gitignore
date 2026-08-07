@@ -9,6 +9,8 @@ logs/
 !.env.production.example
 backend/.env
 backend/logs/
+backend/.cache/
+.cache/
 .DS_Store
 *.pem
 *.key

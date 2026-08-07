@@ -32,6 +32,8 @@ import type {
 import { logger } from '../../utils/logger.js';
 import { getCurrencyDisplayName } from '../../utils/currencyDisplayName.js';
 import { detectEscalationMarker, stripInternalControlMarkers } from '../../response/sanitize-reply.js';
+import { resolveOrderNextAction } from './orderConfirmationPolicy.js';
+import { formatColorOptionsForDisplay } from '../../catalog/color-options.js';
 
 /** Values the sales-response model may return in JSON `next_action` */
 const SALESGPT_MODEL_NEXT_ACTIONS = new Set([
@@ -41,6 +43,7 @@ const SALESGPT_MODEL_NEXT_ACTIONS = new Set([
   'handle_objection',
   'close_sale',
   'collect_info',
+  'await_confirmation',
   'confirm_order',
   'send_image',
   'end_conversation'
@@ -49,6 +52,9 @@ const SALESGPT_MODEL_NEXT_ACTIONS = new Set([
 /**
  * Single source of truth: next_action → SalesGPT stage (1–9).
  * Stage is derived — never decided by a separate AI call.
+ *
+ * await_confirmation and confirm_order both map to stage 8, but only
+ * confirm_order may persist ORDER_DATA (see orderConfirmationPolicy).
  */
 const NEXT_ACTION_TO_STAGE_ID: Record<string, string> = {
   greet: '1',
@@ -58,6 +64,7 @@ const NEXT_ACTION_TO_STAGE_ID: Record<string, string> = {
   handle_objection: '5',
   close_sale: '6',
   collect_info: '7',
+  await_confirmation: '8',
   confirm_order: '8',
   end_conversation: '9'
 };
@@ -91,6 +98,7 @@ function intentFromSalesGPTNextAction(action: string): Intent {
       return 'other';
     case 'close_sale':
     case 'collect_info':
+    case 'await_confirmation':
     case 'confirm_order':
       return 'order';
     case 'end_conversation':
@@ -128,6 +136,8 @@ export interface SalesGPTState {
         phone?: string;
         address?: string;
     };
+    /** Persisted from ConversationState — ready for customer yes */
+    awaitingOrderConfirmation?: boolean;
 }
 
 export interface SalesGPTResult {
@@ -248,6 +258,8 @@ export class SalesGPTAgent {
             };
         }
 
+        this.state.awaitingOrderConfirmation = !!conversationState.awaiting_order_confirmation;
+
         // Restore SalesGPT numeric stage (1–9) when persisted — avoids mapping close→6 only
         const persisted = conversationState.salesgpt_stage_id?.trim();
         if (persisted && /^[1-9]$/.test(persisted)) {
@@ -330,9 +342,15 @@ export class SalesGPTAgent {
         this.currentProductsHaveColors = products.some(p => p.colors && p.colors.length > 0);
         this.currentProductsHaveSizes = products.some(p => p.sizes && p.sizes.length > 0);
 
+        // Snapshot completeness BEFORE this turn's AI extraction merges new fields.
+        const fieldsWereCompleteBeforeTurn = this.getOrderFieldCompleteness().complete;
+        const wasAwaitingConfirmation =
+            previousStageId === '8' ||
+            !!this.state.awaitingOrderConfirmation;
+
         // Step 3: One AI call — response + next_action + extracted_info
         // Prompt still receives previous stage as guidance only (not a competing decision).
-        const { responseText: response, aiNextAction } = await this.generateSalesResponse(
+        let { responseText: response, aiNextAction } = await this.generateSalesResponse(
             messageText,
             productContext,
             toolContext
@@ -366,22 +384,37 @@ export class SalesGPTAgent {
             });
         }
 
-        // Step 4.2: Deterministic order rails from collected fields (tenant-safe)
+        // Step 4.2: Order rails — confirm_order ONLY after explicit customer finalization
+        // while we were already ready. AI alone must never finalize.
         const orderCompleteness = this.getOrderFieldCompleteness();
-        if (nextAction === 'confirm_order' && !orderCompleteness.complete) {
-            nextAction = 'collect_info';
-            intent = 'order';
-            logger.debug('SalesGPT: downgraded confirm_order → collect_info (incomplete fields)', {
-                missing: orderCompleteness.missing
+        const resolvedOrder = resolveOrderNextAction({
+            aiNextAction: nextAction,
+            fieldsComplete: orderCompleteness.complete,
+            fieldsWereCompleteBeforeTurn,
+            wasAwaitingConfirmation,
+            userMessage: messageText,
+            language: this.config.language,
+            collectedInfo: { ...this.state.collectedInfo },
+            responseText: response
+        });
+        if (resolvedOrder.nextAction !== nextAction || resolvedOrder.responseText !== response) {
+            logger.debug('SalesGPT: order confirmation policy applied', {
+                from: nextAction,
+                to: resolvedOrder.nextAction,
+                reason: resolvedOrder.reason,
+                missing: orderCompleteness.missing,
+                fieldsWereCompleteBeforeTurn,
+                wasAwaitingConfirmation
             });
-        } else if (
-            nextAction !== 'confirm_order' &&
-            this.isUserConfirmingOrder(messageText) &&
-            orderCompleteness.complete
+        }
+        nextAction = resolvedOrder.nextAction;
+        response = resolvedOrder.responseText;
+        if (
+            nextAction === 'confirm_order' ||
+            nextAction === 'await_confirmation' ||
+            nextAction === 'collect_info'
         ) {
-            nextAction = 'confirm_order';
             intent = 'order';
-            logger.debug('SalesGPT: user confirmed order with complete fields');
         }
 
         // Step 4.3: <ESCALATE> in model reply → end_conversation / human handoff
@@ -516,9 +549,13 @@ export class SalesGPTAgent {
                         : `   📊 Stock: ${p.stock > 0 ? `${p.stock} pcs` : 'Out of stock'}\n`;
                 }
                 if (p.colors && p.colors.length > 0) {
+                    const optionsLabel = formatColorOptionsForDisplay(
+                        p.colors,
+                        isArabic ? 'arabic' : 'english'
+                    );
                     info += isArabic
-                        ? `   🎨 الألوان: ${p.colors.join('، ')}\n`
-                        : `   🎨 Colors: ${p.colors.join(', ')}\n`;
+                        ? `   🎨 خيارات الألوان (كل رقم = خيار واحد، قد يكون لونين معاً): ${optionsLabel}\n`
+                        : `   🎨 Color options (each number = one option, may combine colors): ${optionsLabel}\n`;
                 }
                 if (p.sizes && p.sizes.length > 0) {
                     info += isArabic
@@ -659,20 +696,22 @@ export class SalesGPTAgent {
 
         if (hasColors || hasSizes) {
             if (hasColors) {
-                arColorSizeRules += '- 🚨 هذا المنتج فيه ألوان متعددة! إذا لم يختار العميل لوناً → يجب أن تسأله عن اللون المفضل قبل إتمام الطلب (اعرض الألوان المتاحة من بيانات المنتج)\n';
-                enColorSizeRules += '- 🚨 This product has multiple colors! If customer hasn\'t chosen one → you MUST ask for their preferred color before completing the order (show available colors from product data)\n';
+                arColorSizeRules += '- 🚨 هذا المنتج فيه خيارات ألوان! كل عنصر في قائمة الألوان خيار واحد للبيع (قد يحتوي لونين معاً مثل «أسود وبني»). لا تفصل الألوان داخل الخيار الواحد ولا تعرضها كألوان مستقلة.\n';
+                arColorSizeRules += '- إذا لم يختار العميل خيار لون → اسأله واعرض الخيارات المرقّمة من بيانات المنتج كما هي\n';
+                enColorSizeRules += '- 🚨 This product has color options! Each entry is ONE sellable option (may combine two colors e.g. "black & brown"). Never split a compound option into separate colors.\n';
+                enColorSizeRules += '- If customer hasn\'t chosen a color option → ask and show the numbered options from product data as-is\n';
             }
             if (hasSizes) {
                 arColorSizeRules += '- 🚨 هذا المنتج فيه مقاسات متعددة! إذا لم يختار العميل مقاساً → يجب أن تسأله عن المقاس المفضل قبل إتمام الطلب (اعرض المقاسات المتاحة من بيانات المنتج)\n';
                 enColorSizeRules += '- 🚨 This product has multiple sizes! If customer hasn\'t chosen one → you MUST ask for their preferred size before completing the order (show available sizes from product data)\n';
             }
             arColorSizeRules += '- 🚨 لا تؤكد الطلب نهائياً إلا بعد اختيار ' + (hasColors && hasSizes ? 'اللون والمقاس' : hasColors ? 'اللون' : 'المقاس') + '\n';
-            arColorSizeRules += '- إذا كل المعلومات مكتملة (اسم + هاتف + عنوان + منتج' + (hasColors ? ' + اللون' : '') + (hasSizes ? ' + المقاس' : '') + ') → أكد الطلب مباشرة 🎉\n';
+            arColorSizeRules += '- إذا كل المعلومات مكتملة (اسم + هاتف + عنوان + منتج' + (hasColors ? ' + اللون' : '') + (hasSizes ? ' + المقاس' : '') + ') → اعرض ملخص الطلب واطلب تأكيداً صريحاً (next_action: await_confirmation). لا تستخدم confirm_order قبل أن يقول العميل نعم/أكد\n';
             enColorSizeRules += '- 🚨 NEVER confirm an order without ' + (hasColors && hasSizes ? 'color and size' : hasColors ? 'color' : 'size') + ' selection\n';
-            enColorSizeRules += '- If all info complete (name + phone + address + product' + (hasColors ? ' + color' : '') + (hasSizes ? ' + size' : '') + ') → confirm order directly 🎉\n';
+            enColorSizeRules += '- If all info complete (name + phone + address + product' + (hasColors ? ' + color' : '') + (hasSizes ? ' + size' : '') + ') → show a summary and ask for explicit confirmation (next_action: await_confirmation). NEVER use confirm_order until the customer says yes/confirm\n';
         } else {
-            arColorSizeRules = '- ⚠️ هذا المنتج ليس فيه ألوان ولا مقاسات. لا تسأل العميل عن لون أو مقاس نهائياً!\n- إذا كل المعلومات مكتملة (اسم + هاتف + عنوان + منتج) → أكد الطلب مباشرة 🎉\n';
-            enColorSizeRules = '- ⚠️ This product does NOT have colors or sizes. Do NOT ask the customer about color or size at all!\n- If all info complete (name + phone + address + product) → confirm order directly 🎉\n';
+            arColorSizeRules = '- ⚠️ هذا المنتج ليس فيه ألوان ولا مقاسات. لا تسأل العميل عن لون أو مقاس نهائياً!\n- إذا كل المعلومات مكتملة (اسم + هاتف + عنوان + منتج) → اعرض الملخص واطلب تأكيداً صريحاً (next_action: await_confirmation). ممنوع confirm_order قبل موافقة العميل\n';
+            enColorSizeRules = '- ⚠️ This product does NOT have colors or sizes. Do NOT ask the customer about color or size at all!\n- If all info complete (name + phone + address + product) → show a summary and ask for explicit confirmation (next_action: await_confirmation). NEVER use confirm_order until the customer says yes/confirm\n';
         }
 
         const userPrompt = isArabic
@@ -689,7 +728,8 @@ ${conversationHistoryText || 'هذه أول رسالة'}
 رسالة العميل الحالية: "${messageText}"
 
 📝 تعليمات مهمة:
-- إذا العميل قدم اسماً أو هاتفاً أو عنواناً → اشكره وأكد الاستلام ثم اسأل عن المعلومة التالية المفقودة أو أكد الطلب
+- إذا العميل قدم اسماً أو هاتفاً أو عنواناً → اشكره وأكد الاستلام ثم اسأل عن المعلومة التالية المفقودة أو اعرض ملخص الطلب واطلب تأكيداً صريحاً
+- عندما تكتمل كل الحقول → next_action="await_confirmation" مع ملخص + سؤال «هل أكد؟». ممنوع next_action="confirm_order" قبل أن يقول العميل نعم/أكد
 - في **extracted_info**: املأ الحقول من **تاريخ المحادثة والرسالة الحالية معاً** (اسم، هاتف، عنوان، لون، مقاس، منتج). لا تقتصر على الرسالة الحالية فقط؛ إذا لم يُذكر حقل في أي منهما استخدم null.
 - 📸 الصور: «صورة متوفرة» داخلية فقط. استخدم next_action="send_image" وامدح المنتج باختصار فقط إذا الرسالة الحالية طلبت صورة صراحةً (صورة/وريني/فرجيني/ارني). ممنوع قول «تفضل الصورة» أو الادعاء أن صورة أُرسلت إذا لم يطلبها. سؤال السعر/المواصفات → أجب دون ذكر صورة.
 
@@ -707,7 +747,7 @@ ${arColorSizeRules}- عند ذكر السعر استخدم **اسم العملة
 أعد ردك كالتالي (JSON):
 {
   "response_text": "ردك المباشر للعميل",
-  "next_action": "greet | discover_needs | present_product | handle_objection | close_sale | collect_info | confirm_order | send_image | end_conversation",
+  "next_action": "greet | discover_needs | present_product | handle_objection | close_sale | collect_info | await_confirmation | confirm_order | send_image | end_conversation",
   "extracted_info": {
     "product_name": "إذا ذُكر",
     "color": "إذا ذُكر",
@@ -731,7 +771,8 @@ ${conversationHistoryText || 'This is the first message'}
 Current customer message: "${messageText}"
 
 📝 Important instructions:
-- If customer provided name/phone/address → acknowledge, then ask for next missing info or confirm order
+- If customer provided name/phone/address → acknowledge, then ask for next missing info or show order summary and ask for explicit confirmation
+- When all fields are complete → next_action="await_confirmation" with a summary + "shall I confirm?". NEVER use next_action="confirm_order" until the customer says yes/confirm
 - In **extracted_info**: fill fields from **conversation history AND the current message** (name, phone, address, color, size, product). Do not only read the latest turn; use null for fields not stated anywhere.
 - 📸 Images: "Image available" is internal only. Use next_action="send_image" and briefly praise the product only if the current message explicitly asks for a photo (photo/image/show me/picture). Never say "Here's the photo!" or claim a photo was sent if they did not ask. Price/specs questions → answer with no photo mention.
 
@@ -749,7 +790,7 @@ ${enColorSizeRules}- Use the **product-specific currency name** shown next to ea
 Respond as JSON:
 {
   "response_text": "your direct response to the customer",
-  "next_action": "greet | discover_needs | present_product | handle_objection | close_sale | collect_info | confirm_order | send_image | end_conversation",
+  "next_action": "greet | discover_needs | present_product | handle_objection | close_sale | collect_info | await_confirmation | confirm_order | send_image | end_conversation",
   "extracted_info": {
     "product_name": "if mentioned",
     "color": "if mentioned",
@@ -805,7 +846,7 @@ Respond as JSON:
             /^(أكد|اكد|نفذ|أتمم|اتمم)\s*(الطلب|طلبي|الأوردر)?[\s!،,.]*$/i,
             /^(confirm|place|submit)\s*(order|it)?[\s!,.]*$/i,
             /^(اي|أي)\s+(بدي|أريد)\s*(أكد|اكد|أأكد|تأكيد)/i,
-            /^(نعم|اي|أي)\s+(أكد|اكد|نفذ)/i
+            /^(نعم|اي|أي|أيوا)\s*(أكد|اكد|أأكد|اأكد|أؤكد|تأكيد|نفذ)/i
         ];
         return confirmPatterns.some(p => p.test(text));
     }
@@ -825,7 +866,7 @@ Respond as JSON:
             const needsColor = this.currentProductsHaveColors && !color;
             const needsSize = this.currentProductsHaveSizes && !size;
             if (name && phone && address && product_name && !needsColor && !needsSize) {
-                return { intent: 'order', nextAction: 'confirm_order' };
+                return { intent: 'order', nextAction: 'await_confirmation' };
             }
             return { intent: 'order', nextAction: stageId === '6' ? 'close_sale' : 'collect_info' };
         }

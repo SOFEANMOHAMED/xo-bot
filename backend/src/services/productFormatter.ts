@@ -5,6 +5,7 @@
  */
 
 import { getCurrencyDisplayName } from '../utils/currencyDisplayName.js';
+import { formatColorOptionsForDisplay } from '../catalog/color-options.js';
 
 export interface ProductVariant {
   option1?: string | null; // e.g., "Large" (Size)
@@ -168,9 +169,9 @@ export function formatProduct(
       result += `\n- 📏 **Sizes:** ${sizes.join(', ')}`;
     }
     const colors = extractColors(product);
-    if (colors.length > 0) {
-      result += `\n- 🎨 **Colors:** ${colors.join(', ')}`;
-    }
+  if (colors.length > 0) {
+    result += `\n- 🎨 **Color options:** ${formatColorOptionsForDisplay(colors, 'english')}`;
+  }
     const minInventory = getMinInventory(product);
     if (minInventory !== null) {
       if (minInventory <= 0) {
@@ -193,7 +194,7 @@ export function formatProduct(
 
   const colors = extractColors(product);
   if (colors.length > 0) {
-    result += `\n- 🎨 **الألوان:** ${colors.join(', ')}`;
+    result += `\n- 🎨 **خيارات الألوان:** ${formatColorOptionsForDisplay(colors, 'arabic')}`;
   }
 
   const minInventory = getMinInventory(product);
