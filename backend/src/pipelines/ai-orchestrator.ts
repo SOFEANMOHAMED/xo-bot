@@ -16,6 +16,7 @@ import type {
 import { logger } from '../utils/logger.js';
 import { getCurrencyDisplayName } from '../utils/currencyDisplayName.js';
 import { formatColorOptionsForDisplay } from '../catalog/color-options.js';
+import { sanitizeProductDescriptionForPrompt } from '../services/salesgpt/orderConfirmationPolicy.js';
 
 // ==================== TYPES ====================
 
@@ -90,7 +91,10 @@ const buildPrompt = (context: AIConversationContext): string => {
         }
         
         if (p.description) {
-          info += `   📝 ${p.description.substring(0, 100)}${p.description.length > 100 ? '...' : ''}\n`;
+          const fullDescription = sanitizeProductDescriptionForPrompt(p.description);
+          info += isArabic
+            ? `   📝 الوصف الكامل:\n   ${fullDescription}\n`
+            : `   📝 Full description:\n   ${fullDescription}\n`;
         }
         
         // 🎯 Smart Stock Display

@@ -44,6 +44,7 @@ import {
     isNegativeReply,
     botReplyAsksForConfirmation,
     buildOrderConfirmedMessage,
+    isProductInfoRequest,
     AWAIT_CONFIRMATION_ACTION,
     CONFIRM_ORDER_ACTION,
     shouldAppendOrderData
@@ -54,6 +55,7 @@ export {
     isAffirmativeReply,
     isNegativeReply,
     botReplyAsksForConfirmation,
+    isProductInfoRequest,
     shouldAppendOrderData,
     AWAIT_CONFIRMATION_ACTION,
     CONFIRM_ORDER_ACTION
@@ -392,7 +394,14 @@ export const processWithSalesGPT = async (
     const completeness = checkOrderCompleteness(conversationState, products[0]);
 
     // Affirmative confirm OR decline of upsell/"anything else?" while order is complete → finalize.
-    if (wasInClosingFlow && completeness.complete && (userSaidYes || userSaidNo)) {
+    // Never finalize when the customer is asking for product details (e.g. "تمام، معلومات أكثر؟").
+    const askingProductInfo = isProductInfoRequest(messageText);
+    if (
+        wasInClosingFlow &&
+        completeness.complete &&
+        (userSaidYes || userSaidNo) &&
+        !askingProductInfo
+    ) {
         const e = conversationState.extracted_entities || {};
         const productName = products[0]?.name || e.product_query || '';
         const thankMsg = buildOrderConfirmedMessage(language, {

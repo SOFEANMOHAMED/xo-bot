@@ -234,10 +234,8 @@ export const planSalesAction = (input: SalesPlanInput): SalesPlan => {
     }
   }
 
-  // ==================== RULE 3.5: 🚀 SMART Ask for size/color if available ====================
-  // ✅ CRITICAL: Ask for color/size when order OR product_query intent is detected AND we have exactly one product
-  // This MUST happen BEFORE order completion, even if all order info is collected
-  // 🚀 NEW: Smart detection - if user already provided color/size, acknowledge and move to next step!
+  // ==================== RULE 3.5: Ask for size/color when purchase intent is clear ====================
+  // Only for `order` — product_query must answer info first, not jump into variant checkout.
   console.log('🔍 RULE 3.5 Check - Smart variant questions', {
     intent,
     stage,
@@ -248,7 +246,7 @@ export const planSalesAction = (input: SalesPlanInput): SalesPlan => {
     hasColors: products[0] && Array.isArray(products[0].colors) && products[0].colors.length > 0,
     entityColor: entities.color,
     entitySize: entities.size,
-    conditionMet: (intent === 'order' || intent === 'product_query') && products.length === 1
+    conditionMet: intent === 'order' && products.length === 1
   });
   logger.info('🔍 RULE 3.5 Check - Smart variant questions', {
     intent,
@@ -260,10 +258,10 @@ export const planSalesAction = (input: SalesPlanInput): SalesPlan => {
     hasColors: products[0] && Array.isArray(products[0].colors) && products[0].colors.length > 0,
     entityColor: entities.color,
     entitySize: entities.size,
-    conditionMet: (intent === 'order' || intent === 'product_query') && products.length === 1
+    conditionMet: intent === 'order' && products.length === 1
   });
 
-  if ((intent === 'order' || intent === 'product_query') && products.length === 1) {
+  if (intent === 'order' && products.length === 1) {
     const product = products[0];
     const hasSizes = Array.isArray(product.sizes) && product.sizes.length > 0;
     const hasColors = Array.isArray(product.colors) && product.colors.length > 0;
@@ -585,6 +583,22 @@ export const planSalesAction = (input: SalesPlanInput): SalesPlan => {
       if (products.length === 1) {
         const product = products[0];
         const currencyLabel = getCurrencyDisplayName(product.currency, language === 'arabic' ? 'arabic' : 'english');
+        const description = (product.description || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+        const descriptionPreview = description
+          ? (description.length > 600 ? `${description.slice(0, 600).trim()}…` : description)
+          : '';
+        if (descriptionPreview) {
+          return {
+            nextAction: 'recommend_products',
+            oneQuestion: language === 'arabic'
+              ? `${product.name} — ${product.price} ${currencyLabel}.\n${descriptionPreview}\n\n${getQuestion('want_more_info', language)}`
+              : `${product.name} — ${product.price} ${currencyLabel}.\n${descriptionPreview}\n\n${getQuestion('want_more_info', language)}`,
+            ctaType: 'choose',
+            recommendationStrategy: 'match_query',
+            shouldOfferDiscount: false,
+            handoffReason: ''
+          };
+        }
         return {
           nextAction: 'recommend_products',
           oneQuestion: language === 'arabic'

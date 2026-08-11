@@ -174,8 +174,8 @@ const INTENT_INSTRUCTIONS: Record<Intent, { ar: string; en: string }> = {
     en: 'Help the customer explore products enthusiastically! 💡 Ask about preferences and needs. Show you care about finding the best for them.'
   },
   product_query: {
-    ar: 'أجب بحماس وركز على الفوائد! بدلاً من "المنتج مصنوع من X"، قل "راح تستفيد من X بطريقة رائعة!". لا تذكر كل التفاصيل (ستظهر تلقائياً)، فقط ابرز ما يهم العميل.',
-    en: 'Answer enthusiastically and focus on benefits! Instead of "Made of X", say "You\'ll benefit from X amazingly!". Don\'t mention all details (shown automatically), just highlight what matters to customer.'
+    ar: 'أجب بوضوح من وصف المنتج الحقيقي في السياق. انقل الفوائد والمكونات/المواصفات المهمة كما هي في الوصف. إذا طلب العميل «معلومات أكثر» استخدم الوصف الكامل دون اختصار مخلّ، ثم اسأل سؤالاً خفيفاً واحداً فقط (صورة/لون/مقاس أو هل يريد المتابعة للطلب) — لا تفتح تأكيد شراء قبل أن يطلب ذلك.',
+    en: 'Answer clearly from the real product description in context. Include important benefits and specs/ingredients from the description. If the customer asks for more info, use the full description without harmful compression, then ask one soft follow-up only (photo/color/size or whether to proceed) — never open order confirmation until they ask.'
   },
   price: {
     ar: 'أكد اهتمامك وأبرز القيمة! السعر سيظهر تلقائياً، لكن ركز على أن المنتج يستحق السعر. اذكر فائدة أو ميزة قوية.',

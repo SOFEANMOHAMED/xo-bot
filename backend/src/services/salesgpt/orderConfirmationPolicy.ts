@@ -32,6 +32,25 @@ const CONFIRM_VERB_PATTERNS: RegExp[] = [
   /(confirm|place|submit|finalize)\s*(the\s+)?(order|it|my\s+order)?/i
 ];
 
+/**
+ * Customer is asking about the product (description / specs / ingredients / how it works),
+ * not confirming a purchase. Soft affirmatives like "تمام" often prefix these questions.
+ */
+const PRODUCT_INFO_REQUEST_PATTERNS: RegExp[] = [
+  /معلومات\s*(اكثر|أكثر|اكتر|اضافيه|إضافية|عن|حول)?/i,
+  /تفاصيل\s*(اكثر|أكثر|اكتر|المنتج|عنه|عنها)?/i,
+  /وصف\s*(المنتج|كامل|اكثر|أكثر|اكتر)?/i,
+  /مواصفات|مكونات|فوائد|طريقة\s*(الاستخدام|الاستعمال)|كيف\s*(يستخدم|يشتغل|يعمل)/i,
+  /(عرفني|احكيلي|احكي|قلي|قولي|وضح|اشرح|شرحي)\s*(لي\s*)?(اكثر|أكثر|اكتر|عنه|عنها|عن\s*المنتج)?/i,
+  /(اكثر|أكثر|اكتر)\s*(عن|حول|معلومات|تفاصيل|وصف)/i,
+  /(اعطيني|عطيني|بدي|أريد|ابي|عاوز)\s*(معلومات|تفاصيل|وصف)/i,
+  /more\s+(info|information|details|about)/i,
+  /tell\s+me\s+more|what\s+(is|are)\s+(it|this|the\s+product)|how\s+does\s+it\s+work/i,
+  /ingredients?|specifications?|description|benefits?/i
+];
+
+const ACTIVE_PRODUCT_DESCRIPTION_MAX_CHARS = 3000;
+
 export function normalizeArabic(text: string): string {
   return text
     .trim()
@@ -56,10 +75,48 @@ function containsAnyToken(text: string, tokens: string[]): boolean {
   );
 }
 
+/** True when the customer is requesting product details / explanation. */
+export function isProductInfoRequest(messageText: string): boolean {
+  if (!messageText?.trim()) return false;
+  const normalized = normalizeArabic(messageText);
+  if (PRODUCT_INFO_REQUEST_PATTERNS.some(p => p.test(messageText) || p.test(normalized))) {
+    return true;
+  }
+  // Short question about "the product" / "it" without order verbs
+  const asksQuestion = /[؟?]/.test(messageText) || /\b(what|how|why|which)\b/i.test(messageText);
+  const aboutProduct =
+    /(المنتج|هذا|هيدا|هاي|عنه|عنها|this|it|product)/i.test(messageText);
+  const orderVerb =
+    /(طلب|اوردر|أوردر|اشتري|شراء|confirm|order|buy)/i.test(messageText);
+  return asksQuestion && aboutProduct && !orderVerb;
+}
+
+/**
+ * Strip HTML / excess whitespace so long merchant descriptions are safe in prompts.
+ */
+export function sanitizeProductDescriptionForPrompt(
+  raw: string,
+  maxChars: number = ACTIVE_PRODUCT_DESCRIPTION_MAX_CHARS
+): string {
+  const cleaned = String(raw || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (cleaned.length <= maxChars) return cleaned;
+  return `${cleaned.slice(0, maxChars).trim()}…`;
+}
+
 /** Permissive yes / confirm detection ("اي اكد", "نعم", "ok", …). */
 export function isAffirmativeReply(messageText: string): boolean {
   if (!messageText) return false;
   if (containsAnyToken(messageText, NEGATIVE_TOKENS)) return false;
+  // "تمام، ممكن معلومات أكثر؟" is politeness + question — not order confirmation.
+  if (isProductInfoRequest(messageText)) return false;
   if (containsAnyToken(messageText, AFFIRMATIVE_TOKENS)) return true;
   return CONFIRM_VERB_PATTERNS.some(p => p.test(messageText));
 }
@@ -67,12 +124,14 @@ export function isAffirmativeReply(messageText: string): boolean {
 /** Permissive no / cancel detection. */
 export function isNegativeReply(messageText: string): boolean {
   if (!messageText) return false;
+  if (isProductInfoRequest(messageText)) return false;
   if (containsAnyToken(messageText, AFFIRMATIVE_TOKENS)) return false;
   return containsAnyToken(messageText, NEGATIVE_TOKENS);
 }
 
 /** Customer intent to finalize the order on this turn. */
 export function isCustomerFinalizingOrder(messageText: string): boolean {
+  if (isProductInfoRequest(messageText)) return false;
   return isAffirmativeReply(messageText) || isNegativeReply(messageText);
 }
 
@@ -202,6 +261,20 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
     collectedInfo,
     responseText
   } = input;
+
+  // Product Q&A always wins over checkout rails — never inject order summary here.
+  if (isProductInfoRequest(userMessage)) {
+    const safeAction =
+      aiNextAction === 'send_image' || aiNextAction === 'end_conversation'
+        ? aiNextAction
+        : 'present_product';
+    return {
+      nextAction: safeAction,
+      responseText,
+      awaitingConfirmation: wasAwaitingConfirmation && fieldsComplete,
+      reason: 'product_info_request_blocks_checkout'
+    };
+  }
 
   const customerFinalizing = isCustomerFinalizingOrder(userMessage);
   const allowedToFinalize =

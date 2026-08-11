@@ -32,7 +32,11 @@ import type {
 import { logger } from '../../utils/logger.js';
 import { getCurrencyDisplayName } from '../../utils/currencyDisplayName.js';
 import { detectEscalationMarker, stripInternalControlMarkers } from '../../response/sanitize-reply.js';
-import { resolveOrderNextAction } from './orderConfirmationPolicy.js';
+import {
+    isProductInfoRequest,
+    resolveOrderNextAction,
+    sanitizeProductDescriptionForPrompt
+} from './orderConfirmationPolicy.js';
 import { formatColorOptionsForDisplay } from '../../catalog/color-options.js';
 
 /** Values the sales-response model may return in JSON `next_action` */
@@ -415,6 +419,8 @@ export class SalesGPTAgent {
             nextAction === 'collect_info'
         ) {
             intent = 'order';
+        } else if (nextAction === 'present_product') {
+            intent = 'product_query';
         }
 
         // Step 4.3: <ESCALATE> in model reply → end_conversation / human handoff
@@ -541,7 +547,10 @@ export class SalesGPTAgent {
                     : `   💰 Price: ${p.price} ${getCurrencyDisplayName(p.currency || currencyCode, 'english')}\n`;
 
                 if (p.description) {
-                    info += `   📝 ${p.description.substring(0, 100)}${p.description.length > 100 ? '...' : ''}\n`;
+                    const fullDescription = sanitizeProductDescriptionForPrompt(p.description);
+                    info += isArabic
+                        ? `   📝 الوصف الكامل (استخدمه حرفياً عند طلب العميل معلومات/تفاصيل):\n   ${fullDescription}\n`
+                        : `   📝 Full description (use when customer asks for details/info):\n   ${fullDescription}\n`;
                 }
                 if (p.stock !== undefined) {
                     info += isArabic
@@ -714,6 +723,8 @@ export class SalesGPTAgent {
             enColorSizeRules = '- ⚠️ This product does NOT have colors or sizes. Do NOT ask the customer about color or size at all!\n- If all info complete (name + phone + address + product) → show a summary and ask for explicit confirmation (next_action: await_confirmation). NEVER use confirm_order until the customer says yes/confirm\n';
         }
 
+        const askingProductInfo = isProductInfoRequest(messageText);
+
         const userPrompt = isArabic
             ? `المرحلة الحالية: ${this.state.currentConversationStage}
 
@@ -728,13 +739,14 @@ ${conversationHistoryText || 'هذه أول رسالة'}
 رسالة العميل الحالية: "${messageText}"
 
 📝 تعليمات مهمة:
+- إذا طلب العميل معلومات / تفاصيل / وصف / مواصفات عن المنتج → next_action="present_product". انقل من **الوصف الكامل** في سياق المنتج النشط بأمانة (يمكن 4–8 جمل عند الحاجة). ممنوع ملخص تأكيد الطلب أو «هل أكد؟» في هذه الرسالة. سؤال ختامي خفيف فقط إن لزم (مثل: هل تحب صورة أو تفضّل لون/مقاس؟).
 - إذا العميل قدم اسماً أو هاتفاً أو عنواناً → اشكره وأكد الاستلام ثم اسأل عن المعلومة التالية المفقودة أو اعرض ملخص الطلب واطلب تأكيداً صريحاً
-- عندما تكتمل كل الحقول → next_action="await_confirmation" مع ملخص + سؤال «هل أكد؟». ممنوع next_action="confirm_order" قبل أن يقول العميل نعم/أكد
+- عندما تكتمل كل الحقول ورسالة العميل ليست طلب معلومات → next_action="await_confirmation" مع ملخص + سؤال «هل أكد؟». ممنوع next_action="confirm_order" قبل أن يقول العميل نعم/أكد
 - في **extracted_info**: املأ الحقول من **تاريخ المحادثة والرسالة الحالية معاً** (اسم، هاتف، عنوان، لون، مقاس، منتج). لا تقتصر على الرسالة الحالية فقط؛ إذا لم يُذكر حقل في أي منهما استخدم null.
 - 📸 الصور: «صورة متوفرة» داخلية فقط. استخدم next_action="send_image" وامدح المنتج باختصار فقط إذا الرسالة الحالية طلبت صورة صراحةً (صورة/وريني/فرجيني/ارني). ممنوع قول «تفضل الصورة» أو الادعاء أن صورة أُرسلت إذا لم يطلبها. سؤال السعر/المواصفات → أجب دون ذكر صورة.
 
 🧭 سياسة استخدام المنتجات والكتالوج:
-- ركّز ردودك التفصيلية على **🎯 المنتج النشط** (السعر، الألوان، المقاسات، الوصف).
+- ركّز ردودك التفصيلية على **🎯 المنتج النشط** (السعر، الألوان، المقاسات، الوصف الكامل).
 - إذا سأل العميل عن منتج آخر أو تصنيف آخر أو "غيره" أو "شو كمان" → اعتمد على **📚 نظرة عامة على الكتالوج** للإجابة بصدق ودون اختلاق، واقترح عليه أبرز خيار مناسب من القائمة.
 - لا تقل أبداً "ليس لدينا" إذا كان المنتج موجوداً في النظرة العامة للكتالوج.
 - لا تعرض القائمة الكاملة للكتالوج للعميل دفعة واحدة؛ اقترح 1-3 خيارات فقط من النظرة العامة.
@@ -742,7 +754,7 @@ ${conversationHistoryText || 'هذه أول رسالة'}
 ${arColorSizeRules}- عند ذكر السعر استخدم **اسم العملة الخاص بكل منتج** كما هو مذكور بجواره (لا تستبدل عملة منتج بأخرى)
 - لا تختلق معلومات
 - كن متحمساً ومحترفاً
-- اجعل الرد مختصراً (2-4 جمل)
+- اجعل الرد مختصراً (2-4 جمل) إلا عند طلب معلومات المنتج فاستخدم الوصف الكامل بوضوح
 
 أعد ردك كالتالي (JSON):
 {
@@ -771,13 +783,14 @@ ${conversationHistoryText || 'This is the first message'}
 Current customer message: "${messageText}"
 
 📝 Important instructions:
+- If the customer asks for more info / details / description / specs → next_action="present_product". Faithfully use the **full description** from the active product context (4–8 sentences when needed). Do NOT show an order-confirmation summary or ask "shall I confirm?" on this turn. Soft follow-up only if useful (photo / color / size).
 - If customer provided name/phone/address → acknowledge, then ask for next missing info or show order summary and ask for explicit confirmation
-- When all fields are complete → next_action="await_confirmation" with a summary + "shall I confirm?". NEVER use next_action="confirm_order" until the customer says yes/confirm
+- When all fields are complete AND the message is not a product-info request → next_action="await_confirmation" with a summary + "shall I confirm?". NEVER use next_action="confirm_order" until the customer says yes/confirm
 - In **extracted_info**: fill fields from **conversation history AND the current message** (name, phone, address, color, size, product). Do not only read the latest turn; use null for fields not stated anywhere.
 - 📸 Images: "Image available" is internal only. Use next_action="send_image" and briefly praise the product only if the current message explicitly asks for a photo (photo/image/show me/picture). Never say "Here's the photo!" or claim a photo was sent if they did not ask. Price/specs questions → answer with no photo mention.
 
 🧭 Product & catalog policy:
-- Keep detailed follow-up focused on the **🎯 active product** (price, options, stock, description).
+- Keep detailed follow-up focused on the **🎯 active product** (price, options, stock, full description).
 - If customer asks for alternatives, categories, "other products", or "what else" → use the **📚 catalog overview** to answer truthfully and suggest 1-3 relevant options.
 - Never say "we don't have it" if that product exists in the catalog overview.
 - Do not dump the entire catalog to the customer unless explicitly requested.
@@ -785,7 +798,7 @@ Current customer message: "${messageText}"
 ${enColorSizeRules}- Use the **product-specific currency name** shown next to each item (never replace one product's currency with another).
 - Never invent information
 - Be enthusiastic and professional
-- Keep response short (2-4 sentences)
+- Keep response short (2-4 sentences) unless answering a product-info request — then use the full description clearly
 
 Respond as JSON:
 {
@@ -812,7 +825,7 @@ Respond as JSON:
         }>(userPrompt, {
             systemInstruction: systemPrompt,
             temperature: 0.4,
-            maxOutputTokens: 600
+            maxOutputTokens: askingProductInfo ? 1200 : 600
         });
 
         if (result.success && result.data) {

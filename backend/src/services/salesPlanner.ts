@@ -427,9 +427,17 @@ export const planSalesAction = (input: SalesPlanInput): SalesPlan => {
       if (products.length === 1) {
         const product = products[0];
         const currencyLabel = getCurrencyDisplayName(product.currency, language === 'arabic' ? 'arabic' : 'english');
-        const question = language === 'arabic'
-          ? `وجدنا ${product.name} بسعر ${product.price} ${currencyLabel}. ${getQuestion('want_more_info', language)}`
-          : `We found ${product.name} for ${product.price} ${currencyLabel}. ${getQuestion('want_more_info', language)}`;
+        const description = (product.description || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+        const descriptionPreview = description
+          ? (description.length > 600 ? `${description.slice(0, 600).trim()}…` : description)
+          : '';
+        const question = descriptionPreview
+          ? (language === 'arabic'
+            ? `${product.name} — ${product.price} ${currencyLabel}.\n${descriptionPreview}\n\n${getQuestion('want_more_info', language)}`
+            : `${product.name} — ${product.price} ${currencyLabel}.\n${descriptionPreview}\n\n${getQuestion('want_more_info', language)}`)
+          : (language === 'arabic'
+            ? `وجدنا ${product.name} بسعر ${product.price} ${currencyLabel}. ${getQuestion('want_more_info', language)}`
+            : `We found ${product.name} for ${product.price} ${currencyLabel}. ${getQuestion('want_more_info', language)}`);
 
         return {
           next_action: 'recommend_products',
