@@ -236,6 +236,11 @@ export interface ResolveOrderActionInput {
   collectedInfo: OrderCollectedSnapshot;
   /** Existing assistant reply from the model (may be replaced). */
   responseText: string;
+  /**
+   * Model-classified product-info ask (preferred).
+   * When omitted, falls back to isProductInfoRequest(userMessage).
+   */
+  modelAsksProductInfo?: boolean;
 }
 
 export interface ResolveOrderActionResult {
@@ -259,11 +264,18 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
     userMessage,
     language,
     collectedInfo,
-    responseText
+    responseText,
+    modelAsksProductInfo
   } = input;
 
   // Product Q&A always wins over checkout rails — never inject order summary here.
-  if (isProductInfoRequest(userMessage)) {
+  // Prefer model classification; heuristic is fallback only when the model omitted the flag.
+  const asksProductInfo =
+    typeof modelAsksProductInfo === 'boolean'
+      ? modelAsksProductInfo
+      : isProductInfoRequest(userMessage);
+
+  if (asksProductInfo) {
     const safeAction =
       aiNextAction === 'send_image' || aiNextAction === 'end_conversation'
         ? aiNextAction

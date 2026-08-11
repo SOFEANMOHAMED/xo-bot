@@ -38,7 +38,8 @@
     "test-sales-planner": "tsx src/services/test_sales_planner.ts",
     "test-orchestrator": "tsx src/services/test_orchestrator.ts",
     "test-guard": "tsx src/services/test_guard.ts",
-    "test-hybrid-writer": "tsx src/services/test_hybrid_writer.ts"
+    "test-hybrid-writer": "tsx src/services/test_hybrid_writer.ts",
+    "test-salesgpt-golden": "tsx src/services/salesgpt/test_customer_request_golden.ts"
   },
   "keywords": [
     "saas",

@@ -37,6 +37,11 @@ import {
     resolveOrderNextAction,
     sanitizeProductDescriptionForPrompt
 } from './orderConfirmationPolicy.js';
+import {
+    hasCustomerRequestBlock,
+    normalizeCustomerRequest,
+    type CustomerRequestSignals
+} from './customerRequest.js';
 import { formatColorOptionsForDisplay } from '../../catalog/color-options.js';
 
 /** Values the sales-response model may return in JSON `next_action` */
@@ -73,7 +78,7 @@ const NEXT_ACTION_TO_STAGE_ID: Record<string, string> = {
   end_conversation: '9'
 };
 
-/** Explicit photo request in the customer message (must match SalesGPT pipeline detector). */
+/** @deprecated Prefer model customer_request.wants_photo — kept for channel/image helpers only. */
 export const SALESGPT_IMAGE_REQUEST_RE =
   /(صورة|صور|وريني|شوفيني|فرجيني|ارني|image|picture|photo|show\s*me)/i;
 
@@ -155,6 +160,8 @@ export interface SalesGPTResult {
     toolUsed?: string;
     toolOutput?: string;
     aiCallsCount: number;
+    /** Structured understanding from the model for this turn. */
+    customerRequest?: CustomerRequestSignals;
 }
 
 /**
@@ -324,20 +331,17 @@ export class SalesGPTAgent {
         let toolOutput: string | undefined;
         const previousStageId = this.state.conversationStageId;
 
-        // Step 1: Tools (extraction happens in generateSalesResponse via extracted_info)
+        // Step 1: Tools — when no products were loaded upstream, always search (no keyword gate).
         let toolContext: string = '';
-        if (this.config.useTools) {
-            const needsProductSearch = this.shouldSearchProducts(messageText);
-            if (needsProductSearch && products.length === 0) {
-                const ctx: ToolContext = {
-                    merchantId: this.config.merchantId,
-                    merchantConfig: this.config.merchantConfig,
-                    products
-                };
-                toolUsed = 'ProductSearch';
-                toolOutput = await executeTool('ProductSearch', messageText, ctx);
-                toolContext = `\n\nنتيجة البحث عن المنتجات:\n${toolOutput}`;
-            }
+        if (this.config.useTools && products.length === 0) {
+            const ctx: ToolContext = {
+                merchantId: this.config.merchantId,
+                merchantConfig: this.config.merchantConfig,
+                products
+            };
+            toolUsed = 'ProductSearch';
+            toolOutput = await executeTool('ProductSearch', messageText, ctx);
+            toolContext = `\n\nنتيجة البحث عن المنتجات:\n${toolOutput}`;
         }
 
         // Step 2: Build product context (active + catalog awareness)
@@ -352,9 +356,12 @@ export class SalesGPTAgent {
             previousStageId === '8' ||
             !!this.state.awaitingOrderConfirmation;
 
-        // Step 3: One AI call — response + next_action + extracted_info
-        // Prompt still receives previous stage as guidance only (not a competing decision).
-        let { responseText: response, aiNextAction } = await this.generateSalesResponse(
+        // Step 3: One AI call — response + next_action + extracted_info + customer_request
+        let {
+            responseText: response,
+            aiNextAction,
+            customerRequest
+        } = await this.generateSalesResponse(
             messageText,
             productContext,
             toolContext
@@ -378,14 +385,25 @@ export class SalesGPTAgent {
             });
         }
 
-        // Step 4.1: Safety — never honor send_image without an explicit photo request
-        if (nextAction === 'send_image' && !SALESGPT_IMAGE_REQUEST_RE.test(messageText)) {
+        // Step 4.1: Image safety — honor send_image only when classified as a photo ask.
+        // Prefer model signal; regex fallback only if the model omitted customer_request entirely.
+        const allowSendImage =
+            customerRequest === null
+                ? SALESGPT_IMAGE_REQUEST_RE.test(messageText)
+                : customerRequest.wantsPhoto;
+        if (nextAction === 'send_image' && !allowSendImage) {
             nextAction = 'present_product';
             intent = 'product_query';
-            logger.debug('SalesGPT: ignored send_image without explicit image request', {
+            logger.debug('SalesGPT: ignored send_image without photo intent', {
                 aiNextAction,
                 messagePreview: messageText.substring(0, 80)
             });
+        }
+
+        // Step 4.1b: Alternatives → stay in product presentation (never invent "only one product").
+        if (customerRequest?.wantsAlternatives && nextAction === 'collect_info') {
+            nextAction = 'present_product';
+            intent = 'product_query';
         }
 
         // Step 4.2: Order rails — confirm_order ONLY after explicit customer finalization
@@ -399,7 +417,10 @@ export class SalesGPTAgent {
             userMessage: messageText,
             language: this.config.language,
             collectedInfo: { ...this.state.collectedInfo },
-            responseText: response
+            responseText: response,
+            // undefined → policy falls back to heuristic; boolean → model owns the classification
+            modelAsksProductInfo:
+                customerRequest === null ? undefined : customerRequest.asksProductInfo
         });
         if (resolvedOrder.nextAction !== nextAction || resolvedOrder.responseText !== response) {
             logger.debug('SalesGPT: order confirmation policy applied', {
@@ -408,7 +429,8 @@ export class SalesGPTAgent {
                 reason: resolvedOrder.reason,
                 missing: orderCompleteness.missing,
                 fieldsWereCompleteBeforeTurn,
-                wasAwaitingConfirmation
+                wasAwaitingConfirmation,
+                customerRequest
             });
         }
         nextAction = resolvedOrder.nextAction;
@@ -421,6 +443,8 @@ export class SalesGPTAgent {
             intent = 'order';
         } else if (nextAction === 'present_product') {
             intent = 'product_query';
+        } else if (customerRequest?.wantsAlternatives) {
+            intent = 'browse';
         }
 
         // Step 4.3: <ESCALATE> in model reply → end_conversation / human handoff
@@ -453,6 +477,7 @@ export class SalesGPTAgent {
             intent,
             stage,
             nextAction,
+            customerRequest,
             aiCalls: this.aiCallsCount,
             processingMs: Date.now() - startTime
         });
@@ -467,7 +492,8 @@ export class SalesGPTAgent {
             nextAction,
             toolUsed,
             toolOutput,
-            aiCallsCount: this.aiCallsCount
+            aiCallsCount: this.aiCallsCount,
+            customerRequest: customerRequest ?? undefined
         };
     }
 
@@ -621,9 +647,34 @@ export class SalesGPTAgent {
                     : '';
 
                 const header = isArabic
-                    ? '📚 نظرة عامة على باقي الكتالوج (مرجعية فقط — لا تعرض هذه القائمة للعميل ما لم يطلبها صراحةً):'
-                    : '📚 Catalog overview (reference only — do not list these to the customer unless explicitly asked):';
+                    ? '📚 منتجات أخرى في كتالوج هذا التاجر (حقائق — استخدمها للإجابة عن البدائل بصدق):'
+                    : '📚 Other products in this merchant catalog (facts — use them to answer alternatives truthfully):';
                 sections.push(`${header}\n${lines}${totalSuffix}`);
+            }
+        }
+
+        // ----- Catalog size truth (always, even when overview is empty after filtering) -----
+        if (catalog?.meta && typeof catalog.meta.totalProducts === 'number') {
+            const total = catalog.meta.totalProducts;
+            const activeCount = products.length;
+            if (isArabic) {
+                sections.push(
+                    `📊 إجمالي منتجات المتجر: ${total}.` +
+                    (total > activeCount
+                        ? ` يوجد منتجات غير المنتج النشط — ممنوع القول «عندنا منتج واحد فقط» أو إنكار وجود بدائل.`
+                        : total <= 1
+                            ? ` هذا فعلاً العدد الكلي في كتالوج هذا التاجر.`
+                            : '')
+                );
+            } else {
+                sections.push(
+                    `📊 Store product count: ${total}.` +
+                    (total > activeCount
+                        ? ` Other products exist beyond the active one — never claim you only have one product or deny alternatives.`
+                        : total <= 1
+                            ? ` That is the real total for this merchant catalog.`
+                            : '')
+                );
             }
         }
 
@@ -647,13 +698,18 @@ export class SalesGPTAgent {
     }
 
     /**
-     * Generate the actual sales response using AI
+     * Generate the actual sales response using AI.
+     * customerRequest is null when the model omitted the block (callers may fall back).
      */
     private async generateSalesResponse(
         messageText: string,
         productContext: string,
         toolContext: string
-    ): Promise<{ responseText: string; aiNextAction?: string }> {
+    ): Promise<{
+        responseText: string;
+        aiNextAction?: string;
+        customerRequest: CustomerRequestSignals | null;
+    }> {
         const agentName = this.getSalespersonName();
         const storeName = this.config.merchantConfig.storeName ||
             this.config.merchantConfig.store_name || 'المتجر';
@@ -725,6 +781,13 @@ export class SalesGPTAgent {
 
         const askingProductInfo = isProductInfoRequest(messageText);
 
+        const customerRequestSchema = `"customer_request": {
+    "wants_alternatives": true/false,
+    "asks_product_info": true/false,
+    "wants_photo": true/false,
+    "ready_to_confirm": true/false
+  }`;
+
         const userPrompt = isArabic
             ? `المرحلة الحالية: ${this.state.currentConversationStage}
 
@@ -739,36 +802,37 @@ ${conversationHistoryText || 'هذه أول رسالة'}
 رسالة العميل الحالية: "${messageText}"
 
 📝 تعليمات مهمة:
-- 🎯 إقناع من الوصف: عند present_product / handle_objection / close_sale (وعند اقتراح المنتج أول مرة) استخرج 2–3 فوائد من **الوصف الكامل** للمنتج النشط واربطها بحاجة العميل إن وُجدت. لا تختلق مميزات. لا تلصق الوصف كاملاً إلا عند طلب معلومات/تفاصيل.
-- إذا طلب العميل معلومات / تفاصيل / وصف / مواصفات عن المنتج → next_action="present_product". انقل من **الوصف الكامل** بأمانة (يمكن 4–8 جمل عند الحاجة). ممنوع ملخص تأكيد الطلب أو «هل أكد؟» في هذه الرسالة. سؤال ختامي خفيف فقط إن لزم (مثل: هل تحب صورة أو تفضّل لون/مقاس؟).
-- إذا العميل قدم اسماً أو هاتفاً أو عنواناً → اشكره وأكد الاستلام ثم اسأل عن المعلومة التالية المفقودة أو اعرض ملخص الطلب واطلب تأكيداً صريحاً
-- عندما تكتمل كل الحقول ورسالة العميل ليست طلب معلومات → next_action="await_confirmation" مع ملخص + سؤال «هل أكد؟». ممنوع next_action="confirm_order" قبل أن يقول العميل نعم/أكد
-- في **extracted_info**: املأ الحقول من **تاريخ المحادثة والرسالة الحالية معاً** (اسم، هاتف، عنوان، لون، مقاس، منتج). لا تقتصر على الرسالة الحالية فقط؛ إذا لم يُذكر حقل في أي منهما استخدم null.
-- 📸 الصور: «صورة متوفرة» داخلية فقط. استخدم next_action="send_image" وامدح المنتج باختصار فقط إذا الرسالة الحالية طلبت صورة صراحةً (صورة/وريني/فرجيني/ارني). ممنوع قول «تفضل الصورة» أو الادعاء أن صورة أُرسلت إذا لم يطلبها. سؤال السعر/المواصفات → أجب دون ذكر صورة.
+- افهم نية العميل من المعنى الكامل للرسالة (لهجة، صياغة، سؤال ضمني) — لا تعتمد على كلمات مفتاحية حرفية.
+- املأ customer_request بأمانة حسب فهمك للرسالة الحالية فقط.
+- 🎯 إقناع من الوصف: عند present_product / handle_objection / close_sale استخرج 2–3 فوائد من **الوصف الكامل** للمنتج النشط. لا تختلق مميزات.
+- إذا asks_product_info=true → next_action="present_product" وانقل من الوصف الكامل. ممنوع ملخص تأكيد الطلب.
+- إذا wants_alternatives=true → أجب بصدق من **📚 منتجات أخرى** و/أو إجمالي المنتجات. اقترح 1–3 بدائل بأسعارها. ممنوع إنكار وجود منتجات أخرى إذا ظهر في السياق أكثر من منتج أو إجمالي > 1.
+- إذا wants_photo=true فقط → next_action="send_image".
+- ready_to_confirm=true فقط عندما يوافق العميل صراحة على تثبيت الطلب (نعم/أكد)، وليس عند لفظة مجاملة مثل «تمام» داخل سؤال آخر.
+- إذا العميل قدم اسماً/هاتفاً/عنواناً → اشكره ثم اسأل المعلومة التالية أو اعرض ملخصاً لـ await_confirmation.
+- في extracted_info: املأ من تاريخ المحادثة والرسالة الحالية معاً؛ null لما لم يُذكر.
 
-🧭 سياسة استخدام المنتجات والكتالوج:
-- ركّز ردودك التفصيلية على **🎯 المنتج النشط** (السعر، الألوان، المقاسات، الوصف الكامل كمصدر الإقناع).
-- إذا سأل العميل عن منتج آخر أو تصنيف آخر أو "غيره" أو "شو كمان" → اعتمد على **📚 نظرة عامة على الكتالوج** للإجابة بصدق ودون اختلاق، واقترح عليه أبرز خيار مناسب من القائمة.
-- لا تقل أبداً "ليس لدينا" إذا كان المنتج موجوداً في النظرة العامة للكتالوج.
-- لا تعرض القائمة الكاملة للكتالوج للعميل دفعة واحدة؛ اقترح 1-3 خيارات فقط من النظرة العامة.
-- لا تخلط بيانات منتجين مختلفين (لا تنسخ سعر منتج إلى آخر).
-${arColorSizeRules}- عند ذكر السعر استخدم **اسم العملة الخاص بكل منتج** كما هو مذكور بجواره (لا تستبدل عملة منتج بأخرى)
-- لا تختلق معلومات
-- كن متحمساً ومحترفاً
-- اجعل الرد مختصراً (2-4 جمل) إلا عند طلب معلومات المنتج فاستخدم الوصف الكامل بوضوح
+🧭 سياسة الكتالوج:
+- المنتج النشط للتفاصيل العميقة؛ باقي الكتالوج للإجابة عن البدائل بصدق.
+- لا تخلط أسعار/أوصاف بين منتجين.
+- لا تعرض كل الكتالوج دفعة واحدة إلا إذا طلب العميل ذلك صراحة.
+${arColorSizeRules}- عند ذكر السعر استخدم اسم العملة المذكور مع كل منتج.
+- لا تختلق معلومات.
+- ردود قصيرة (2–4 جمل) إلا عند asks_product_info فاستخدم الوصف بوضوح.
 
-أعد ردك كالتالي (JSON):
+أعد JSON فقط:
 {
   "response_text": "ردك المباشر للعميل",
   "next_action": "greet | discover_needs | present_product | handle_objection | close_sale | collect_info | await_confirmation | confirm_order | send_image | end_conversation",
+  ${customerRequestSchema},
   "extracted_info": {
-    "product_name": "إذا ذُكر",
-    "color": "إذا ذُكر",
-    "size": "إذا ذُكر",
-    "quantity": "رقم الكمية المطلوبة (رقم فقط، الافتراضي 1)",
-    "name": "إذا ذُكر",
-    "phone": "إذا ذُكر",
-    "address": "إذا ذُكر"
+    "product_name": "إذا ذُكر أو null",
+    "color": "إذا ذُكر أو null",
+    "size": "إذا ذُكر أو null",
+    "quantity": "رقم أو null",
+    "name": "إذا ذُكر أو null",
+    "phone": "إذا ذُكر أو null",
+    "address": "إذا ذُكر أو null"
   }
 }`
             : `Current stage: ${this.state.currentConversationStage}
@@ -784,36 +848,37 @@ ${conversationHistoryText || 'This is the first message'}
 Current customer message: "${messageText}"
 
 📝 Important instructions:
-- 🎯 Persuade from the description: on present_product / handle_objection / close_sale (and first product suggestion), extract 2–3 benefits from the active product's **full description** and tie them to the customer's need if known. Never invent features. Do not paste the full description unless they ask for details.
-- If the customer asks for more info / details / description / specs → next_action="present_product". Faithfully use the **full description** (4–8 sentences when needed). Do NOT show an order-confirmation summary or ask "shall I confirm?" on this turn. Soft follow-up only if useful (photo / color / size).
-- If customer provided name/phone/address → acknowledge, then ask for next missing info or show order summary and ask for explicit confirmation
-- When all fields are complete AND the message is not a product-info request → next_action="await_confirmation" with a summary + "shall I confirm?". NEVER use next_action="confirm_order" until the customer says yes/confirm
-- In **extracted_info**: fill fields from **conversation history AND the current message** (name, phone, address, color, size, product). Do not only read the latest turn; use null for fields not stated anywhere.
-- 📸 Images: "Image available" is internal only. Use next_action="send_image" and briefly praise the product only if the current message explicitly asks for a photo (photo/image/show me/picture). Never say "Here's the photo!" or claim a photo was sent if they did not ask. Price/specs questions → answer with no photo mention.
+- Understand intent from full meaning (dialect, phrasing, implied questions) — never rely on literal keyword lists.
+- Fill customer_request honestly from the current message only.
+- 🎯 Persuade from the description: on present_product / handle_objection / close_sale extract 2–3 benefits from the active product's full description. Never invent features.
+- If asks_product_info=true → next_action="present_product" and use the full description. No order-confirmation summary.
+- If wants_alternatives=true → answer truthfully from **📚 Other products** and/or total product count. Suggest 1–3 alternatives with prices. Never deny other products when context shows more than one or total > 1.
+- If wants_photo=true only → next_action="send_image".
+- ready_to_confirm=true only when the customer explicitly affirms placing the order — not polite fillers like "ok" inside another question.
+- If customer provided name/phone/address → acknowledge, then ask next missing field or show await_confirmation summary.
+- In extracted_info: fill from history + current message; null when absent.
 
-🧭 Product & catalog policy:
-- Keep detailed follow-up focused on the **🎯 active product** (price, options, stock, full description as the persuasion source).
-- If customer asks for alternatives, categories, "other products", or "what else" → use the **📚 catalog overview** to answer truthfully and suggest 1-3 relevant options.
-- Never say "we don't have it" if that product exists in the catalog overview.
-- Do not dump the entire catalog to the customer unless explicitly requested.
-- Never mix facts between products (e.g., wrong price/currency copied from another item).
-${enColorSizeRules}- Use the **product-specific currency name** shown next to each item (never replace one product's currency with another).
-- Never invent information
-- Be enthusiastic and professional
-- Keep response short (2-4 sentences) unless answering a product-info request — then use the full description clearly
+🧭 Catalog policy:
+- Active product for deep detail; rest of catalog for truthful alternatives.
+- Never mix prices/descriptions across products.
+- Do not dump the full catalog unless the customer explicitly asks for it.
+${enColorSizeRules}- Use each product's currency name as shown.
+- Never invent information.
+- Keep replies short (2–4 sentences) unless asks_product_info — then use the description clearly.
 
-Respond as JSON:
+Return JSON only:
 {
   "response_text": "your direct response to the customer",
   "next_action": "greet | discover_needs | present_product | handle_objection | close_sale | collect_info | await_confirmation | confirm_order | send_image | end_conversation",
+  ${customerRequestSchema},
   "extracted_info": {
-    "product_name": "if mentioned",
-    "color": "if mentioned",
-    "size": "if mentioned",
-    "quantity": "requested quantity number (number only, default 1)",
-    "name": "if mentioned",
-    "phone": "if mentioned",
-    "address": "if mentioned"
+    "product_name": "if mentioned or null",
+    "color": "if mentioned or null",
+    "size": "if mentioned or null",
+    "quantity": "number or null",
+    "name": "if mentioned or null",
+    "phone": "if mentioned or null",
+    "address": "if mentioned or null"
   }
 }`;
 
@@ -823,30 +888,35 @@ Respond as JSON:
         const result = await generateJSON<{
             response_text: string;
             next_action: string;
+            customer_request?: unknown;
             extracted_info: Partial<SalesGPTState['collectedInfo']>;
         }>(userPrompt, {
             systemInstruction: systemPrompt,
-            temperature: 0.4,
-            maxOutputTokens: askingProductInfo ? 1200 : 600
+            temperature: 0.3,
+            maxOutputTokens: askingProductInfo ? 1200 : 700
         });
 
         if (result.success && result.data) {
-            // Merge any newly extracted info
             if (result.data.extracted_info) {
                 this.mergeCollectedInfo(result.data.extracted_info);
             }
+            const rawRequest = result.data.customer_request;
+            const customerRequest = hasCustomerRequestBlock(rawRequest)
+                ? normalizeCustomerRequest(rawRequest)
+                : null;
             return {
                 responseText: result.data.response_text || (isArabic ? 'كيف يمكنني مساعدتك؟' : 'How can I help you?'),
-                aiNextAction: result.data.next_action
+                aiNextAction: result.data.next_action,
+                customerRequest
             };
         }
 
-        // Fallback
         return {
             responseText: isArabic
                 ? 'أهلاً وسهلاً! 😊 كيف يمكنني مساعدتك اليوم؟'
                 : 'Hello! 😊 How can I help you today?',
-            aiNextAction: undefined
+            aiNextAction: undefined,
+            customerRequest: null
         };
     }
 
@@ -867,15 +937,12 @@ Respond as JSON:
     }
 
     /**
-     * Determine intent and next action from stage and message
+     * Stage-only fallback when the model omits next_action (no keyword intent matching).
      */
     private determineIntentAndAction(
-        messageText: string,
+        _messageText: string,
         stageId: string
     ): { intent: Intent; nextAction: string } {
-        const text = messageText.toLowerCase();
-
-        // Order-related
         if (['6', '7', '8'].includes(stageId)) {
             const { name, phone, address, product_name, color, size } = this.state.collectedInfo;
             const needsColor = this.currentProductsHaveColors && !color;
@@ -886,35 +953,26 @@ Respond as JSON:
             return { intent: 'order', nextAction: stageId === '6' ? 'close_sale' : 'collect_info' };
         }
 
-        // Objection
         if (stageId === '5') {
-            if (/غالي|مرتفع|سعر|expensive|costly|price/i.test(text)) {
-                return { intent: 'price', nextAction: 'handle_objection' };
-            }
             return { intent: 'other', nextAction: 'handle_objection' };
         }
 
-        // Product presentation
         if (['3', '4'].includes(stageId)) {
             return { intent: 'product_query', nextAction: 'present_product' };
         }
 
-        // Needs discovery
         if (stageId === '2') {
             return { intent: 'browse', nextAction: 'discover_needs' };
         }
 
-        // Greeting
         if (stageId === '1') {
             return { intent: 'greeting', nextAction: 'greet' };
         }
 
-        // End
         if (stageId === '9') {
             return { intent: 'other', nextAction: 'end_conversation' };
         }
 
-        // Default
         return { intent: 'other', nextAction: 'discover_needs' };
     }
 }

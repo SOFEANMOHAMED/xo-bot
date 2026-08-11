@@ -133,18 +133,6 @@ const detectLanguage = (text: string): Language => {
     return arabicChars >= englishChars ? 'arabic' : 'english';
 };
 
-const CATALOG_EXPLORE_PATTERNS: RegExp[] = [
-    /شو\s*(في|عندك|متوفر|كمان|غير)/i,
-    /(منتجات|اصناف|تصنيفات|غيره|غيرها|بديل|بدائل|باقي)/i,
-    /what\s+(do\s+you\s+have|else|other|more)/i,
-    /(other\s+products|alternatives|categories|catalog)/i
-];
-
-const isCatalogExploreRequest = (text: string): boolean => {
-    if (!text) return false;
-    return CATALOG_EXPLORE_PATTERNS.some(p => p.test(text));
-};
-
 // ==================== ORDER COMPLETENESS ====================
 
 /** True when the most recent assistant message explicitly asked for order confirmation. */
@@ -252,18 +240,14 @@ export const processWithSalesGPT = async (
     });
 
     // ==================== STEP 1: Product Search ====================
+    // Active product = focus for deep details. Catalog overview is ALWAYS attached
+    // so the model can answer alternatives truthfully without keyword gates.
     let products: Product[] = [];
     let activeProductId: string | null = conversationState.last_recommended_products?.[0] || null;
-    const isCatalogExplore = isCatalogExploreRequest(messageText);
-    const wantsOtherProducts =
-        isCatalogExplore ||
-        /(بدل|غيره|منتج آخر|منتجات أخرى|something else|another product|other products)/i.test(
-            messageText
-        );
 
     // Strategy -1: seeded product from ad/post/comment acquisition (recommended start, not exclusive)
     const seededProductId = conversationState.extracted_entities?.product_id;
-    if (seededProductId && !wantsOtherProducts) {
+    if (seededProductId) {
         const seeded = await getProductById(merchantId, seededProductId);
         if (seeded) {
             products = [seeded];
@@ -272,13 +256,14 @@ export const processWithSalesGPT = async (
         }
     }
 
-    // Strategy 0: explicit entity query has highest priority
+    // Strategy 0: explicit entity query has highest priority for switching focus
     if (conversationState.extracted_entities?.product_query) {
         products = await searchProducts(merchantId, conversationState.extracted_entities.product_query, undefined, 5);
+        if (products[0]) activeProductId = products[0].id;
     }
 
-    // Strategy 1: Smart keyword extraction from current message
-    if (products.length === 0 || wantsOtherProducts) {
+    // Strategy 1: keyword extraction when we still have no focus product
+    if (products.length === 0) {
         const smartKeywords = extractProductKeywords(messageText);
         const meaningfulKeywords = smartKeywords.filter(k => k.length >= 3);
         if (meaningfulKeywords.length > 0) {
@@ -299,8 +284,8 @@ export const processWithSalesGPT = async (
         }
     }
 
-    // Strategy 2: From conversation history only when user is NOT exploring catalog
-    if (products.length === 0 && !isCatalogExplore && conversationState.last_recommended_products?.[0]) {
+    // Strategy 2: From conversation history
+    if (products.length === 0 && conversationState.last_recommended_products?.[0]) {
         const productId = conversationState.last_recommended_products[0];
         const product = await getProductById(merchantId, productId);
         if (product) {
@@ -310,19 +295,14 @@ export const processWithSalesGPT = async (
         }
     }
 
-    // Strategy 3: Browse requests fallback
+    // Strategy 3: Top products when still empty (browse / cold start)
     const isImageRequest = SALESGPT_IMAGE_REQUEST_RE.test(messageText);
-    const explicitBrowse =
-        messageText.includes('شو') || messageText.includes('ماذا') ||
-        messageText.includes('what') || messageText.includes('عندك') ||
-        messageText.includes('متوفر');
-    if (products.length === 0 && !isImageRequest && (isCatalogExplore || explicitBrowse)) {
+    if (products.length === 0 && !isImageRequest) {
         products = await getTopProducts(merchantId, 5);
         if (products[0]) activeProductId = products[0].id;
     }
 
     // Always attach compact catalog awareness for SaaS stores.
-    // This keeps the agent aware of alternatives without flooding tokens.
     const [catalogOverview, catalogMeta] = await Promise.all([
         getProductsOverview(merchantId, 30),
         getCatalogMeta(merchantId)
@@ -331,7 +311,7 @@ export const processWithSalesGPT = async (
         overview: catalogOverview,
         meta: catalogMeta,
         activeProductId,
-        isExploring: isCatalogExplore
+        isExploring: true
     };
 
     // ==================== STEP 2: Create & Run SalesGPT Agent ====================
