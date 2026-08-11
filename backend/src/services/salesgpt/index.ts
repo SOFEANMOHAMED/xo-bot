@@ -7,7 +7,6 @@
 
 import {
     SalesGPTAgent,
-    SALESGPT_IMAGE_REQUEST_RE,
     type SalesGPTConfig,
     type SalesGPTResult,
     type CatalogAwareness
@@ -295,8 +294,7 @@ export const processWithSalesGPT = async (
     }
 
     // Strategy 3: Top products when still empty (browse / cold start)
-    const isImageRequest = SALESGPT_IMAGE_REQUEST_RE.test(messageText);
-    if (products.length === 0 && !isImageRequest) {
+    if (products.length === 0) {
         products = await getTopProducts(merchantId, 5);
         if (products[0]) activeProductId = products[0].id;
     }
@@ -518,9 +516,8 @@ export const processWithSalesGPT = async (
     // ==================== STEP 3: Handle Image Requests ====================
     let finalReplyText = salesResult.responseText;
 
-    // Attach images only on explicit customer request (or AI send_image already gated in agent).
-    const shouldAttachImage =
-        isImageRequest || salesResult.nextAction === 'send_image';
+    // Attach images only when agent already gated send_image via model wants_photo.
+    const shouldAttachImage = salesResult.nextAction === 'send_image';
 
     if (shouldAttachImage) {
         if (products.length === 1 && products[0].imageUrl) {

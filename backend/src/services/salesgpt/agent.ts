@@ -78,10 +78,6 @@ const NEXT_ACTION_TO_STAGE_ID: Record<string, string> = {
   end_conversation: '9'
 };
 
-/** @deprecated Prefer model customer_request.wants_photo — kept for channel/image helpers only. */
-export const SALESGPT_IMAGE_REQUEST_RE =
-  /(صورة|صور|وريني|شوفيني|فرجيني|ارني|image|picture|photo|show\s*me)/i;
-
 function normalizeSalesGPTNextAction(raw?: string): string | undefined {
   if (!raw || typeof raw !== 'string') return undefined;
   const t = raw
@@ -385,12 +381,9 @@ export class SalesGPTAgent {
             });
         }
 
-        // Step 4.1: Image safety — honor send_image only when classified as a photo ask.
-        // Prefer model signal; regex fallback only if the model omitted customer_request entirely.
-        const allowSendImage =
-            customerRequest === null
-                ? SALESGPT_IMAGE_REQUEST_RE.test(messageText)
-                : customerRequest.wantsPhoto;
+        // Step 4.1: Image safety — honor send_image only when model classified a photo ask.
+        // Fail closed when customer_request is missing (degraded/AI parse failure).
+        const allowSendImage = customerRequest?.wantsPhoto === true;
         if (nextAction === 'send_image' && !allowSendImage) {
             nextAction = 'present_product';
             intent = 'product_query';
