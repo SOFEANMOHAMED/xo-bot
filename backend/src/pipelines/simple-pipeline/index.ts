@@ -171,12 +171,3 @@ export const canHandleSimply = (messageText: string): boolean => {
 // Re-export handlers
 export { handleGreeting, isPureGreeting } from './greeting-handler.js';
 export { handleConfirmation, isSimpleConfirmation, isThanks } from './confirmation-handler.js';
-export {
-  handleOrderMessage,
-  isOrderIntent,
-  isCancelIntent,
-  isOrderConfirmation,
-  isOrderComplete as isOrderInfoComplete
-} from './order-handler.js';
-
-export type { OrderHandlerResult } from './order-handler.js';

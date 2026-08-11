@@ -518,14 +518,6 @@ export class SalesGPTAgent {
         return `مساعد ${storeName}`;
     }
 
-    private shouldSearchProducts(messageText: string): boolean {
-        const searchTriggers = [
-            /بحث|ابحث|دور|ابي|بدي|اريد|عندكم|شو عندكم|وريني|فرجيني/i,
-            /search|find|show|looking for|do you have/i
-        ];
-        return searchTriggers.some(p => p.test(messageText));
-    }
-
     /**
      * Merge new info into collected info (never overwrite with empty)
      */
@@ -918,22 +910,6 @@ Return JSON only:
             aiNextAction: undefined,
             customerRequest: null
         };
-    }
-
-    /**
-     * Check if user is explicitly confirming an order
-     */
-    private isUserConfirmingOrder(messageText: string): boolean {
-        const text = messageText.trim();
-        const confirmPatterns = [
-            /^(نعم|أيوا|أي|اي|تمام|موافق|ماشي|طيب|أكيد|بالتأكيد|اوكي|ok|okay|yes|yep|yeah|sure)[\s!،,.؟?]*$/i,
-            /^(بدي|أريد|ابي|عاوز)\s*(أكد|اكد|تأكيد|أأكد|اأكد|أؤكد)/i,
-            /^(أكد|اكد|نفذ|أتمم|اتمم)\s*(الطلب|طلبي|الأوردر)?[\s!،,.]*$/i,
-            /^(confirm|place|submit)\s*(order|it)?[\s!,.]*$/i,
-            /^(اي|أي)\s+(بدي|أريد)\s*(أكد|اكد|أأكد|تأكيد)/i,
-            /^(نعم|اي|أي|أيوا)\s*(أكد|اكد|أأكد|اأكد|أؤكد|تأكيد|نفذ)/i
-        ];
-        return confirmPatterns.some(p => p.test(text));
     }
 
     /**

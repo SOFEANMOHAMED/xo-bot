@@ -1,9 +1,8 @@
 /**
  * SalesGPT Module Index
  * Main entry point that integrates SalesGPT with the existing XoBot pipeline
- * 
- * This module replaces the old AI orchestrator with SalesGPT's
- * stage-based sales conversation management
+ *
+ * Replaces the legacy Full-AI orchestrator with stage-based sales conversation management.
  */
 
 import {
@@ -215,7 +214,7 @@ export { sanitizeCaptionWhenImageSent } from '../../response/image-caption.js';
 
 /**
  * Process message using SalesGPT brain
- * This replaces processWithFullAI in the smart pipeline
+ * Primary full-AI sales path used by the smart pipeline
  */
 export const processWithSalesGPT = async (
     input: SalesGPTPipelineInput
