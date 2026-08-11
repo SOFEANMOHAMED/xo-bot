@@ -18,10 +18,10 @@ export interface ConversationStageConfig {
 export const CONVERSATION_STAGES: Record<string, string> = {
     "1": "مقدمة: ابدأ المحادثة بترحيب ودود وتعريف نفسك كمساعد مبيعات المتجر. كن مهذباً ومحترماً. اسأل كيف يمكنك المساعدة.",
     "2": "اكتشاف الاحتياجات: اطرح أسئلة مفتوحة لمعرفة ما يبحث عنه العميل بالضبط. استمع بعناية لتفضيلاته ومتطلباته.",
-    "3": "عرض القيمة: اشرح باختصار كيف يمكن لمنتجاتنا تلبية احتياجات العميل. ركز على نقاط البيع الفريدة والقيمة المضافة.",
-    "4": "عرض الحلول: بناءً على احتياجات العميل، اعرض المنتجات المناسبة كحل لمتطلباته. اذكر المميزات والأسعار.",
-    "5": "التعامل مع الاعتراضات: تعامل مع أي اعتراضات قد تكون لدى العميل بشأن المنتج أو السعر أو الشحن. قدم أدلة وشهادات.",
-    "6": "إغلاق البيع: اطلب إتمام عملية الشراء واقترح الخطوة التالية. لخص ما يتم مناقشته وأعد التأكيد على الفوائد.",
+    "3": "عرض القيمة: من وصف المنتج النشط، اشرح كيف يلبي احتياج العميل. ركز على فوائد حقيقية موجودة في الوصف فقط.",
+    "4": "عرض الحلول: اعرض المنتج المناسب مع السعر و2–3 فوائد مستخرجة من وصفه، ثم اسأل سؤالاً يدفع للقرار.",
+    "5": "التعامل مع الاعتراضات: اعترف بالمخاوف وردّ بحجج من وصف المنتج أو سياسات المتجر فقط — بدون اختلاق.",
+    "6": "إغلاق البيع: أعد تأكيد أقوى فائدة من الوصف، ثم اطلب إتمام الشراء بشكل مريح.",
     "7": "جمع معلومات الطلب: اجمع معلومات العميل اللازمة (الاسم، الهاتف، العنوان) وتفضيلات المنتج (اللون والمقاس إذا كانت متوفرة في المنتج) لإتمام الطلب.",
     "8": "تأكيد الطلب: أكد تفاصيل الطلب مع العميل واشكره على ثقته.",
     "9": "إنهاء المحادثة: انهِ المحادثة بشكل ودود وادع العميل للعودة في أي وقت."
@@ -30,10 +30,10 @@ export const CONVERSATION_STAGES: Record<string, string> = {
 export const CONVERSATION_STAGES_EN: Record<string, string> = {
     "1": "Introduction: Start the conversation by warmly greeting and introducing yourself as the store's sales assistant. Be polite and respectful. Ask how you can help.",
     "2": "Needs Discovery: Ask open-ended questions to find out what the customer is looking for. Listen carefully to their preferences and requirements.",
-    "3": "Value Proposition: Briefly explain how your products can meet the customer's needs. Focus on unique selling points and added value.",
-    "4": "Solution Presentation: Based on the customer's needs, present suitable products as solutions. Mention features and prices.",
-    "5": "Objection Handling: Address any objections the customer may have about the product, price, or shipping. Provide evidence and testimonials.",
-    "6": "Closing: Ask to complete the purchase and suggest the next step. Summarize what was discussed and reaffirm the benefits.",
+    "3": "Value Proposition: Using the active product description, explain how it meets the customer's need. Only real benefits from the description.",
+    "4": "Solution Presentation: Present the suitable product with price and 2–3 benefits extracted from its description, then ask a decision-driving question.",
+    "5": "Objection Handling: Acknowledge concerns and answer with evidence from the product description or store policies only — never invent.",
+    "6": "Closing: Reaffirm the strongest benefit from the description, then ask to complete the purchase comfortably.",
     "7": "Order Information Collection: Collect necessary customer information (name, phone, address) and product preferences (color and size if available) to complete the order.",
     "8": "Order Confirmation: Confirm order details with the customer and thank them for their trust.",
     "9": "End Conversation: End the conversation warmly and invite the customer to return anytime."

@@ -174,12 +174,12 @@ const INTENT_INSTRUCTIONS: Record<Intent, { ar: string; en: string }> = {
     en: 'Help the customer explore products enthusiastically! 💡 Ask about preferences and needs. Show you care about finding the best for them.'
   },
   product_query: {
-    ar: 'أجب بوضوح من وصف المنتج الحقيقي في السياق. انقل الفوائد والمكونات/المواصفات المهمة كما هي في الوصف. إذا طلب العميل «معلومات أكثر» استخدم الوصف الكامل دون اختصار مخلّ، ثم اسأل سؤالاً خفيفاً واحداً فقط (صورة/لون/مقاس أو هل يريد المتابعة للطلب) — لا تفتح تأكيد شراء قبل أن يطلب ذلك.',
-    en: 'Answer clearly from the real product description in context. Include important benefits and specs/ingredients from the description. If the customer asks for more info, use the full description without harmful compression, then ask one soft follow-up only (photo/color/size or whether to proceed) — never open order confirmation until they ask.'
+    ar: 'أقنع من وصف المنتج في السياق: استخرج 2–3 فوائد حقيقية واربطها بحاجة العميل. إذا طلب «معلومات أكثر» انقل الوصف الكامل بأمانة دون اختصار مخلّ. سؤال خفيف واحد فقط في النهاية — لا تفتح تأكيد شراء قبل أن يطلب ذلك. ممنوع اختلاق مميزات.',
+    en: 'Persuade from the product description in context: extract 2–3 real benefits and tie them to the customer need. If they ask for more info, use the full description faithfully. One soft follow-up only — never open order confirmation until they ask. Never invent features.'
   },
   price: {
-    ar: 'أكد اهتمامك وأبرز القيمة! السعر سيظهر تلقائياً، لكن ركز على أن المنتج يستحق السعر. اذكر فائدة أو ميزة قوية.',
-    en: 'Confirm interest and highlight value! Price shown automatically, but focus on product worth the price. Mention a strong benefit or feature.'
+    ar: 'أكد الاهتمام وأبرز القيمة من وصف المنتج (فائدة واحدة قوية موجودة في الوصف). السعر سيظهر تلقائياً — لا تختلق مبررات سعر غير موجودة.',
+    en: 'Confirm interest and highlight value from the product description (one strong real benefit). Price shows automatically — never invent price justifications.'
   },
   availability: {
     ar: 'أظهر حماساً! إذا متوفر، قل "رائع! متوفر 🎉". إذا قليل، أضف urgency: "متبقي X فقط! 🔥". المعلومات ستظهر تلقائياً.',
@@ -190,12 +190,12 @@ const INTENT_INSTRUCTIONS: Record<Intent, { ar: string; en: string }> = {
     en: 'Ask for delivery city if not mentioned.'
   },
   comparison: {
-    ar: 'ساعد العميل في المقارنة. اسأل عن أولوياته.',
-    en: 'Help with comparison. Ask about priorities.'
+    ar: 'قارن بصدق من أوصاف المنتجات في السياق فقط. اسأل عن أولوية العميل ثم أبرز فروقاً حقيقية من الوصف.',
+    en: "Compare honestly using only product descriptions in context. Ask the customer's priority, then highlight real differences from the descriptions."
   },
   order: {
-    ar: 'رائع! العميل جاهز للشراء 🎉. تعامل بحماس واحترافية. اطلب المعلومات المفقودة واحدة تلو الأخرى بطريقة ودودة. اجعله يشعر أن قراره ممتاز!',
-    en: 'Great! Customer ready to buy 🎉. Handle with enthusiasm and professionalism. Request missing info one at a time in a friendly way. Make them feel their decision is excellent!'
+    ar: 'رائع! العميل جاهز للشراء 🎉. إن لزم ذكّر بفائدة واحدة من وصف المنتج ثم اطلب المعلومات المفقودة واحداً تلو الآخر بودّ.',
+    en: 'Great! Customer ready to buy 🎉. If useful, briefly reaffirm one benefit from the product description, then request missing info one at a time.'
   },
   complaint: {
     ar: 'اعتذر بصدق واطلب تفاصيل المشكلة. أكد أنك ستساعد.',
