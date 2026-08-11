@@ -10,6 +10,8 @@ import {
   FACEBOOK_PAGE_SUBSCRIBED_FIELDS,
   subscribeFacebookPageWebhooks
 } from '../services/facebookPageWebhooks.js';
+import { scheduleFacebookPageHistorySync } from '../services/metaConversationHistorySync.js';
+import { clearMerchantChannelConversations } from '../services/metaConversationCleanup.js';
 
 export { FACEBOOK_PAGE_SUBSCRIBED_FIELDS, subscribeFacebookPageWebhooks };
 export const getIntegrations = async (
@@ -146,10 +148,26 @@ export const connectFacebook = async (
     }
 
     // Generate OAuth URL
+    // pages_show_list is required for GET /me/accounts (especially on mobile Meta dialogs).
     const state = Buffer.from(JSON.stringify({ merchantId: req.merchantId })).toString('base64');
-    const scopes =
-      'pages_manage_metadata,pages_read_engagement,pages_messaging,pages_manage_posts,pages_manage_engagement';
-    const authUrl = `https://www.facebook.com/v21.0/dialog/oauth?client_id=${fbAppId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&scope=${scopes}`;
+    const scopes = [
+      'pages_show_list',
+      'pages_manage_metadata',
+      'pages_read_engagement',
+      'pages_messaging',
+      'pages_manage_posts',
+      'pages_manage_engagement',
+      'business_management',
+    ].join(',');
+    const authUrl =
+      `https://www.facebook.com/v21.0/dialog/oauth` +
+      `?client_id=${fbAppId}` +
+      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+      `&state=${encodeURIComponent(state)}` +
+      `&scope=${encodeURIComponent(scopes)}` +
+      `&response_type=code` +
+      // Force Meta to re-show page/business pickers (critical on mobile + Business Suite).
+      `&auth_type=rerequest`;
 
     res.json({
       success: true,
@@ -390,6 +408,13 @@ export const linkFacebookPages = async (
       } catch (subErr) {
         logger.error(`Error subscribing page ${pageData.id}`, subErr as Error);
       }
+
+      // Auto-import recent Messenger history for this page (non-blocking).
+      scheduleFacebookPageHistorySync({
+        merchantId: req.merchantId!,
+        pageId: String(pageData.id),
+        accessToken: pageAccessToken,
+      });
     }
 
     deleteFbLinkingSession(sessionId);
@@ -433,6 +458,12 @@ export const disconnectFacebookPage = async (
 
     // Remove synced posts for this page so they no longer appear in the dashboard
     await clearMerchantSocialPosts(req.merchantId!, 'facebook', pageId);
+    // Remove Messenger threads belonging to this page (messages cascade)
+    await clearMerchantChannelConversations({
+      merchantId: req.merchantId!,
+      platform: 'facebook_messenger',
+      accountId: pageId,
+    });
 
     res.json({
       success: true,
@@ -455,6 +486,10 @@ export const disconnectFacebook = async (
     );
 
     await clearMerchantSocialPosts(req.merchantId!, 'facebook');
+    await clearMerchantChannelConversations({
+      merchantId: req.merchantId!,
+      platform: 'facebook_messenger',
+    });
 
     res.json({
       success: true,

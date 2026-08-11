@@ -37,6 +37,12 @@ import {
   voiceTranscriptionFallbackMessage
 } from '../services/voiceTranscription.js';
 import { getCurrencyDisplayName } from '../utils/currencyDisplayName.js';
+import { withOAuthCodeDedup } from '../utils/oauthCodeDedup.js';
+import {
+  resolveManagedFacebookPages,
+  fetchGrantedFacebookPermissions,
+  type FacebookManagedPage,
+} from '../utils/facebookPages.js';
 import {
   applyCommentTemplate,
   clampSocialText,
@@ -58,6 +64,8 @@ import {
   FACEBOOK_PAGE_SUBSCRIBED_FIELDS,
   subscribeFacebookPageWebhooks
 } from '../services/facebookPageWebhooks.js';
+import { scheduleInstagramAccountHistorySync } from '../services/metaConversationHistorySync.js';
+import { clearMerchantChannelConversations } from '../services/metaConversationCleanup.js';
 
 // ==================== HELPERS ====================
 
@@ -167,37 +175,10 @@ const INSTAGRAM_OAUTH_SCOPES = [
   'instagram_content_publish'
 ].join(',');
 
-type ManagedFacebookPage = {
-  id: string;
-  name?: string;
-  access_token?: string;
-  instagram_business_account?: { id?: string; username?: string };
-};
+type ManagedFacebookPage = FacebookManagedPage;
 
-const fetchAllManagedFacebookPages = async (userAccessToken: string): Promise<ManagedFacebookPage[]> => {
-  const pages: ManagedFacebookPage[] = [];
-  let url: string | null =
-    `https://graph.facebook.com/${INSTAGRAM_GRAPH_VERSION}/me/accounts` +
-    `?fields=id,name,access_token,instagram_business_account{id,username}` +
-    `&limit=100&access_token=${encodeURIComponent(userAccessToken)}`;
-
-  while (url) {
-    const resp = await fetch(url);
-    const data = (await resp.json()) as {
-      data?: ManagedFacebookPage[];
-      paging?: { next?: string };
-      error?: { message?: string; code?: number };
-    };
-    if (!resp.ok || data.error) {
-      logger.error('Instagram OAuth: failed to list Facebook pages', new Error(JSON.stringify(data)));
-      break;
-    }
-    if (Array.isArray(data.data)) pages.push(...data.data);
-    url = data.paging?.next || null;
-  }
-
-  return pages;
-};
+const IG_PAGE_FIELDS =
+  'id,name,access_token,instagram_business_account{id,username}';
 
 /**
  * Meta may expose the linked IG account on `instagram_business_account` or only on `/instagram_accounts`.
@@ -457,10 +438,14 @@ const sendInstagramImage = async (
 
 const instagramOAuthCorsOrigin = () => process.env.CORS_ORIGIN || 'https://xo-bot.com';
 
+const buildInstagramIntegrationRedirect = (params: Record<string, string>) => {
+  const q = new URLSearchParams(params);
+  return `${instagramOAuthCorsOrigin()}/app/integrations?${q.toString()}`;
+};
+
 /** OAuth errors → redirect to SPA with query params (avoid raw JSON in the browser). */
 const redirectInstagramIntegration = (res: Response, params: Record<string, string>) => {
-  const q = new URLSearchParams(params);
-  res.redirect(`${instagramOAuthCorsOrigin()}/app/integrations?${q.toString()}`);
+  res.redirect(buildInstagramIntegrationRedirect(params));
 };
 
 const decodeBase64Url = (input: string): Buffer => {
@@ -536,8 +521,10 @@ export const connectInstagram = async (
       `https://www.facebook.com/${INSTAGRAM_GRAPH_VERSION}/dialog/oauth` +
       `?client_id=${fbAppId}` +
       `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-      `&state=${state}` +
-      `&scope=${INSTAGRAM_OAUTH_SCOPES}`;
+      `&state=${encodeURIComponent(state)}` +
+      `&scope=${encodeURIComponent(INSTAGRAM_OAUTH_SCOPES)}` +
+      `&response_type=code` +
+      `&auth_type=rerequest`;
 
     res.json({ success: true, data: { authUrl } });
   } catch (error) {
@@ -548,125 +535,166 @@ export const connectInstagram = async (
 export const instagramCallback = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  _next: NextFunction
 ) => {
   try {
+    const oauthError = typeof req.query.error === 'string' ? req.query.error : '';
+    if (oauthError) {
+      const reason =
+        oauthError === 'access_denied' || req.query.error_reason === 'user_denied'
+          ? 'user_denied'
+          : 'oauth_failed';
+      logger.warn('Instagram OAuth denied or errored by provider', {
+        error: oauthError,
+        errorReason: req.query.error_reason || null,
+      });
+      redirectInstagramIntegration(res, { instagram: 'error', reason });
+      return;
+    }
+
     const { code, state } = req.query;
     if (!code || !state) {
       redirectInstagramIntegration(res, { instagram: 'error', reason: 'missing_params' });
       return;
     }
 
-    const fbAppId = process.env.FACEBOOK_APP_ID!;
-    const fbAppSecret = process.env.FACEBOOK_APP_SECRET!;
-    const redirectUri =
-      process.env.INSTAGRAM_REDIRECT_URI ||
-      `${process.env.CORS_ORIGIN || 'https://xo-bot.com'}/api/integrations/instagram/callback`;
+    const authCode = String(code);
 
-    let merchantId: string;
-    try {
-      const decoded = JSON.parse(Buffer.from(state as string, 'base64').toString());
-      merchantId = decoded.merchantId;
-      if (!isValidUUID(merchantId)) throw new Error('bad uuid');
-    } catch {
-      redirectInstagramIntegration(res, { instagram: 'error', reason: 'invalid_state' });
-      return;
-    }
+    const redirectUrl = await withOAuthCodeDedup('instagram', authCode, async () => {
+      const fbAppId = process.env.FACEBOOK_APP_ID!;
+      const fbAppSecret = process.env.FACEBOOK_APP_SECRET!;
+      const redirectUri =
+        process.env.INSTAGRAM_REDIRECT_URI ||
+        `${process.env.CORS_ORIGIN || 'https://xo-bot.com'}/api/integrations/instagram/callback`;
 
-    // Exchange code → short-lived user token
-    const tokenResp = await fetch(
-      `https://graph.facebook.com/v21.0/oauth/access_token` +
-      `?client_id=${fbAppId}` +
-      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-      `&client_secret=${fbAppSecret}` +
-      `&code=${code}`
-    );
-    const tokenData = await tokenResp.json() as any;
-    if (!tokenResp.ok || !tokenData.access_token) {
-      logger.error('Instagram token exchange failed', new Error(JSON.stringify(tokenData)));
-      redirectInstagramIntegration(res, { instagram: 'error', reason: 'oauth_failed' });
-      return;
-    }
-    const userAccessToken = tokenData.access_token;
-
-    const pages = await fetchAllManagedFacebookPages(userAccessToken);
-    if (!pages.length) {
-      logger.warn('Instagram OAuth: no Facebook pages returned for user', { merchantId });
-      redirectInstagramIntegration(res, { instagram: 'error', reason: 'no_pages' });
-      return;
-    }
-
-    let connectedCount = 0;
-    const pagesWithoutIg: Array<{ id: string; name?: string }> = [];
-
-    for (const page of pages) {
-      const linked = await resolveLinkedInstagramBusinessAccount(page, userAccessToken);
-      if (!linked) {
-        pagesWithoutIg.push({ id: page.id, name: page.name });
-        continue;
-      }
-
-      const { igBusinessId, pageAccessToken, igUsername } = linked;
-
-      // Get IG username if not already known from page fields
-      let resolvedUsername = igUsername || '';
-      if (!resolvedUsername) {
-        const igInfoResp = await fetch(
-          `https://graph.facebook.com/${INSTAGRAM_GRAPH_VERSION}/${igBusinessId}` +
-          `?fields=username,name,profile_picture_url&access_token=${encodeURIComponent(pageAccessToken)}`
-        );
-        const igInfo = (await igInfoResp.json()) as { username?: string };
-        resolvedUsername = igInfo.username || '';
-      }
-
-      // Upsert instagram_accounts
-      await pool.query(
-        `INSERT INTO instagram_accounts
-           (merchant_id, ig_user_id, ig_username, page_id, access_token,
-            auto_reply_comments, auto_reply_dm, send_dm_on_comment)
-         VALUES ($1,$2,$3,$4,$5, true, true, true)
-         ON CONFLICT (merchant_id, ig_user_id)
-         DO UPDATE SET
-           ig_username = EXCLUDED.ig_username,
-           page_id = EXCLUDED.page_id,
-           access_token = EXCLUDED.access_token,
-           updated_at = CURRENT_TIMESTAMP`,
-        [merchantId, igBusinessId, resolvedUsername, page.id, pageAccessToken]
-      );
-
-      // Subscribe page to webhook fields needed for IG + Messenger human takeover
+      let merchantId: string;
       try {
-        const { ok, data } = await subscribeFacebookPageWebhooks(page.id, pageAccessToken);
-        if (!ok) {
-          logger.warn('Failed to subscribe IG page to webhooks', {
-            pageId: page.id,
-            data: data as Record<string, any>
-          });
-        } else {
-          logger.info('Subscribed IG page webhooks', {
-            pageId: page.id,
-            fields: FACEBOOK_PAGE_SUBSCRIBED_FIELDS
-          });
-        }
-      } catch (e) {
-        logger.warn('Failed to subscribe IG page to webhooks', { pageId: page.id });
+        const decoded = JSON.parse(Buffer.from(state as string, 'base64').toString());
+        merchantId = decoded.merchantId;
+        if (!isValidUUID(merchantId)) throw new Error('bad uuid');
+      } catch {
+        return buildInstagramIntegrationRedirect({ instagram: 'error', reason: 'invalid_state' });
       }
 
-      connectedCount++;
-    }
+      const tokenResp = await fetch(
+        `https://graph.facebook.com/v21.0/oauth/access_token` +
+          `?client_id=${fbAppId}` +
+          `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+          `&client_secret=${fbAppSecret}` +
+          `&code=${encodeURIComponent(authCode)}`
+      );
+      const tokenData = (await tokenResp.json()) as { access_token?: string; error?: unknown };
+      if (!tokenResp.ok || !tokenData.access_token) {
+        logger.error('Instagram token exchange failed', new Error(JSON.stringify(tokenData)));
+        return buildInstagramIntegrationRedirect({ instagram: 'error', reason: 'oauth_failed' });
+      }
+      const userAccessToken = tokenData.access_token;
 
-    if (connectedCount === 0) {
-      logger.warn('Instagram OAuth: no linked IG business account on any managed page', {
+      const { pages, source } = await resolveManagedFacebookPages(
+        userAccessToken,
+        IG_PAGE_FIELDS
+      );
+      if (!pages.length) {
+        const granted = await fetchGrantedFacebookPermissions(userAccessToken);
+        const hasPagePerms = granted.includes('pages_show_list');
+        const hasBusinessMgmt = granted.includes('business_management');
+        logger.warn('Instagram OAuth: no Facebook pages returned for user', {
+          merchantId,
+          grantedPermissions: granted,
+          hasPagePerms,
+          hasBusinessMgmt,
+          resolveSource: source,
+        });
+        return buildInstagramIntegrationRedirect({
+          instagram: 'error',
+          reason: hasPagePerms && !hasBusinessMgmt ? 'business_pages' : 'no_pages',
+        });
+      }
+
+      logger.info('Instagram OAuth pages resolved', {
         merchantId,
-        pagesChecked: pages.length,
-        pagesWithoutIg
+        pagesCount: pages.length,
+        source,
       });
-      redirectInstagramIntegration(res, { instagram: 'error', reason: 'no_business' });
-      return;
-    }
 
-    logger.info('Instagram OAuth completed', { merchantId, connectedCount });
-    res.redirect(`${instagramOAuthCorsOrigin()}/app/integrations?instagram=connected`);
+      let connectedCount = 0;
+      const pagesWithoutIg: Array<{ id: string; name?: string }> = [];
+
+      for (const page of pages) {
+        const linked = await resolveLinkedInstagramBusinessAccount(page, userAccessToken);
+        if (!linked) {
+          pagesWithoutIg.push({ id: page.id, name: page.name });
+          continue;
+        }
+
+        const { igBusinessId, pageAccessToken, igUsername } = linked;
+
+        let resolvedUsername = igUsername || '';
+        if (!resolvedUsername) {
+          const igInfoResp = await fetch(
+            `https://graph.facebook.com/${INSTAGRAM_GRAPH_VERSION}/${igBusinessId}` +
+              `?fields=username,name,profile_picture_url&access_token=${encodeURIComponent(pageAccessToken)}`
+          );
+          const igInfo = (await igInfoResp.json()) as { username?: string };
+          resolvedUsername = igInfo.username || '';
+        }
+
+        await pool.query(
+          `INSERT INTO instagram_accounts
+             (merchant_id, ig_user_id, ig_username, page_id, access_token,
+              auto_reply_comments, auto_reply_dm, send_dm_on_comment)
+           VALUES ($1,$2,$3,$4,$5, true, true, true)
+           ON CONFLICT (merchant_id, ig_user_id)
+           DO UPDATE SET
+             ig_username = EXCLUDED.ig_username,
+             page_id = EXCLUDED.page_id,
+             access_token = EXCLUDED.access_token,
+             updated_at = CURRENT_TIMESTAMP`,
+          [merchantId, igBusinessId, resolvedUsername, page.id, pageAccessToken]
+        );
+
+        try {
+          const { ok, data } = await subscribeFacebookPageWebhooks(page.id, pageAccessToken);
+          if (!ok) {
+            logger.warn('Failed to subscribe IG page to webhooks', {
+              pageId: page.id,
+              data: data as Record<string, any>,
+            });
+          } else {
+            logger.info('Subscribed IG page webhooks', {
+              pageId: page.id,
+              fields: FACEBOOK_PAGE_SUBSCRIBED_FIELDS,
+            });
+          }
+        } catch {
+          logger.warn('Failed to subscribe IG page to webhooks', { pageId: page.id });
+        }
+
+        // Auto-import recent Instagram DM history (non-blocking).
+        scheduleInstagramAccountHistorySync({
+          merchantId,
+          pageId: String(page.id),
+          igUserId: String(igBusinessId),
+          accessToken: pageAccessToken,
+        });
+
+        connectedCount++;
+      }
+
+      if (connectedCount === 0) {
+        logger.warn('Instagram OAuth: no linked IG business account on any managed page', {
+          merchantId,
+          pagesChecked: pages.length,
+          pagesWithoutIg,
+        });
+        return buildInstagramIntegrationRedirect({ instagram: 'error', reason: 'no_business' });
+      }
+
+      logger.info('Instagram OAuth completed', { merchantId, connectedCount });
+      return `${instagramOAuthCorsOrigin()}/app/integrations?instagram=connected`;
+    });
+
+    res.redirect(redirectUrl);
   } catch (error) {
     logger.error('Instagram OAuth callback error', error as Error);
     redirectInstagramIntegration(res, { instagram: 'error', reason: 'server_error' });
@@ -682,6 +710,10 @@ export const disconnectInstagram = async (
     await pool.query('DELETE FROM instagram_accounts WHERE merchant_id = $1', [req.merchantId]);
     // Remove synced Instagram posts so they no longer appear in the dashboard
     await clearMerchantSocialPosts(req.merchantId!, 'instagram');
+    await clearMerchantChannelConversations({
+      merchantId: req.merchantId!,
+      platform: 'instagram',
+    });
     res.json({ success: true, message: 'Instagram disconnected' });
   } catch (error) {
     next(error);

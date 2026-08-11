@@ -47,6 +47,11 @@ import {
   type AcquisitionContext
 } from '../services/socialAcquisition.js';
 import { getProductById } from '../catalog/product-search.js';
+import { withOAuthCodeDedup } from '../utils/oauthCodeDedup.js';
+import {
+  resolveManagedFacebookPages,
+  fetchGrantedFacebookPermissions,
+} from '../utils/facebookPages.js';
 
 // ==================== FACEBOOK LINKING SESSIONS ====================
 
@@ -1502,9 +1507,13 @@ const processFacebookMessage = async (event: any) => {
 
 const facebookOAuthCorsOrigin = () => process.env.CORS_ORIGIN || 'https://xo-bot.com';
 
-const redirectFacebookIntegration = (res: Response, params: Record<string, string>) => {
+const buildFacebookIntegrationRedirect = (params: Record<string, string>) => {
   const q = new URLSearchParams(params);
-  res.redirect(`${facebookOAuthCorsOrigin()}/app/integrations?${q.toString()}`);
+  return `${facebookOAuthCorsOrigin()}/app/integrations?${q.toString()}`;
+};
+
+const redirectFacebookIntegration = (res: Response, params: Record<string, string>) => {
+  res.redirect(buildFacebookIntegrationRedirect(params));
 };
 
 export const facebookCallback = async (
@@ -1513,6 +1522,21 @@ export const facebookCallback = async (
   next: NextFunction
 ) => {
   try {
+    const oauthError = typeof req.query.error === 'string' ? req.query.error : '';
+    if (oauthError) {
+      const reason =
+        oauthError === 'access_denied' || req.query.error_reason === 'user_denied'
+          ? 'user_denied'
+          : 'oauth_failed';
+      logger.warn('Facebook OAuth denied or errored by provider', {
+        error: oauthError,
+        errorReason: req.query.error_reason || null,
+        errorDescription: req.query.error_description || null,
+      });
+      redirectFacebookIntegration(res, { facebook: 'error', reason });
+      return;
+    }
+
     const { code, state } = req.query;
 
     if (!code || !state) {
@@ -1520,71 +1544,96 @@ export const facebookCallback = async (
       return;
     }
 
-    let merchantId: string;
-    try {
-      const stateData = JSON.parse(Buffer.from(state, 'base64').toString());
-      merchantId = stateData.merchantId;
-      if (!merchantId) throw new Error('no merchantId');
-    } catch {
-      redirectFacebookIntegration(res, { facebook: 'error', reason: 'invalid_state' });
-      return;
-    }
+    const authCode = String(code);
 
-    const fbAppId = process.env.FACEBOOK_APP_ID;
-    const fbAppSecret = process.env.FACEBOOK_APP_SECRET;
-    const redirectUri =
-      process.env.FACEBOOK_REDIRECT_URI ||
-      `${process.env.CORS_ORIGIN}/api/integrations/facebook/callback`;
+    const redirectUrl = await withOAuthCodeDedup('facebook', authCode, async () => {
+      let merchantId: string;
+      try {
+        const stateData = JSON.parse(Buffer.from(String(state), 'base64').toString());
+        merchantId = stateData.merchantId;
+        if (!merchantId) throw new Error('no merchantId');
+      } catch {
+        return buildFacebookIntegrationRedirect({ facebook: 'error', reason: 'invalid_state' });
+      }
 
-    const tokenResponse = await fetch(
-      `https://graph.facebook.com/v21.0/oauth/access_token?client_id=${fbAppId}&client_secret=${fbAppSecret}&redirect_uri=${encodeURIComponent(redirectUri)}&code=${code}`
-    );
+      const fbAppId = process.env.FACEBOOK_APP_ID;
+      const fbAppSecret = process.env.FACEBOOK_APP_SECRET;
+      const redirectUri =
+        process.env.FACEBOOK_REDIRECT_URI ||
+        `${process.env.CORS_ORIGIN}/api/integrations/facebook/callback`;
 
-    const tokenData = await tokenResponse.json() as { access_token?: string; token_type?: string; expires_in?: number; error?: { message?: string; code?: number } };
+      const tokenResponse = await fetch(
+        `https://graph.facebook.com/v21.0/oauth/access_token?client_id=${fbAppId}&client_secret=${fbAppSecret}&redirect_uri=${encodeURIComponent(redirectUri)}&code=${encodeURIComponent(authCode)}`
+      );
 
-    if (!tokenResponse.ok || !tokenData.access_token) {
-      logger.error('Facebook OAuth token exchange failed', new Error(JSON.stringify(tokenData)));
-      redirectFacebookIntegration(res, { facebook: 'error', reason: 'oauth_failed' });
-      return;
-    }
+      const tokenData = await tokenResponse.json() as {
+        access_token?: string;
+        token_type?: string;
+        expires_in?: number;
+        error?: { message?: string; code?: number };
+      };
 
-    const userAccessToken = tokenData.access_token;
+      if (!tokenResponse.ok || !tokenData.access_token) {
+        logger.error('Facebook OAuth token exchange failed', new Error(JSON.stringify(tokenData)));
+        return buildFacebookIntegrationRedirect({ facebook: 'error', reason: 'oauth_failed' });
+      }
 
-    const pagesResponse = await fetch(
-      `https://graph.facebook.com/v21.0/me/accounts?fields=id,name,access_token,category,picture&access_token=${userAccessToken}`
-    );
+      const userAccessToken = tokenData.access_token;
+      const { pages, source } = await resolveManagedFacebookPages(userAccessToken);
 
-    const pagesData = await pagesResponse.json() as { data?: Array<{ id: string; name: string; access_token?: string; category?: string; picture?: { data?: { url?: string } }; [key: string]: any }>; error?: { message?: string; code?: number } };
+      if (pages.length === 0) {
+        const granted = await fetchGrantedFacebookPermissions(userAccessToken);
+        const hasPagePerms = granted.includes('pages_show_list');
+        const hasBusinessMgmt = granted.includes('business_management');
+        logger.error(
+          'Failed to get Facebook pages',
+          new Error(
+            JSON.stringify({
+              data: [],
+              grantedPermissions: granted,
+              hasPagePerms,
+              hasBusinessMgmt,
+              resolveSource: source,
+            })
+          )
+        );
+        return buildFacebookIntegrationRedirect({
+          facebook: 'error',
+          reason: hasPagePerms && !hasBusinessMgmt ? 'business_pages' : 'no_pages',
+        });
+      }
 
-    if (!pagesResponse.ok || !pagesData.data || pagesData.data.length === 0) {
-      logger.error('Failed to get Facebook pages', new Error(JSON.stringify(pagesData)));
-      redirectFacebookIntegration(res, { facebook: 'error', reason: 'no_pages' });
-      return;
-    }
+      logger.info('Facebook pages resolved for OAuth linking', {
+        merchantId,
+        pagesCount: pages.length,
+        source,
+      });
 
-    const corsOrigin = process.env.CORS_ORIGIN || 'https://xo-bot.com';
+      const corsOrigin = process.env.CORS_ORIGIN || 'https://xo-bot.com';
+      const sessionId = crypto.randomUUID();
+      fbLinkingSessions.set(sessionId, {
+        merchantId,
+        userAccessToken,
+        pages: pages.map((p) => ({
+          id: p.id,
+          name: p.name || p.id,
+          access_token: p.access_token,
+          category: p.category,
+          picture: p.picture,
+        })),
+        createdAt: Date.now(),
+      });
 
-    const sessionId = crypto.randomUUID();
-    fbLinkingSessions.set(sessionId, {
-      merchantId,
-      userAccessToken,
-      pages: pagesData.data.map(p => ({
-        id: p.id,
-        name: p.name,
-        access_token: p.access_token,
-        category: p.category,
-        picture: p.picture,
-      })),
-      createdAt: Date.now(),
+      logger.info('Facebook OAuth: linking session created', {
+        merchantId,
+        sessionId,
+        pagesCount: pages.length,
+      });
+
+      return `${corsOrigin}/app/integrations?facebook=select_pages&fb_session=${sessionId}`;
     });
 
-    logger.info('Facebook OAuth: linking session created', {
-      merchantId,
-      sessionId,
-      pagesCount: pagesData.data.length,
-    });
-
-    res.redirect(`${corsOrigin}/app/integrations?facebook=select_pages&fb_session=${sessionId}`);
+    res.redirect(redirectUrl);
   } catch (error) {
     logger.error('Error in Facebook OAuth callback', error as Error);
     redirectFacebookIntegration(res, { facebook: 'error', reason: 'server_error' });
