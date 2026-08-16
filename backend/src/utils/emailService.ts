@@ -1,5 +1,18 @@
 import nodemailer from 'nodemailer';
 import { logger } from './logger.js';
+import {
+  BRAND,
+  XO_BOT_BENEFITS_AR,
+  XO_BOT_FIRST_STEPS_AR,
+  escapeHtml,
+  getAppName,
+  getFromAddress,
+  getFrontendUrl,
+  renderBrandedEmail,
+  renderBulletList,
+  renderInfoBox,
+} from './emailBrand.js';
+import { getOrderSourceLabel } from './orderSource.js';
 
 type MailPayload = {
   from: string;
@@ -7,19 +20,6 @@ type MailPayload = {
   subject: string;
   html?: string;
   text?: string;
-};
-
-const getFrontendUrl = () => {
-  return process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'https://xo-bot.com';
-};
-
-const getAppName = () => {
-  return process.env.APP_NAME || 'Xo Bot';
-};
-
-const getFromAddress = () => {
-  const appName = getAppName();
-  return process.env.SMTP_FROM || `"${appName}" <noreply@xo-bot.com>`;
 };
 
 const hasMailgunConfig = () =>
@@ -56,10 +56,6 @@ const createTransporter = () => {
 
 const transporter = createTransporter();
 
-/**
- * Prefer Mailgun HTTP API (works when outbound SMTP ports are blocked).
- * Fall back to SMTP when Mailgun is not configured.
- */
 const sendViaMailgun = async (payload: MailPayload): Promise<string> => {
   const apiKey = process.env.MAILGUN_API_KEY!;
   const domain = process.env.MAILGUN_DOMAIN!;
@@ -109,6 +105,42 @@ const sendMailMessage = async (payload: MailPayload): Promise<string> => {
   throw new Error('Email delivery is not configured');
 };
 
+const deliverOrLog = async (
+  mailOptions: MailPayload,
+  logLabel: string,
+  meta: Record<string, unknown>
+): Promise<boolean> => {
+  try {
+    if (!isEmailDeliveryConfigured()) {
+      logger.info(`${logLabel} (development mode)`, meta);
+      console.log(`\n📧 ${logLabel} (Development Mode)`);
+      console.log(`To: ${mailOptions.to}`);
+      console.log(`Subject: ${mailOptions.subject}\n`);
+      return true;
+    }
+
+    const messageId = await sendMailMessage(mailOptions);
+    logger.info(`${logLabel} sent`, {
+      ...meta,
+      messageId,
+      provider: hasMailgunConfig() ? 'mailgun' : 'smtp',
+    });
+    return true;
+  } catch (error) {
+    logger.error(`Error sending ${logLabel}`, error as Error, meta);
+    return false;
+  }
+};
+
+const greeting = (name?: string | null): string => {
+  const trimmed = name?.trim();
+  return trimmed ? escapeHtml(trimmed) : 'عزيزي التاجر';
+};
+
+const dashboardUrl = (): string => `${getFrontendUrl()}/app`;
+const pricingUrl = (): string => `${getFrontendUrl()}/#pricing`;
+const loginUrl = (): string => `${getFrontendUrl()}/login`;
+
 /**
  * Send password reset email
  */
@@ -116,284 +148,240 @@ export const sendPasswordResetEmail = async (
   email: string,
   resetToken: string
 ): Promise<boolean> => {
-  try {
-    const frontendUrl = getFrontendUrl();
-    const appName = getAppName();
-    const resetLink = `${frontendUrl}/reset-password?token=${resetToken}`;
+  const frontendUrl = getFrontendUrl();
+  const appName = getAppName();
+  const resetLink = `${frontendUrl}/reset-password?token=${resetToken}`;
 
-    const mailOptions: MailPayload = {
-      from: getFromAddress(),
-      to: email,
-      subject: 'إعادة تعيين كلمة المرور - Password Reset',
-      html: `
-        <!DOCTYPE html>
-        <html dir="rtl" lang="ar">
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <style>
-            body {
-              font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-              line-height: 1.6;
-              color: #333;
-              max-width: 600px;
-              margin: 0 auto;
-              padding: 20px;
-              background-color: #f4f4f4;
-            }
-            .container {
-              background-color: #ffffff;
-              border-radius: 10px;
-              padding: 30px;
-              box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            }
-            .header {
-              text-align: center;
-              margin-bottom: 30px;
-            }
-            .logo {
-              font-size: 24px;
-              font-weight: bold;
-              color: #6366f1;
-              margin-bottom: 10px;
-            }
-            .button {
-              display: inline-block;
-              padding: 12px 30px;
-              background-color: #6366f1;
-              color: #ffffff;
-              text-decoration: none;
-              border-radius: 5px;
-              margin: 20px 0;
-              text-align: center;
-            }
-            .button:hover {
-              background-color: #4f46e5;
-            }
-            .footer {
-              margin-top: 30px;
-              padding-top: 20px;
-              border-top: 1px solid #e5e7eb;
-              font-size: 12px;
-              color: #6b7280;
-              text-align: center;
-            }
-            .warning {
-              background-color: #fef3c7;
-              border-right: 4px solid #f59e0b;
-              padding: 15px;
-              margin: 20px 0;
-              border-radius: 5px;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="header">
-              <div class="logo">${appName}</div>
-            </div>
-            
-            <h2>إعادة تعيين كلمة المرور</h2>
-            <p>مرحباً،</p>
-            <p>لقد طلبت إعادة تعيين كلمة المرور لحسابك. اضغط على الزر أدناه لإعادة تعيين كلمة المرور:</p>
-            
-            <div style="text-align: center;">
-              <a href="${resetLink}" class="button">إعادة تعيين كلمة المرور</a>
-            </div>
-            
-            <p>أو انسخ الرابط التالي إلى المتصفح:</p>
-            <p style="word-break: break-all; color: #6366f1;">${resetLink}</p>
-            
-            <div class="warning">
-              <strong>⚠️ تحذير:</strong> هذا الرابط صالح لمدة ساعة واحدة فقط. إذا لم تطلب إعادة تعيين كلمة المرور، يمكنك تجاهل هذا الإيميل.
-            </div>
-            
-            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
-            
-            <h2>Password Reset</h2>
-            <p>Hello,</p>
-            <p>You requested to reset your password. Click the button below to reset your password:</p>
-            
-            <div style="text-align: center;">
-              <a href="${resetLink}" class="button">Reset Password</a>
-            </div>
-            
-            <p>Or copy this link to your browser:</p>
-            <p style="word-break: break-all; color: #6366f1;">${resetLink}</p>
-            
-            <div class="warning">
-              <strong>⚠️ Warning:</strong> This link is valid for 1 hour only. If you didn't request a password reset, you can ignore this email.
-            </div>
-            
-            <div class="footer">
-              <p>© ${new Date().getFullYear()} ${appName}. All rights reserved.</p>
-              <p>This is an automated email, please do not reply.</p>
-            </div>
-          </div>
-        </body>
-        </html>
-      `,
-      text: `
-        إعادة تعيين كلمة المرور - Password Reset
-        
-        مرحباً،
-        لقد طلبت إعادة تعيين كلمة المرور. استخدم الرابط التالي:
-        ${resetLink}
-        
-        هذا الرابط صالح لمدة ساعة واحدة فقط.
-        
-        ---
-        
-        Hello,
-        You requested to reset your password. Use the following link:
-        ${resetLink}
-        
-        This link is valid for 1 hour only.
-      `,
-    };
+  const bodyHtml = `
+    <p style="margin:0 0 14px;">مرحباً،</p>
+    <p style="margin:0 0 14px;color:${BRAND.muted};">
+      تلقّينا طلباً لإعادة تعيين كلمة المرور لحسابك في ${escapeHtml(appName)}.
+      اضغط الزر أدناه لإكمال العملية.
+    </p>
+    ${renderInfoBox(
+      `<p style="margin:0;color:${BRAND.text};font-size:14px;"><strong>ملاحظة:</strong> الرابط صالح لمدة ساعة واحدة. إن لم تطلب ذلك، يمكنك تجاهل هذه الرسالة بأمان.</p>`,
+      'warn'
+    )}
+  `;
 
-    if (!isEmailDeliveryConfigured()) {
-      logger.info('Password reset email (development mode)', {
-        to: email,
-        resetLink,
-      });
-      console.log('\n📧 Password Reset Email (Development Mode):');
-      console.log(`To: ${email}`);
-      console.log(`Reset Link: ${resetLink}\n`);
-      return true;
-    }
+  const mailOptions: MailPayload = {
+    from: getFromAddress(),
+    to: email,
+    subject: `إعادة تعيين كلمة المرور — ${appName}`,
+    html: renderBrandedEmail({
+      title: 'إعادة تعيين كلمة المرور',
+      preheader: 'رابط آمن لإعادة تعيين كلمة مرورك',
+      bodyHtml,
+      ctaLabel: 'إعادة تعيين كلمة المرور',
+      ctaUrl: resetLink,
+    }),
+    text: `إعادة تعيين كلمة المرور\n\nاستخدم الرابط التالي (صالح لمدة ساعة):\n${resetLink}`,
+  };
 
-    const messageId = await sendMailMessage(mailOptions);
-    logger.info('Password reset email sent', {
-      to: email,
-      messageId,
-      provider: hasMailgunConfig() ? 'mailgun' : 'smtp',
-    });
-
-    return true;
-  } catch (error) {
-    logger.error('Error sending password reset email', error as Error, { email });
-    return false;
-  }
+  return deliverOrLog(mailOptions, 'Password reset email', { to: email, resetLink });
 };
 
 /**
- * Send welcome email
+ * Welcome email — sent on email signup and Google OAuth signup
  */
 export const sendWelcomeEmail = async (
   email: string,
-  name?: string
+  name?: string | null
 ): Promise<boolean> => {
-  try {
-    const appName = getAppName();
-    const frontendUrl = getFrontendUrl();
+  const appName = getAppName();
+  const bodyHtml = `
+    <p style="margin:0 0 14px;">مرحباً ${greeting(name)}،</p>
+    <p style="margin:0 0 14px;color:${BRAND.muted};">
+      أهلاً بك في <strong style="color:${BRAND.text};">${escapeHtml(appName)}</strong> —
+      بوت المبيعات الذكي لمتجرك على السوشيال ميديا.
+    </p>
+    <p style="margin:0 0 14px;color:${BRAND.muted};">
+      لديك الآن <strong style="color:${BRAND.text};">7 أيام تجربة مجانية</strong> لاستكشاف المنصة
+      وبدء الرد على عملائك وبيع منتجاتك تلقائياً.
+    </p>
+    ${renderInfoBox(
+      `<p style="margin:0;color:${BRAND.text};font-size:14px;">سنرسل لك خلال الساعة القادمة دليلاً مختصراً لخطوات البدء الأولى.</p>`
+    )}
+  `;
 
-    const mailOptions: MailPayload = {
-      from: getFromAddress(),
-      to: email,
-      subject: `مرحباً بك في ${appName} - Welcome to ${appName}`,
-      html: `
-        <!DOCTYPE html>
-        <html dir="rtl" lang="ar">
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <style>
-            body {
-              font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-              line-height: 1.6;
-              color: #333;
-              max-width: 600px;
-              margin: 0 auto;
-              padding: 20px;
-              background-color: #f4f4f4;
-            }
-            .container {
-              background-color: #ffffff;
-              border-radius: 10px;
-              padding: 30px;
-              box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            }
-            .header {
-              text-align: center;
-              margin-bottom: 30px;
-            }
-            .logo {
-              font-size: 24px;
-              font-weight: bold;
-              color: #6366f1;
-              margin-bottom: 10px;
-            }
-            .button {
-              display: inline-block;
-              padding: 12px 30px;
-              background-color: #6366f1;
-              color: #ffffff;
-              text-decoration: none;
-              border-radius: 5px;
-              margin: 20px 0;
-              text-align: center;
-            }
-            .footer {
-              margin-top: 30px;
-              padding-top: 20px;
-              border-top: 1px solid #e5e7eb;
-              font-size: 12px;
-              color: #6b7280;
-              text-align: center;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="header">
-              <div class="logo">${appName}</div>
-            </div>
-            
-            <h2>مرحباً ${name || 'بك'}! 👋</h2>
-            <p>شكراً لك على الانضمام إلى ${appName}. نحن سعداء بوجودك معنا!</p>
-            <p>يمكنك الآن البدء في استخدام منصتنا لإدارة متجرك الذكي.</p>
-            
-            <div style="text-align: center;">
-              <a href="${frontendUrl}/login" class="button">تسجيل الدخول</a>
-            </div>
-            
-            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
-            
-            <h2>Welcome ${name || ''}! 👋</h2>
-            <p>Thank you for joining ${appName}. We're excited to have you!</p>
-            <p>You can now start using our platform to manage your smart store.</p>
-            
-            <div style="text-align: center;">
-              <a href="${frontendUrl}/login" class="button">Login</a>
-            </div>
-            
-            <div class="footer">
-              <p>© ${new Date().getFullYear()} ${appName}. All rights reserved.</p>
-            </div>
-          </div>
-        </body>
-        </html>
-      `,
-    };
+  const mailOptions: MailPayload = {
+    from: getFromAddress(),
+    to: email,
+    subject: `مرحباً بك في ${appName}`,
+    html: renderBrandedEmail({
+      title: 'مرحباً بك',
+      preheader: 'بدأت تجربتك المجانية — جاهز للبيع بذكاء',
+      bodyHtml,
+      ctaLabel: 'الدخول إلى لوحة التحكم',
+      ctaUrl: dashboardUrl(),
+    }),
+    text: `مرحباً بك في ${appName}\n\nلديك 7 أيام تجربة مجانية. ادخل لوحتك من: ${dashboardUrl()}`,
+  };
 
-    if (!isEmailDeliveryConfigured()) {
-      logger.info('Welcome email (development mode)', { to: email, name });
-      console.log(`\n📧 Welcome Email (Development Mode) to: ${email}\n`);
-      return true;
+  return deliverOrLog(mailOptions, 'Welcome email', { to: email, name });
+};
+
+/**
+ * First steps — ~1 hour after signup
+ */
+export const sendOnboardingStepsEmail = async (
+  email: string,
+  name?: string | null
+): Promise<boolean> => {
+  const appName = getAppName();
+  const bodyHtml = `
+    <p style="margin:0 0 14px;">مرحباً ${greeting(name)}،</p>
+    <p style="margin:0 0 14px;color:${BRAND.muted};">
+      للبدء مع ${escapeHtml(appName)} بسرعة، اتبع هذه الخطوات الثلاث:
+    </p>
+    ${renderBulletList([...XO_BOT_FIRST_STEPS_AR])}
+    <p style="margin:0;color:${BRAND.muted};">
+      لا تحتاج خبرة تقنية — كل شيء من لوحة عربية بسيطة.
+    </p>
+  `;
+
+  const mailOptions: MailPayload = {
+    from: getFromAddress(),
+    to: email,
+    subject: `خطواتك الأولى مع ${appName}`,
+    html: renderBrandedEmail({
+      title: 'ابدأ في دقائق',
+      preheader: 'ثلاث خطوات لتفعيل بوت المبيعات',
+      bodyHtml,
+      ctaLabel: 'ابدأ الآن',
+      ctaUrl: dashboardUrl(),
+    }),
+    text: `خطواتك الأولى مع ${appName}\n\n${XO_BOT_FIRST_STEPS_AR.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\n${dashboardUrl()}`,
+  };
+
+  return deliverOrLog(mailOptions, 'Onboarding steps email', { to: email });
+};
+
+/**
+ * Day 3 — encourage usage + benefits
+ */
+export const sendDay3EngagementEmail = async (
+  email: string,
+  name?: string | null
+): Promise<boolean> => {
+  const appName = getAppName();
+  const bodyHtml = `
+    <p style="margin:0 0 14px;">مرحباً ${greeting(name)}،</p>
+    <p style="margin:0 0 14px;color:${BRAND.muted};">
+      مرّت ثلاثة أيام على انضمامك إلى ${escapeHtml(appName)}.
+      إن لم تُكمل الإعداد بعد، هذا وقت ممتاز لتفعيل البوت والاستفادة من تجربتك.
+    </p>
+    <p style="margin:0 0 8px;font-weight:700;color:${BRAND.text};">ماذا ستكسب؟</p>
+    ${renderBulletList([...XO_BOT_BENEFITS_AR])}
+  `;
+
+  const mailOptions: MailPayload = {
+    from: getFromAddress(),
+    to: email,
+    subject: `لا تفوّت فرصة البيع الآلي مع ${appName}`,
+    html: renderBrandedEmail({
+      title: 'فعّل بوتك اليوم',
+      preheader: 'فوائد واضحة لتفعيل Xo Bot في متجرك',
+      bodyHtml,
+      ctaLabel: 'متابعة الإعداد',
+      ctaUrl: dashboardUrl(),
+    }),
+    text: `فعّل ${appName}\n\n${XO_BOT_BENEFITS_AR.map((b) => `• ${b}`).join('\n')}\n\n${dashboardUrl()}`,
+  };
+
+  return deliverOrLog(mailOptions, 'Day 3 engagement email', { to: email });
+};
+
+/**
+ * Day 6 — trial ending soon
+ */
+export const sendDay6TrialEndingEmail = async (
+  email: string,
+  name?: string | null,
+  trialEndsAt?: Date | string | null
+): Promise<boolean> => {
+  const appName = getAppName();
+  let endsLabel = 'قريباً';
+  if (trialEndsAt) {
+    const d = trialEndsAt instanceof Date ? trialEndsAt : new Date(trialEndsAt);
+    if (!Number.isNaN(d.getTime())) {
+      endsLabel = d.toLocaleDateString('ar-EG', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
     }
-
-    const messageId = await sendMailMessage(mailOptions);
-    logger.info('Welcome email sent', {
-      to: email,
-      messageId,
-      provider: hasMailgunConfig() ? 'mailgun' : 'smtp',
-    });
-    return true;
-  } catch (error) {
-    logger.error('Error sending welcome email', error as Error, { email });
-    return false;
   }
+
+  const bodyHtml = `
+    <p style="margin:0 0 14px;">مرحباً ${greeting(name)}،</p>
+    <p style="margin:0 0 14px;color:${BRAND.muted};">
+      تنتهي فترتك التجريبية في <strong style="color:${BRAND.text};">${escapeHtml(endsLabel)}</strong>.
+      لا تفقد الردود الآلية والمبيعات التي يوفّرها ${escapeHtml(appName)}.
+    </p>
+    ${renderInfoBox(
+      `<p style="margin:0;color:${BRAND.text};font-size:14px;">اشترك الآن لتستمر قنواتك (فيسبوك، إنستغرام، تيليجرام) دون انقطاع.</p>`,
+      'warn'
+    )}
+    <p style="margin:16px 0 8px;font-weight:700;color:${BRAND.text};">لماذا يستمر التجار معنا؟</p>
+    ${renderBulletList([...XO_BOT_BENEFITS_AR])}
+  `;
+
+  const mailOptions: MailPayload = {
+    from: getFromAddress(),
+    to: email,
+    subject: `تجربتك في ${appName} تنتهي قريباً`,
+    html: renderBrandedEmail({
+      title: 'تنتهي تجربتك قريباً',
+      preheader: `الفترة التجريبية حتى ${endsLabel}`,
+      bodyHtml,
+      ctaLabel: 'عرض الباقات',
+      ctaUrl: pricingUrl(),
+    }),
+    text: `تجربتك تنتهي في ${endsLabel}\n\nعرض الباقات: ${pricingUrl()}`,
+  };
+
+  return deliverOrLog(mailOptions, 'Day 6 trial ending email', { to: email, endsLabel });
+};
+
+/**
+ * After trial ends
+ */
+export const sendTrialEndedEmail = async (
+  email: string,
+  name?: string | null
+): Promise<boolean> => {
+  const appName = getAppName();
+  const bodyHtml = `
+    <p style="margin:0 0 14px;">مرحباً ${greeting(name)}،</p>
+    <p style="margin:0 0 14px;color:${BRAND.muted};">
+      انتهت فترتك التجريبية في ${escapeHtml(appName)}.
+      يمكنك الاشتراك في أي وقت لاستعادة بوت المبيعات والرد على عملائك تلقائياً.
+    </p>
+    ${renderInfoBox(
+      `<p style="margin:0 0 8px;font-weight:700;color:${BRAND.text};">باقات تناسب مرحلتك</p>
+       <p style="margin:0;color:${BRAND.muted};font-size:14px;">من رد التعليقات فقط إلى بوت مبيعات على فيسبوك وإنستغرام وتيليجرام.</p>`
+    )}
+    <p style="margin:16px 0 0;color:${BRAND.muted};">
+      بيانات متجرك محفوظة — الاشتراك يعيد تفعيل الخدمة فوراً.
+    </p>
+  `;
+
+  const mailOptions: MailPayload = {
+    from: getFromAddress(),
+    to: email,
+    subject: `انتهت تجربتك في ${appName}`,
+    html: renderBrandedEmail({
+      title: 'انتهت الفترة التجريبية',
+      preheader: 'اشترك لاستعادة بوت المبيعات',
+      bodyHtml,
+      ctaLabel: 'الاشتراك الآن',
+      ctaUrl: pricingUrl(),
+    }),
+    text: `انتهت تجربتك في ${appName}\n\nاشترك من: ${pricingUrl()}\nأو سجّل الدخول: ${loginUrl()}`,
+  };
+
+  return deliverOrLog(mailOptions, 'Trial ended email', { to: email });
 };
 
 /**
@@ -413,66 +401,15 @@ export const sendBroadcastEmail = async (
     return result;
   }
 
-  const htmlBody = isHtml
-    ? `
-        <!DOCTYPE html>
-        <html dir="rtl" lang="ar">
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <style>
-            body {
-              font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-              line-height: 1.6;
-              color: #333;
-              max-width: 600px;
-              margin: 0 auto;
-              padding: 20px;
-              background-color: #f4f4f4;
-            }
-            .container {
-              background-color: #ffffff;
-              border-radius: 10px;
-              padding: 30px;
-              box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            }
-            .header {
-              text-align: center;
-              margin-bottom: 30px;
-            }
-            .logo {
-              font-size: 24px;
-              font-weight: bold;
-              color: #6366f1;
-              margin-bottom: 10px;
-            }
-            .footer {
-              margin-top: 30px;
-              padding-top: 20px;
-              border-top: 1px solid #e5e7eb;
-              font-size: 12px;
-              color: #6b7280;
-              text-align: center;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="header">
-              <div class="logo">${appName}</div>
-            </div>
-            <div>
-              ${message}
-            </div>
-            <div class="footer">
-              <p>© ${new Date().getFullYear()} ${appName}. All rights reserved.</p>
-              <p>This is an automated email, please do not reply.</p>
-            </div>
-          </div>
-        </body>
-        </html>
-      `
-    : undefined;
+  const bodyInner = isHtml
+    ? message
+    : `<p style="white-space:pre-wrap;margin:0;color:${BRAND.muted};">${escapeHtml(message)}</p>`;
+
+  const htmlBody = renderBrandedEmail({
+    title: subject,
+    bodyHtml: bodyInner,
+    footerNote: `رسالة من فريق ${appName}`,
+  });
 
   const batchSize = 10;
   for (let i = 0; i < to.length; i += batchSize) {
@@ -482,9 +419,7 @@ export const sendBroadcastEmail = async (
       try {
         if (!isEmailDeliveryConfigured()) {
           logger.info('Broadcast email (development mode)', { to: email, subject });
-          console.log(`\n📧 Broadcast Email (Development Mode):`);
-          console.log(`To: ${email}`);
-          console.log(`Subject: ${subject}\n`);
+          console.log(`\n📧 Broadcast Email (Development Mode):\nTo: ${email}\nSubject: ${subject}\n`);
           result.sent++;
           continue;
         }
@@ -493,7 +428,7 @@ export const sendBroadcastEmail = async (
           from: getFromAddress(),
           to: email,
           subject,
-          ...(isHtml ? { html: htmlBody } : { text: message }),
+          html: htmlBody,
         });
         logger.info('Broadcast email sent', {
           to: email,
@@ -510,7 +445,7 @@ export const sendBroadcastEmail = async (
     }
 
     if (i + batchSize < to.length && isEmailDeliveryConfigured()) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   }
 
@@ -537,14 +472,6 @@ export type NewOrderEmailPayload = {
   items: NewOrderEmailItem[];
 };
 
-const escapeHtml = (value: string): string =>
-  value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-
 const formatMoney = (amount: number, currency: string): string => {
   const safeCurrency = (currency || 'USD').toUpperCase();
   try {
@@ -566,145 +493,89 @@ export const sendNewOrderEmail = async (
   merchantName: string | null | undefined,
   order: NewOrderEmailPayload
 ): Promise<boolean> => {
-  try {
-    const appName = getAppName();
-    const frontendUrl = getFrontendUrl().replace(/\/$/, '');
-    const ordersUrl = `${frontendUrl}/app/orders`;
-    const shortId = order.orderId.length > 8 ? order.orderId.slice(0, 8) : order.orderId;
-    const currency = order.currency || 'USD';
-    const greetingName = merchantName?.trim() || 'عزيزي التاجر';
+  const appName = getAppName();
+  const ordersUrl = `${getFrontendUrl()}/app/orders`;
+  const shortId = order.orderId.length > 8 ? order.orderId.slice(0, 8) : order.orderId;
+  const currency = order.currency || 'USD';
 
-    const itemsRows =
-      order.items?.length > 0
-        ? order.items
-            .map((item) => {
-              const lineTotal = (item.price || 0) * (item.quantity || 1);
-              return `
-                <tr>
-                  <td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;">${escapeHtml(item.productName || 'منتج')}</td>
-                  <td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">${item.quantity || 1}</td>
-                  <td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;text-align:left;">${escapeHtml(formatMoney(lineTotal, currency))}</td>
-                </tr>`;
-            })
-            .join('')
-        : `
-            <tr>
-              <td colspan="3" style="padding:10px 8px;color:#6b7280;">لا توجد تفاصيل منتجات</td>
-            </tr>`;
+  const itemsRows =
+    order.items?.length > 0
+      ? order.items
+          .map((item) => {
+            const lineTotal = (item.price || 0) * (item.quantity || 1);
+            return `
+              <tr>
+                <td style="padding:10px 8px;border-bottom:1px solid ${BRAND.border};">${escapeHtml(item.productName || 'منتج')}</td>
+                <td style="padding:10px 8px;border-bottom:1px solid ${BRAND.border};text-align:center;">${item.quantity || 1}</td>
+                <td style="padding:10px 8px;border-bottom:1px solid ${BRAND.border};text-align:left;">${escapeHtml(formatMoney(lineTotal, currency))}</td>
+              </tr>`;
+          })
+          .join('')
+      : `
+          <tr>
+            <td colspan="3" style="padding:10px 8px;color:${BRAND.muted};">لا توجد تفاصيل منتجات</td>
+          </tr>`;
 
-    const detailRow = (label: string, value?: string | null) => {
-      if (!value || !String(value).trim()) return '';
-      return `
-        <tr>
-          <td style="padding:6px 0;color:#6b7280;width:35%;vertical-align:top;">${escapeHtml(label)}</td>
-          <td style="padding:6px 0;color:#111827;font-weight:600;">${escapeHtml(String(value))}</td>
-        </tr>`;
-    };
+  const detailRow = (label: string, value?: string | null) => {
+    if (!value || !String(value).trim()) return '';
+    return `
+      <tr>
+        <td style="padding:6px 0;color:${BRAND.muted};width:35%;vertical-align:top;">${escapeHtml(label)}</td>
+        <td style="padding:6px 0;color:${BRAND.text};font-weight:600;">${escapeHtml(String(value))}</td>
+      </tr>`;
+  };
 
-    const sourceLabel =
-      order.source === 'shopify'
-        ? 'Shopify'
-        : order.source === 'bot' || order.source === 'whatsapp' || order.source === 'facebook' || order.source === 'telegram' || order.source === 'instagram'
-          ? 'بوت المحادثة'
-          : order.source || 'المنصة';
+  const sourceLabel = getOrderSourceLabel(order.source, order.notes);
 
-    const mailOptions: MailPayload = {
-      from: getFromAddress(),
-      to: merchantEmail,
-      subject: `طلب جديد #${shortId} — ${appName}`,
-      html: `
-        <!DOCTYPE html>
-        <html dir="rtl" lang="ar">
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        </head>
-        <body style="margin:0;padding:0;background:#f4f4f5;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;">
-          <div style="max-width:600px;margin:24px auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
-            <div style="background:#4f46e5;padding:24px 28px;color:#fff;">
-              <div style="font-size:14px;opacity:0.9;">${escapeHtml(appName)}</div>
-              <h1 style="margin:8px 0 0;font-size:22px;">طلب جديد #${escapeHtml(shortId)}</h1>
-            </div>
-            <div style="padding:28px;">
-              <p style="margin:0 0 16px;color:#374151;line-height:1.6;">مرحباً ${escapeHtml(greetingName)}،</p>
-              <p style="margin:0 0 20px;color:#374151;line-height:1.6;">وصلك طلب جديد عبر ${escapeHtml(sourceLabel)}. تفاصيل الطلب:</p>
+  const bodyHtml = `
+    <p style="margin:0 0 14px;">مرحباً ${greeting(merchantName)}،</p>
+    <p style="margin:0 0 18px;color:${BRAND.muted};">
+      وصلك طلب جديد عبر ${escapeHtml(sourceLabel)}. رقم الطلب: <strong style="color:${BRAND.text};">#${escapeHtml(shortId)}</strong>
+    </p>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:18px;">
+      ${detailRow('اسم العميل', order.customerName)}
+      ${detailRow('الهاتف', order.customerPhone)}
+      ${detailRow(
+        'البريد',
+        order.customerEmail && !String(order.customerEmail).endsWith('@chat-order.com')
+          ? order.customerEmail
+          : null
+      )}
+      ${detailRow('العنوان', order.customerAddress)}
+      ${detailRow('وقت التوصيل', order.deliveryTime)}
+      ${detailRow('ملاحظات', order.notes)}
+    </table>
+    <table style="width:100%;border-collapse:collapse;background:${BRAND.soft};border-radius:12px;overflow:hidden;margin-bottom:16px;">
+      <thead>
+        <tr style="background:${BRAND.softBorder};">
+          <th style="padding:10px 8px;text-align:right;font-size:13px;color:${BRAND.primaryDark};">المنتج</th>
+          <th style="padding:10px 8px;text-align:center;font-size:13px;color:${BRAND.primaryDark};">الكمية</th>
+          <th style="padding:10px 8px;text-align:left;font-size:13px;color:${BRAND.primaryDark};">السعر</th>
+        </tr>
+      </thead>
+      <tbody>${itemsRows}</tbody>
+    </table>
+    <p style="margin:0;font-size:18px;font-weight:700;color:${BRAND.text};">
+      الإجمالي: ${escapeHtml(formatMoney(order.total || 0, currency))}
+    </p>
+  `;
 
-              <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
-                ${detailRow('اسم العميل', order.customerName)}
-                ${detailRow('الهاتف', order.customerPhone)}
-                ${detailRow('البريد', order.customerEmail && !String(order.customerEmail).endsWith('@chat-order.com') ? order.customerEmail : null)}
-                ${detailRow('العنوان', order.customerAddress)}
-                ${detailRow('وقت التوصيل', order.deliveryTime)}
-                ${detailRow('ملاحظات', order.notes)}
-              </table>
+  const mailOptions: MailPayload = {
+    from: getFromAddress(),
+    to: merchantEmail,
+    subject: `طلب جديد #${shortId} — ${appName}`,
+    html: renderBrandedEmail({
+      title: `طلب جديد #${shortId}`,
+      preheader: `طلب من ${order.customerName || 'عميل'} — ${formatMoney(order.total || 0, currency)}`,
+      bodyHtml,
+      ctaLabel: 'عرض الطلبات',
+      ctaUrl: ordersUrl,
+    }),
+    text: `طلب جديد #${shortId}\nالعميل: ${order.customerName || '-'}\nالهاتف: ${order.customerPhone || '-'}\nالإجمالي: ${formatMoney(order.total || 0, currency)}\n${ordersUrl}`,
+  };
 
-              <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:8px;overflow:hidden;margin-bottom:16px;">
-                <thead>
-                  <tr style="background:#eef2ff;">
-                    <th style="padding:10px 8px;text-align:right;font-size:13px;color:#4338ca;">المنتج</th>
-                    <th style="padding:10px 8px;text-align:center;font-size:13px;color:#4338ca;">الكمية</th>
-                    <th style="padding:10px 8px;text-align:left;font-size:13px;color:#4338ca;">السعر</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${itemsRows}
-                </tbody>
-              </table>
-
-              <p style="margin:0 0 24px;font-size:18px;font-weight:700;color:#111827;">
-                الإجمالي: ${escapeHtml(formatMoney(order.total || 0, currency))}
-              </p>
-
-              <div style="text-align:center;margin:28px 0 8px;">
-                <a href="${ordersUrl}" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:14px 28px;border-radius:8px;font-weight:700;">
-                  عرض الطلبات
-                </a>
-              </div>
-              <p style="margin:12px 0 0;font-size:12px;color:#9ca3af;text-align:center;word-break:break-all;">
-                أو افتح: ${escapeHtml(ordersUrl)}
-              </p>
-            </div>
-            <div style="padding:16px 28px;border-top:1px solid #e5e7eb;text-align:center;font-size:12px;color:#9ca3af;">
-              © ${new Date().getFullYear()} ${escapeHtml(appName)}
-            </div>
-          </div>
-        </body>
-        </html>
-      `,
-      text: `
-طلب جديد #${shortId}
-
-العميل: ${order.customerName || '-'}
-الهاتف: ${order.customerPhone || '-'}
-العنوان: ${order.customerAddress || '-'}
-الإجمالي: ${formatMoney(order.total || 0, currency)}
-
-عرض الطلبات: ${ordersUrl}
-      `.trim(),
-    };
-
-    if (!isEmailDeliveryConfigured()) {
-      logger.info('New order email (development mode)', {
-        to: merchantEmail,
-        orderId: order.orderId,
-        ordersUrl,
-      });
-      return true;
-    }
-
-    const messageId = await sendMailMessage(mailOptions);
-    logger.info('New order email sent', {
-      to: merchantEmail,
-      orderId: order.orderId,
-      messageId,
-      provider: hasMailgunConfig() ? 'mailgun' : 'smtp',
-    });
-    return true;
-  } catch (error) {
-    logger.error('Error sending new order email', error as Error, {
-      merchantEmail,
-      orderId: order.orderId,
-    });
-    return false;
-  }
+  return deliverOrLog(mailOptions, 'New order email', {
+    to: merchantEmail,
+    orderId: order.orderId,
+  });
 };

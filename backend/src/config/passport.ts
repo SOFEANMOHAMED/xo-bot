@@ -7,6 +7,7 @@ import {
   linkMerchantToAffiliateReferrer,
   referralCodeFromOAuthState
 } from '../utils/affiliateReferral.js';
+import { sendAndTrackWelcomeEmail } from '../services/lifecycleEmails/index.js';
 
 passport.use(new GoogleStrategy({
   clientID: process.env.GOOGLE_CLIENT_ID!,
@@ -110,6 +111,9 @@ passport.use(new GoogleStrategy({
 
     console.log('[Passport Google Strategy] New user created successfully:', { userId: newUser.id });
     logger.info('Google OAuth: New user created successfully', { userId: newUser.id });
+
+    void sendAndTrackWelcomeEmail(newUser.id, newUser.email, newUser.name);
+
     return done(null, newUser);
   } catch (error: any) {
     console.error('[Passport Google Strategy] Error processing profile:', error);

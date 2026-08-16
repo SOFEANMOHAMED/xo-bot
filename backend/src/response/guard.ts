@@ -266,7 +266,7 @@ export const guardReply = (input: GuardInput): GuardResult => {
   // ==================== CHECK: Repetition ====================
   const rep = hasRepetition(cleaned);
   if (rep.has) {
-    violations.push(`Repetitive content: "${rep.phrase?.substring(0, 30)}..."`);
+    violations.push(`Repetitive content (phraseLength=${rep.phrase?.length || 0})`);
     cleaned = removeRepetition(cleaned);
     warnings.push('Removed repetition');
   }

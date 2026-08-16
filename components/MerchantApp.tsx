@@ -796,7 +796,7 @@ const MerchantApp: React.FC = () => {
         })),
         date: new Date(response.order.date || response.order.createdAt || Date.now()),
         notes: response.order.notes || '',
-        source: (response.order.source || 'manual') as 'manual' | 'shopify',
+        source: response.order.source || 'manual',
       };
       
       setOrders(prevOrders => [order, ...prevOrders]);

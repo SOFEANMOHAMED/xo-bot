@@ -78,6 +78,17 @@ CREATE INDEX IF NOT EXISTS idx_merchants_role ON merchants(role);
 -- Create index for google_id
 CREATE INDEX IF NOT EXISTS idx_merchants_google_id ON merchants(google_id);
 
+-- Merchant lifecycle emails (welcome, onboarding, trial nudges)
+CREATE TABLE IF NOT EXISTS merchant_lifecycle_emails (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+    email_type VARCHAR(50) NOT NULL,
+    sent_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (merchant_id, email_type)
+);
+CREATE INDEX IF NOT EXISTS idx_merchant_lifecycle_emails_type_sent
+    ON merchant_lifecycle_emails (email_type, sent_at DESC);
+
 -- Products Table
 CREATE TABLE IF NOT EXISTS products (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

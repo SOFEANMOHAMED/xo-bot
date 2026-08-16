@@ -5,6 +5,7 @@ import {
   getMerchantPlanLimits,
   getProductCount,
   getMonthlyAIResponseCount,
+  getMarketingImageCount,
   getFacebookPagesCount,
   getInstagramAccountsCount,
   getWhatsAppAccountsCount,
@@ -60,6 +61,46 @@ export const checkAIResponseLimit = async (
       return next(createError(
         `لقد وصلت إلى الحد الأقصى للردود الذكية لهذا الشهر (${limits.maxMonthlyAIResponses}). يرجى ترقية خطتك أو الانتظار حتى الشهر القادم.`,
         403
+      ));
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const checkMarketingImageLimit = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const merchantId = req.merchantId || req.userId;
+    if (!merchantId) {
+      return next(createError('Unauthorized', 401));
+    }
+
+    const limits = await getMerchantPlanLimits(merchantId);
+
+    if (limits.maxMonthlyMarketingImages === 0) {
+      return next(createError(
+        'ستوديو التصميم بالذكاء الاصطناعي غير متاح في باقتك الحالية. يرجى ترقية الباقة.',
+        403,
+        true,
+        'MARKETING_IMAGES_NOT_INCLUDED'
+      ));
+    }
+
+    const currentCount = await getMarketingImageCount(merchantId, limits.billingPeriod);
+
+    if (!isWithinLimit(currentCount, limits.maxMonthlyMarketingImages)) {
+      const periodLabel = limits.billingPeriod === 'yearly' ? 'لهذا العام' : 'لهذا الشهر';
+      return next(createError(
+        `لقد وصلت إلى الحد الأقصى لتوليد الصور بالذكاء الاصطناعي ${periodLabel} (${limits.maxMonthlyMarketingImages}). يرجى ترقية باقتك أو الانتظار حتى الفترة القادمة.`,
+        403,
+        true,
+        'MARKETING_IMAGES_LIMIT'
       ));
     }
 

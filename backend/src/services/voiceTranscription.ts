@@ -349,7 +349,7 @@ export async function transcribeAudio(
         language: result.language,
         durationSec: result.duration,
         latencyMs: Date.now() - start,
-        textPreview: result.text.substring(0, 80)
+        transcriptLength: result.text.length,
       });
 
       return {

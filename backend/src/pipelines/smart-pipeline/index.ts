@@ -72,7 +72,7 @@ export const processSmartPipeline = async (
 
   logger.info('Smart pipeline started', {
     merchantId,
-    messagePreview: messageText.substring(0, 50),
+    messageLength: messageText.length,
     useFullAI: useFullAIMode
   });
 
@@ -247,7 +247,7 @@ export const processSmartPipeline = async (
 
     logger.debug('Products fetched', {
       count: products.length,
-      query: entities.product_query || messageText.substring(0, 30),
+      queryLength: (entities.product_query || messageText).length,
       productNames: products.map(p => p.name)
     });
   }
@@ -298,8 +298,7 @@ export const processSmartPipeline = async (
   console.log('📋 Sales plan created', {
     nextAction: plan.nextAction,
     ctaType: plan.ctaType,
-    oneQuestion: plan.oneQuestion,
-    oneQuestionPreview: plan.oneQuestion?.substring(0, 100)
+    oneQuestionLength: plan.oneQuestion?.length || 0,
   });
   logger.debug('Sales plan created', {
     nextAction: plan.nextAction,

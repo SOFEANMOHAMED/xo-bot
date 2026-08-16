@@ -58,7 +58,7 @@ export interface Order {
   status: OrderStatus;
   date: Date;
   items: OrderItem[];
-  source: 'shopify' | 'manual';
+  source: string;
   notes?: string;
   viewedAt?: string | null;
 }

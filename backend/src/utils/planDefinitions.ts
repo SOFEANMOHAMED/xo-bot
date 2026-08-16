@@ -14,6 +14,8 @@ export function isPaidPlanKey(key: string): key is PaidPlanKey {
 export interface PlanLimits {
   maxProducts: number; // -1 unlimited
   maxMonthlyAIResponses: number; // -1 unlimited
+  /** AI design-studio images per billing period (monthly plans: calendar month; yearly: calendar year). -1 unlimited, 0 disabled. */
+  maxMonthlyMarketingImages: number;
   maxFacebookPages: number;
   maxInstagramAccounts: number;
   maxWhatsAppAccounts: number;
@@ -49,6 +51,7 @@ export const DEFAULT_PLAN_CONFIGS: Record<PaidPlanKey, PlanConfig> = {
       'ربط صفحة فيسبوك واحدة',
       'ربط حساب إنستغرام واحد',
       'استخدام AI غير محدود',
+      '5 صور تسويقية بالذكاء الاصطناعي شهرياً',
       'دعم فني عبر البريد'
     ]
   },
@@ -61,6 +64,7 @@ export const DEFAULT_PLAN_CONFIGS: Record<PaidPlanKey, PlanConfig> = {
       'بوت مبيعات ذكي',
       'ربط قناة واحدة: فيسبوك أو إنستغرام أو تيليجرام',
       'استخدام AI غير محدود',
+      '20 صورة تسويقية بالذكاء الاصطناعي شهرياً',
       'إدارة منتجات وطلبات',
       'دعم فني'
     ]
@@ -75,6 +79,7 @@ export const DEFAULT_PLAN_CONFIGS: Record<PaidPlanKey, PlanConfig> = {
       'ربط صفحة فيسبوك واحدة',
       'ربط حساب إنستغرام واحد',
       'استخدام AI غير محدود',
+      '40 صورة تسويقية بالذكاء الاصطناعي شهرياً',
       'إدارة منتجات وطلبات',
       'تحليلات أساسية',
       'دعم فني أولوية'
@@ -91,6 +96,7 @@ export const DEFAULT_PLAN_CONFIGS: Record<PaidPlanKey, PlanConfig> = {
       'ربط حساب إنستغرام واحد',
       'ربط بوت تيليجرام واحد',
       'استخدام AI غير محدود',
+      '200 صورة تسويقية بالذكاء الاصطناعي سنوياً',
       'إدارة منتجات وطلبات',
       'تحليلات متقدمة',
       'فوترة سنوية بوفر واضح',
@@ -103,6 +109,7 @@ export const DEFAULT_PLAN_LIMITS: Record<string, PlanLimits> = {
   comments: {
     maxProducts: -1,
     maxMonthlyAIResponses: -1,
+    maxMonthlyMarketingImages: 5,
     maxFacebookPages: 1,
     maxInstagramAccounts: 1,
     maxWhatsAppAccounts: 0,
@@ -118,6 +125,7 @@ export const DEFAULT_PLAN_LIMITS: Record<string, PlanLimits> = {
   single: {
     maxProducts: -1,
     maxMonthlyAIResponses: -1,
+    maxMonthlyMarketingImages: 20,
     maxFacebookPages: 1,
     maxInstagramAccounts: 1,
     maxWhatsAppAccounts: 0,
@@ -133,6 +141,7 @@ export const DEFAULT_PLAN_LIMITS: Record<string, PlanLimits> = {
   social: {
     maxProducts: -1,
     maxMonthlyAIResponses: -1,
+    maxMonthlyMarketingImages: 40,
     maxFacebookPages: 1,
     maxInstagramAccounts: 1,
     maxWhatsAppAccounts: 0,
@@ -148,6 +157,7 @@ export const DEFAULT_PLAN_LIMITS: Record<string, PlanLimits> = {
   yearly: {
     maxProducts: -1,
     maxMonthlyAIResponses: -1,
+    maxMonthlyMarketingImages: 200,
     maxFacebookPages: 1,
     maxInstagramAccounts: 1,
     maxWhatsAppAccounts: 0,
@@ -163,6 +173,7 @@ export const DEFAULT_PLAN_LIMITS: Record<string, PlanLimits> = {
   trial: {
     maxProducts: -1,
     maxMonthlyAIResponses: -1,
+    maxMonthlyMarketingImages: 5,
     maxFacebookPages: 1,
     maxInstagramAccounts: 1,
     maxWhatsAppAccounts: 0,
@@ -179,6 +190,7 @@ export const DEFAULT_PLAN_LIMITS: Record<string, PlanLimits> = {
   starter: {
     maxProducts: -1,
     maxMonthlyAIResponses: -1,
+    maxMonthlyMarketingImages: 5,
     maxFacebookPages: 1,
     maxInstagramAccounts: 1,
     maxWhatsAppAccounts: 0,
@@ -194,6 +206,7 @@ export const DEFAULT_PLAN_LIMITS: Record<string, PlanLimits> = {
   pro: {
     maxProducts: -1,
     maxMonthlyAIResponses: -1,
+    maxMonthlyMarketingImages: 20,
     maxFacebookPages: 1,
     maxInstagramAccounts: 1,
     maxWhatsAppAccounts: 0,
@@ -209,6 +222,7 @@ export const DEFAULT_PLAN_LIMITS: Record<string, PlanLimits> = {
   business: {
     maxProducts: -1,
     maxMonthlyAIResponses: -1,
+    maxMonthlyMarketingImages: 40,
     maxFacebookPages: 1,
     maxInstagramAccounts: 1,
     maxWhatsAppAccounts: 0,
@@ -226,6 +240,7 @@ export const DEFAULT_PLAN_LIMITS: Record<string, PlanLimits> = {
 export const ZERO_PLAN_LIMITS: PlanLimits = {
   maxProducts: 0,
   maxMonthlyAIResponses: 0,
+  maxMonthlyMarketingImages: 0,
   maxFacebookPages: 0,
   maxInstagramAccounts: 0,
   maxWhatsAppAccounts: 0,

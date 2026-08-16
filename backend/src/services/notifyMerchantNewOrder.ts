@@ -12,6 +12,7 @@ import {
   type NewOrderEmailPayload,
 } from '../utils/emailService.js';
 import { createMerchantNotification } from './merchantNotifications.js';
+import { getOrderSourceLabel } from '../utils/orderSource.js';
 
 export type NotifyNewOrderInput = {
   merchantId: string;
@@ -45,6 +46,7 @@ export async function notifyMerchantNewOrder(input: NotifyNewOrderInput): Promis
     typeof input.total === 'number' ? input.total : parseFloat(String(input.total || 0)) || 0;
   const currency = input.currency || 'USD';
   const source = input.source || null;
+  const sourceLabel = source ? getOrderSourceLabel(source, input.notes) : null;
 
   // In-app + Web Push (merchant-scoped) — always, even if email is missing
   try {
@@ -52,7 +54,7 @@ export async function notifyMerchantNewOrder(input: NotifyNewOrderInput): Promis
       `اسم العميل: ${customerName}`,
       `الإجمالي: ${total} ${currency}`,
     ];
-    if (source) messageParts.push(`المصدر: ${source}`);
+    if (sourceLabel) messageParts.push(`المصدر: ${sourceLabel}`);
     if (input.customerPhone?.trim()) messageParts.push(`الهاتف: ${input.customerPhone.trim()}`);
 
     await createMerchantNotification({

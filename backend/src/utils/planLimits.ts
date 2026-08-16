@@ -86,6 +86,36 @@ export function isWithinLimit(current: number, limit: number): boolean {
   return current < limit;
 }
 
+/** Start of current billing period for marketing image quota. */
+export function getMarketingImagePeriodStart(billingPeriod: 'monthly' | 'yearly'): Date {
+  const now = new Date();
+  if (billingPeriod === 'yearly') {
+    return new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+  }
+  return new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+}
+
+export async function getMarketingImageCount(
+  merchantId: string,
+  billingPeriod: 'monthly' | 'yearly' = 'monthly'
+): Promise<number> {
+  try {
+    const periodStart = getMarketingImagePeriodStart(billingPeriod);
+
+    const result = await pool.query(
+      `SELECT COUNT(*)::int as count
+       FROM design_studio_images
+       WHERE merchant_id = $1
+       AND created_at >= $2`,
+      [merchantId, periodStart]
+    );
+    return result.rows[0]?.count || 0;
+  } catch (error) {
+    logger.error('Error getting marketing image count', error as Error, { merchantId });
+    return 0;
+  }
+}
+
 export async function getProductCount(merchantId: string): Promise<number> {
   try {
     const result = await pool.query(

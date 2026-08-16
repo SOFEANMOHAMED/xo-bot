@@ -9,7 +9,7 @@ import {
 import { generateSaaSBotResponse } from '../controllers/saasBot.controller.js';
 import { authenticate } from '../middleware/auth.js';
 import { checkSubscriptionStatus } from '../middleware/subscriptionCheck.js';
-import { checkAIResponseLimit } from '../middleware/planLimits.js';
+import { checkAIResponseLimit, checkMarketingImageLimit } from '../middleware/planLimits.js';
 
 const router = express.Router();
 
@@ -26,7 +26,7 @@ router.post('/product-description', checkAIResponseLimit, generateProductDescrip
 
 router.get('/marketing-images', getMarketingImageHistory);
 router.get('/marketing-images/:id/content', getMarketingImageContent);
-router.post('/marketing-image', checkAIResponseLimit, generateMarketingImageAI);
+router.post('/marketing-image', checkMarketingImageLimit, generateMarketingImageAI);
 
 export default router;
 

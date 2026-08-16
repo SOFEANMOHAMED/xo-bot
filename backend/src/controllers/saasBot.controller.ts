@@ -59,7 +59,7 @@ export const generateSaaSBotResponse = async (
       
       Knowledge Base (Source is Arabic, Translate as needed):
       - Add Product Steps: ${SAAS_SUPPORT_DATA.tutorials.add_product.join(' -> ')}
-      - Connect Shopify Steps: ${SAAS_SUPPORT_DATA.tutorials.connect_shopify.join(' -> ')}
+      - Connect Channel Steps: ${SAAS_SUPPORT_DATA.tutorials.connect_channel.join(' -> ')}
       - Test Bot Steps: ${SAAS_SUPPORT_DATA.tutorials.test_bot.join(' -> ')}
       - Support Contact: ${SAAS_SUPPORT_DATA.support_contact}
       

@@ -1,8 +1,24 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Palette, Image as ImageIcon, Sparkles, Download, Upload, RefreshCw, Layers } from 'lucide-react';
+import { Palette, Image as ImageIcon, Sparkles, Download, Upload, RefreshCw, Layers, X } from 'lucide-react';
 import apiService, { type MarketingImageRecord } from '../services/api';
 import { logger } from '../utils/logger';
 import { compressImageDataUrlForAI } from '../utils/productImage';
+
+const MAX_REFERENCE_IMAGES = 8;
+
+const readFileAsDataUrl = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error('فشل قراءة الصورة'));
+    };
+    reader.onerror = () => reject(new Error('فشل قراءة الصورة'));
+    reader.readAsDataURL(file);
+  });
 
 const getImageExtension = (mimeType: string) => {
   if (mimeType === 'image/jpeg') return 'jpg';
@@ -28,7 +44,7 @@ const formatImageDate = (date: string) => {
 
 const ImageStudio: React.FC = () => {
   const [prompt, setPrompt] = useState('');
-  const [referenceImage, setReferenceImage] = useState<string | null>(null);
+  const [referenceImages, setReferenceImages] = useState<string[]>([]);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,12 +52,16 @@ const ImageStudio: React.FC = () => {
   const [historyImageUrls, setHistoryImageUrls] = useState<Record<string, string>>({});
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [imageQuota, setImageQuota] = useState<{
+    used: number;
+    limit: number;
+    remaining: number;
+    billingPeriod: 'monthly' | 'yearly';
+  } | null>(null);
   const historyObjectUrlsRef = useRef<string[]>([]);
   const isMountedRef = useRef(false);
   
-  // Settings
   const [aspectRatio, setAspectRatio] = useState<'1:1' | '16:9' | '9:16' | '4:3' | '3:4'>('1:1');
-  const [imageSize, setImageSize] = useState<'1K' | '2K' | '4K'>('1K');
 
   const downloadUrl = (url: string, filename: string) => {
     const link = document.createElement('a');
@@ -82,6 +102,9 @@ const ImageStudio: React.FC = () => {
       historyObjectUrlsRef.current = createdObjectUrls;
 
       setHistoryImages(result.images);
+      if (result.quota) {
+        setImageQuota(result.quota);
+      }
       setHistoryImageUrls(
         Object.fromEntries(entries.filter((entry): entry is [string, string] => entry !== null))
       );
@@ -110,15 +133,34 @@ const ImageStudio: React.FC = () => {
     };
   }, [loadHistory]);
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setReferenceImage(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []).filter((file) => file.type.startsWith('image/'));
+    e.target.value = '';
+    if (files.length === 0) {
+      return;
     }
+
+    const remaining = MAX_REFERENCE_IMAGES - referenceImages.length;
+    if (remaining <= 0) {
+      setError(`يمكنك رفع ${MAX_REFERENCE_IMAGES} صور مرجعية كحد أقصى.`);
+      return;
+    }
+
+    try {
+      const selected = files.slice(0, remaining);
+      const dataUrls = await Promise.all(selected.map(readFileAsDataUrl));
+      setReferenceImages((prev) => [...prev, ...dataUrls].slice(0, MAX_REFERENCE_IMAGES));
+      if (files.length > remaining) {
+        setError(`تم رفع ${remaining} صور فقط. الحد الأقصى ${MAX_REFERENCE_IMAGES} صور.`);
+      }
+    } catch (err) {
+      logger.error('Failed to read reference images:', err);
+      setError('فشل قراءة بعض الصور المرجعية.');
+    }
+  };
+
+  const removeReferenceImage = (index: number) => {
+    setReferenceImages((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleGenerate = async () => {
@@ -132,16 +174,19 @@ const ImageStudio: React.FC = () => {
     setGeneratedImage(null);
 
     try {
-      let referenceImageBase64 = referenceImage || undefined;
-      if (referenceImageBase64?.startsWith('data:')) {
-        referenceImageBase64 = await compressImageDataUrlForAI(referenceImageBase64);
+      let referenceImageBase64s: string[] | undefined;
+      if (referenceImages.length > 0) {
+        referenceImageBase64s = await Promise.all(
+          referenceImages.map((image) =>
+            image.startsWith('data:') ? compressImageDataUrlForAI(image) : image
+          )
+        );
       }
 
       const result = await apiService.generateMarketingImageAI({
         prompt: prompt.trim(),
         aspectRatio,
-        imageSize,
-        referenceImageBase64
+        referenceImageBase64s
       });
       if (result?.imageDataUrl) {
         setGeneratedImage(result.imageDataUrl);
@@ -193,8 +238,16 @@ const ImageStudio: React.FC = () => {
           </span>
         </h2>
         <p className="text-gray-500 dark:text-gray-400 mt-1">
-          أنشئ صوراً تسويقية لمنتجاتك وحملاتك عبر الذكاء الاصطناعي (Nano Banana Pro — دقة تصل إلى 4K).
+          أنشئ صوراً تسويقية لمنتجاتك وحملاتك عبر الذكاء الاصطناعي (Nano Banana Pro).
         </p>
+        {imageQuota && imageQuota.limit !== -1 && (
+          <p className={`text-sm mt-2 ${imageQuota.remaining === 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-300'}`}>
+            {imageQuota.billingPeriod === 'yearly' ? 'الصور المتبقية هذا العام' : 'الصور المتبقية هذا الشهر'}:{' '}
+            <span className="font-semibold">{imageQuota.remaining}</span>
+            {' '}من {imageQuota.limit}
+            {imageQuota.remaining === 0 && ' — رقِّ باقتك للمزيد من الصور'}
+          </p>
+        )}
       </div>
 
       <div className="grid lg:grid-cols-3 gap-6">
@@ -216,70 +269,65 @@ const ImageStudio: React.FC = () => {
                  />
               </div>
 
-              {/* Reference Image */}
               <div className="mb-6">
                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                   صورة مرجعية (اختياري)
+                   صور مرجعية (اختياري)
                  </label>
-                 <div className="border-2 border-dashed border-gray-200 dark:border-gray-600 rounded-xl p-4 text-center hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors relative group">
-                    {referenceImage ? (
-                      <div className="relative">
-                         <img src={referenceImage} alt="Reference" className="w-full h-32 object-cover rounded-lg" />
-                         <button 
-                           onClick={() => setReferenceImage(null)}
-                           className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                 <div className="grid grid-cols-3 gap-2">
+                    {referenceImages.map((image, index) => (
+                      <div key={`${index}-${image.slice(-24)}`} className="relative group aspect-square">
+                         <img src={image} alt={`مرجع ${index + 1}`} className="w-full h-full object-cover rounded-lg border border-gray-200 dark:border-gray-600" />
+                         <button
+                           type="button"
+                           onClick={() => removeReferenceImage(index)}
+                           className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                           aria-label={`حذف الصورة ${index + 1}`}
                          >
-                           <RefreshCw size={14} />
+                           <X size={12} />
                          </button>
                       </div>
-                    ) : (
-                      <label className="cursor-pointer flex flex-col items-center justify-center gap-2">
-                         <Upload className="text-gray-400" size={24} />
-                         <span className="text-xs text-gray-500 dark:text-gray-400">اضغط لرفع صورة</span>
-                         <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+                    ))}
+                    {referenceImages.length < MAX_REFERENCE_IMAGES && (
+                      <label className="aspect-square cursor-pointer flex flex-col items-center justify-center gap-1 border-2 border-dashed border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                         <Upload className="text-gray-400" size={20} />
+                         <span className="text-[10px] text-gray-500 dark:text-gray-400 text-center px-1">
+                           {referenceImages.length === 0 ? 'رفع صور' : 'إضافة'}
+                         </span>
+                         <input
+                           type="file"
+                           accept="image/jpeg,image/png,image/webp,image/*"
+                           multiple
+                           className="hidden"
+                           onChange={handleImageUpload}
+                         />
                       </label>
                     )}
                  </div>
-                 <p className="text-[10px] text-gray-400 mt-1">استخدم صورة لتعديلها أو كمرجع للنمط.</p>
+                 <p className="text-[10px] text-gray-400 mt-1">
+                   حتى {MAX_REFERENCE_IMAGES} صور كمرجع للمنتج أو النمط. {referenceImages.length}/{MAX_REFERENCE_IMAGES}
+                 </p>
               </div>
 
-              {/* Settings Grid */}
-              <div className="grid grid-cols-2 gap-4 mb-6">
-                 <div>
-                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 flex items-center gap-1">
-                      <Layers size={12} /> الأبعاد
-                    </label>
-                    <select 
-                      value={aspectRatio}
-                      onChange={(e) => setAspectRatio(e.target.value as any)}
-                      className="w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-brand outline-none"
-                    >
-                      <option value="1:1">مربع (1:1)</option>
-                      <option value="16:9">أفقي (16:9)</option>
-                      <option value="9:16">قصة (9:16)</option>
-                      <option value="4:3">أفقي (4:3)</option>
-                      <option value="3:4">عمودي (3:4)</option>
-                    </select>
-                 </div>
-                 <div>
-                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 flex items-center gap-1">
-                      <ImageIcon size={12} /> الدقة
-                    </label>
-                    <select 
-                      value={imageSize}
-                      onChange={(e) => setImageSize(e.target.value as any)}
-                      className="w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-brand outline-none"
-                    >
-                      <option value="1K">قياسي (1K)</option>
-                      <option value="2K">عالي (2K)</option>
-                      <option value="4K">فائق (4K)</option>
-                    </select>
-                 </div>
+              <div className="mb-6">
+                 <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5 flex items-center gap-1">
+                   <Layers size={12} /> الأبعاد
+                 </label>
+                 <select
+                   value={aspectRatio}
+                   onChange={(e) => setAspectRatio(e.target.value as typeof aspectRatio)}
+                   className="w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-brand outline-none"
+                 >
+                   <option value="1:1">مربع (1:1)</option>
+                   <option value="16:9">أفقي (16:9)</option>
+                   <option value="9:16">قصة (9:16)</option>
+                   <option value="4:3">أفقي (4:3)</option>
+                   <option value="3:4">عمودي (3:4)</option>
+                 </select>
               </div>
 
               <button 
                 onClick={handleGenerate}
-                disabled={isGenerating}
+                disabled={isGenerating || (imageQuota !== null && imageQuota.limit !== -1 && imageQuota.remaining <= 0)}
                 className="w-full py-3 bg-brand hover:bg-brand-600 text-white rounded-xl font-bold shadow-lg shadow-brand/25 dark:shadow-none transition-all flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
               >
                 {isGenerating ? (
@@ -415,7 +463,7 @@ const ImageStudio: React.FC = () => {
                     {image.prompt}
                   </p>
                   <div className="mt-2 flex items-center justify-between text-xs text-gray-400">
-                    <span>{image.aspectRatio} · {image.imageSize}</span>
+                    <span>{image.aspectRatio}</span>
                     <span>{formatImageDate(image.createdAt)}</span>
                   </div>
                 </div>

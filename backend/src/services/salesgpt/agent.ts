@@ -389,7 +389,7 @@ export class SalesGPTAgent {
             intent = 'product_query';
             logger.debug('SalesGPT: ignored send_image without photo intent', {
                 aiNextAction,
-                messagePreview: messageText.substring(0, 80)
+                messageLength: messageText.length,
             });
         }
 

@@ -132,7 +132,7 @@ export const handleIncomingMessage = async (
       merchantId,
       platform,
       userId,
-      messagePreview: messageText.substring(0, 50)
+      messageLength: messageText.length,
     });
 
     // ==================== STEP 1: Get or Create Conversation ====================
@@ -340,7 +340,7 @@ export const handleIncomingMessage = async (
           additionalNotes: merchantPolicies.additionalNotes
         }
       });
-      console.log('[Orchestrator] STEP 6 DONE: Reply generated, length =', replyText.length, 'preview:', replyText.substring(0, 100));
+      console.log('[Orchestrator] STEP 6 DONE: Reply generated, length =', replyText.length);
     } catch (hybridWriterError: any) {
       console.log('[Orchestrator] STEP 6 FAILED:', hybridWriterError.message);
       logger.error('Orchestrator: Hybrid writer failed, using fallback', hybridWriterError as Error, {

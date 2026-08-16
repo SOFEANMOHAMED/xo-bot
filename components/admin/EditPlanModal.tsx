@@ -5,6 +5,7 @@ import { useAdminNotifications } from './AdminNotificationContext';
 interface PlanLimits {
   maxProducts: number;
   maxMonthlyAIResponses: number;
+  maxMonthlyMarketingImages: number;
   maxFacebookPages: number;
   maxInstagramAccounts: number;
   maxWhatsAppAccounts: number;
@@ -39,6 +40,7 @@ interface EditPlanModalProps {
 const defaultLimits = (): PlanLimits => ({
   maxProducts: -1,
   maxMonthlyAIResponses: -1,
+  maxMonthlyMarketingImages: 5,
   maxFacebookPages: 1,
   maxInstagramAccounts: 1,
   maxWhatsAppAccounts: 0,
@@ -310,6 +312,7 @@ const EditPlanModal: React.FC<EditPlanModalProps> = ({ isOpen, plan, onClose, on
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {numberField('المنتجات (-1 غير محدود)', 'maxProducts', limits.maxProducts)}
                       {numberField('ردود AI شهرياً (-1 غير محدود)', 'maxMonthlyAIResponses', limits.maxMonthlyAIResponses)}
+                      {numberField('صور AI (شهري/سنوي حسب الباقة، -1 غير محدود)', 'maxMonthlyMarketingImages', limits.maxMonthlyMarketingImages ?? 5)}
                       {numberField('صفحات فيسبوك', 'maxFacebookPages', limits.maxFacebookPages)}
                       {numberField('حسابات إنستغرام', 'maxInstagramAccounts', limits.maxInstagramAccounts ?? 0)}
                       {numberField('بوتات تيليجرام', 'maxTelegramBots', limits.maxTelegramBots ?? 0)}

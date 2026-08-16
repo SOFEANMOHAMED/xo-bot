@@ -213,7 +213,7 @@ export const generateJSON = async <T = unknown>(
     return { data, success: true };
   } catch (parseError) {
     logger.error('Failed to parse AI JSON response', parseError as Error, {
-      responsePreview: result.text.substring(0, 200)
+      responseLength: result.text.length,
     });
 
     return {

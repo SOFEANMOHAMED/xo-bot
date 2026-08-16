@@ -136,8 +136,9 @@ const extractOrderData = (text: string): { orderData: any | null; cleanText: str
         cleanText = cleanText.replace(/\n{3,}/g, '\n\n').trim();
 
         logger.info('ORDER_DATA extracted from Instagram reply', {
-          customerName: orderData.customerName,
-          customerPhone: orderData.customerPhone
+          hasName: Boolean(orderData.customerName),
+          hasPhone: Boolean(orderData.customerPhone),
+          productsCount: Array.isArray(orderData.products) ? orderData.products.length : 0,
         });
 
         return { orderData, cleanText };
@@ -346,7 +347,7 @@ const sendInstagramDM = async (
     // 💡 السطر السحري لإنستغرام لمطابقة النص العربي في مراجعة Meta
     logger.info('Sending Instagram DM via Meta Graph API', {
       recipientId: igScopedUserId,
-      messagePayload: { text: message }
+      messageLength: (message || '').length,
     });
     const url =
       `https://graph.facebook.com/v21.0/me/messages` +
@@ -1268,13 +1269,13 @@ const processInstagramDM = async (event: any) => {
     });
     messageText = voiceResult.messageText;
     if (voiceResult.transcribed) {
-      logger.info('Instagram voice transcribed', {
-        merchantId,
-        userId: senderId,
-        textPreview: voiceResult.transcript?.text?.substring(0, 80),
-        model: voiceResult.transcript?.model
-      });
-    }
+        logger.info('Instagram voice transcribed', {
+          merchantId,
+          userId: senderId,
+          transcriptLength: voiceResult.transcript?.text?.length || 0,
+          model: voiceResult.transcript?.model
+        });
+          }
     if (voiceResult.shouldAbortWithFallback) {
       await sendInstagramDM(
         senderId,
@@ -1305,7 +1306,9 @@ const processInstagramDM = async (event: any) => {
           } else {
             messageText = `[تحليل صورة العميل: "${analysis.description}" — لم يُعثر على منتج مطابق في المتجر]\n${messageText || 'كم سعر هذا المنتج؟'}`;
           }
-          console.log('[processInstagramDM] Image analyzed, augmented messageText:', messageText.substring(0, 200));
+          console.log('[processInstagramDM] Image analyzed', {
+            messageLength: messageText.length,
+          });
         }
       }
     } catch (imgErr) {
@@ -1564,7 +1567,7 @@ const processInstagramDM = async (event: any) => {
 
       if (result.next_action === 'confirm_order' && responseText.includes('[ORDER_DATA]')) {
         console.log('[processInstagramDM] Full AI Mode: Order confirmed, ORDER_DATA attached:', {
-          name: entities.name,
+          hasName: Boolean(entities.name),
           productsCount: products.length,
           next_action: result.next_action
         });
@@ -1678,7 +1681,7 @@ const processInstagramDM = async (event: any) => {
     ) {
       console.log('[processInstagramDM] ORDER_DATA detected, processing order:', {
         merchantId,
-        customerName: orderData.customerName,
+        hasName: Boolean(orderData.customerName),
         productsCount: orderData.products.length
       });
 

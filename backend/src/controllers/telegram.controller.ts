@@ -120,8 +120,9 @@ const extractOrderData = (text: string): { orderData: any | null; cleanText: str
         cleanText = cleanText.replace(/\n{3,}/g, '\n\n').trim();
         
         console.log('[extractOrderData] Successfully extracted order data:', {
-          customerName: orderData.customerName,
-          customerPhone: orderData.customerPhone
+          hasName: Boolean(orderData.customerName),
+          hasPhone: Boolean(orderData.customerPhone),
+          productsCount: Array.isArray(orderData.products) ? orderData.products.length : 0,
         });
         
         return { orderData, cleanText };
@@ -293,8 +294,7 @@ const processTelegramMessage = async (update: any) => {
     logger.info('Processing Telegram message', {
       chatId,
       userId,
-      userName,
-      messageText: messageText.substring(0, 50)
+      messageLength: messageText.length,
     });
 
     // ✅ SaaS: Merchant ID and bot info should be passed from webhook handler (set by telegramWebhook)
@@ -389,7 +389,7 @@ const processTelegramMessage = async (update: any) => {
           logger.info('Telegram voice transcribed', {
             merchantId,
             userId,
-            textPreview: voiceResult.transcript?.text?.substring(0, 80),
+            transcriptLength: voiceResult.transcript?.text?.length || 0,
             model: voiceResult.transcript?.model,
             durationSec: voiceResult.transcript?.durationSec
           });
@@ -460,7 +460,9 @@ const processTelegramMessage = async (update: any) => {
             } else {
               messageText = `[تحليل صورة العميل: "${analysis.description}" — لم يُعثر على منتج مطابق في المتجر]\n${messageText || 'كم سعر هذا المنتج؟'}`;
             }
-            console.log('[processTelegramMessage] Image analyzed, augmented messageText:', messageText.substring(0, 200));
+            console.log('[processTelegramMessage] Image analyzed', {
+              messageLength: messageText.length,
+            });
           }
         }
       }
@@ -559,7 +561,7 @@ const processTelegramMessage = async (update: any) => {
 
     console.log('[processTelegramMessage] Conversation ready for NEW orchestrator:', { 
       conversationId, 
-      messageText: messageText.substring(0, 50),
+      messageLength: messageText.length,
       recentMessagesCount: recentMessages.length,
       hasConversationState: Object.keys(conversationState).length > 0
     }); 
@@ -641,7 +643,7 @@ const processTelegramMessage = async (update: any) => {
 
       if (result.next_action === 'confirm_order' && responseText.includes('[ORDER_DATA]')) {
         console.log('[processTelegramMessage] Full AI Mode: Order confirmed, ORDER_DATA attached:', {
-          name: entities.name,
+          hasName: Boolean(entities.name),
           productsCount: products.length,
           next_action: result.next_action
         });
@@ -664,7 +666,6 @@ const processTelegramMessage = async (update: any) => {
       console.log('[processTelegramMessage] NEW Orchestrator response generated:', {
         conversationId,
         responseLength: responseText.length,
-        responsePreview: responseText.substring(0, 100),
         // ✅ metadata جديدة من النظام الجديد
         pipelineUsed: result.meta.pipelineUsed,
         aiCallsCount: result.meta.aiCallsCount,
@@ -792,7 +793,7 @@ const processTelegramMessage = async (update: any) => {
       
       console.log('[processTelegramMessage] ORDER_DATA detected, processing order:', {
         merchantId,
-        customerName: orderData.customerName,
+        hasName: Boolean(orderData.customerName),
         productsCount: orderData.products.length
       });
       
@@ -967,7 +968,7 @@ const processTelegramMessage = async (update: any) => {
                 orderData.total || 0,
                 settings.store_currency || 'USD',
                 'pending',
-                'bot',
+                'telegram',
                 combinedNotes
               ]
             : [
@@ -979,7 +980,7 @@ const processTelegramMessage = async (update: any) => {
                 orderData.total || 0,
                 settings.store_currency || 'USD',
                 'pending',
-                'bot',
+                'telegram',
                 combinedNotes
               ];
 
@@ -1144,7 +1145,7 @@ const processTelegramMessage = async (update: any) => {
         console.log('🧹 Telegram: Full state reset after order. last_order saved:', {
           orderId,
           productName: confirmedProductName,
-          customerName: confirmedCustomerName
+          hasCustomerName: Boolean(confirmedCustomerName),
         });
 
         // 💾 Persist reset state + last_order (was only in memory — next message must load this from DB)
@@ -1499,7 +1500,6 @@ export const telegramWebhook = async (
       method: req.method,
       hasBody: !!req.body,
       bodyKeys: req.body ? Object.keys(req.body) : [],
-      body: req.body ? JSON.stringify(req.body).substring(0, 200) : 'no body'
     });
     logger.info('Telegram webhook received', {
       path: req.path,
@@ -1654,13 +1654,13 @@ export const telegramWebhook = async (
         merchantId,
         chatId: update.message.chat?.id,
         userId: update.message.from?.id,
-        text: update.message.text?.substring(0, 50)
+        textLength: update.message.text?.length || 0,
       });
       logger.info('Processing Telegram message', {
         merchantId,
         chatId: update.message.chat?.id,
         userId: update.message.from?.id,
-        text: update.message.text?.substring(0, 50)
+        textLength: update.message.text?.length || 0,
       });
       
       // Per-conversation queue: merge rapid messages (4–6s) then process once
@@ -1708,7 +1708,6 @@ export const telegramWebhook = async (
       console.log('[Telegram Webhook] Update without message:', {
         merchantId,
         updateKeys: Object.keys(update || {}),
-        update: update ? JSON.stringify(update).substring(0, 200) : 'no update'
       });
       logger.debug('Telegram webhook update without message', {
         merchantId,

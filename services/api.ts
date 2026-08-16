@@ -991,8 +991,7 @@ class ApiService {
   async generateMarketingImageAI(body: {
     prompt: string;
     aspectRatio?: '1:1' | '16:9' | '9:16' | '4:3' | '3:4';
-    imageSize?: '1K' | '2K' | '4K';
-    referenceImageBase64?: string;
+    referenceImageBase64s?: string[];
   }) {
     return this.request<{
       imageDataUrl: string;
@@ -1007,6 +1006,12 @@ class ApiService {
   async getMarketingImageHistory(limit: number = 24) {
     return this.request<{
       images: MarketingImageRecord[];
+      quota?: {
+        used: number;
+        limit: number;
+        remaining: number;
+        billingPeriod: 'monthly' | 'yearly';
+      };
     }>(`/ai/marketing-images?limit=${encodeURIComponent(String(limit))}`);
   }
 

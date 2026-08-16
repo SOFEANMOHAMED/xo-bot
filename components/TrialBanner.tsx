@@ -69,7 +69,7 @@ const TrialBanner: React.FC<TrialBannerProps> = ({
           </div>
           <div>
             <p className="font-bold text-orange-800 dark:text-orange-300 text-sm">تنبيه: يوم واحد متبقي في فترتك التجريبية</p>
-            <p className="text-orange-600 dark:text-orange-400 text-xs">لا تفقد إعداداتك وبيانات البوت. اشترك اليوم واحصل على خصم 10%.</p>
+            <p className="text-orange-600 dark:text-orange-400 text-xs">لا تفقد إعداداتك وبيانات البوت. اشترك اليوم.</p>
           </div>
         </div>
         <button 

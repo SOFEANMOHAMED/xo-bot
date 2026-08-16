@@ -336,9 +336,13 @@ Extract intent and entities. Return ONLY valid JSON.`;
           result.stage = 'discover';
           result.entities = result.entities || {};
           result.entities.wants_catalog = true;
-          logger.info('Catalog AI check: true (overrode intent)', { messageText });
+          logger.info('Catalog AI check: true (overrode intent)', {
+            messageLength: messageText.length,
+          });
         } else {
-          logger.info('Catalog AI check: false', { messageText });
+          logger.info('Catalog AI check: false', {
+            messageLength: messageText.length,
+          });
         }
       } catch (err) {
         logger.warn('Catalog AI check failed', { message: (err as Error).message });

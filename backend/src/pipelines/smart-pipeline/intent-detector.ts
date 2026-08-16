@@ -767,7 +767,7 @@ Extract intent and entities. Return ONLY valid JSON.`;
         ...validated.entities,
         color: proactiveColor
       };
-      console.log('🎨✨ Proactive color extraction:', { color: proactiveColor, from: messageText });
+      console.log('🎨✨ Proactive color extraction:', { color: proactiveColor, messageLength: messageText.length });
     }
     
     if (proactiveSize) {
@@ -775,7 +775,7 @@ Extract intent and entities. Return ONLY valid JSON.`;
         ...validated.entities,
         size: proactiveSize
       };
-      console.log('📏✨ Proactive size extraction:', { size: proactiveSize, from: messageText });
+      console.log('📏✨ Proactive size extraction:', { size: proactiveSize, messageLength: messageText.length });
     }
 
     // ✅ CONTEXT-AWARE: Extract color/size if bot asked about them
@@ -802,7 +802,7 @@ Extract intent and entities. Return ONLY valid JSON.`;
     // If bot asked about color and message contains a color (and not already extracted)
     if (botAskedAboutColor && !validated.entities.color && colorPatterns.some(color => textLower.includes(color.toLowerCase()))) {
       const detectedColor = colorPatterns.find(color => textLower.includes(color.toLowerCase()));
-      console.log('🎨 Detected color from context', { color: detectedColor, messageText });
+      console.log('🎨 Detected color from context', { color: detectedColor, messageLength: messageText.length });
       validated.entities = {
         ...validated.entities,
         color: detectedColor
@@ -816,7 +816,7 @@ Extract intent and entities. Return ONLY valid JSON.`;
     // If bot asked about size and message contains a size (and not already extracted)
     if (botAskedAboutSize && !validated.entities.size && sizePatterns.some(size => textLower.includes(size.toLowerCase()))) {
       const detectedSize = sizePatterns.find(size => textLower.includes(size.toLowerCase()));
-      console.log('📏 Detected size from context', { size: detectedSize, messageText });
+      console.log('📏 Detected size from context', { size: detectedSize, messageLength: messageText.length });
       validated.entities = {
         ...validated.entities,
         size: detectedSize

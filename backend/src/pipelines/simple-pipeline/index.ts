@@ -68,7 +68,7 @@ export const processSimplePipeline = (
 
   logger.debug('Simple pipeline processing', {
     merchantId,
-    messagePreview: messageText.substring(0, 30),
+    messageLength: messageText.length,
     hasHistory
   });
 

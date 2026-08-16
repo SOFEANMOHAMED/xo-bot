@@ -7,7 +7,8 @@ import pool from '../database/connection.js';
 import { createError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
 import { z } from 'zod';
-import { sendPasswordResetEmail, sendWelcomeEmail } from '../utils/emailService.js';
+import { sendPasswordResetEmail } from '../utils/emailService.js';
+import { sendAndTrackWelcomeEmail } from '../services/lifecycleEmails/index.js';
 import { logger } from '../utils/logger.js';
 import {
   linkMerchantToAffiliateReferrer,
@@ -156,10 +157,8 @@ export const register = async (
     // Get role from database (default to 'user' if not set)
     const role = merchant.role || 'user';
 
-    // Send welcome email (async, don't wait)
-    sendWelcomeEmail(merchant.email, merchant.name).catch(err => {
-      console.warn('Failed to send welcome email:', err);
-    });
+    // Welcome email (tracked — also used for Google OAuth)
+    void sendAndTrackWelcomeEmail(merchant.id, merchant.email, merchant.name);
 
     // Generate JWT
     const token = generateToken(merchant.id, merchant.id, role);

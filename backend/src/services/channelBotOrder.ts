@@ -8,6 +8,7 @@ import type { ConversationState, Entities } from '../core/types.js';
 import { logger } from '../utils/logger.js';
 import { clearAbandonedCheckoutFromState } from './abandonedCheckout/index.js';
 import { notifyMerchantNewOrderAsync } from './notifyMerchantNewOrder.js';
+import { resolveOrderChannelSource } from '../utils/orderSource.js';
 
 export type ChannelOrderSettings = {
   store_currency: string;
@@ -40,6 +41,7 @@ export async function persistBotChannelOrder(
 ): Promise<boolean> {
   const { logPrefix, defaultBaseNotes, customerTags, interactionTitle, interactionDescription, interactionPlatform } =
     labels;
+  const orderSource = resolveOrderChannelSource(interactionPlatform, orderData?.notes || defaultBaseNotes);
 
   const client = await pool.connect();
   try {
@@ -208,7 +210,7 @@ export async function persistBotChannelOrder(
             orderData.total || 0,
             settings.store_currency || 'USD',
             'pending',
-            'bot',
+            orderSource,
             combinedNotes
           ]
         : [
@@ -220,7 +222,7 @@ export async function persistBotChannelOrder(
             orderData.total || 0,
             settings.store_currency || 'USD',
             'pending',
-            'bot',
+            orderSource,
             combinedNotes
           ];
 
@@ -345,7 +347,7 @@ export async function persistBotChannelOrder(
         notes: combinedNotes,
         total: orderData.total || 0,
         currency: settings.store_currency || 'USD',
-        source: 'bot',
+        source: orderSource,
         items: (orderData.products || []).map((p: any) => ({
           productName: p.productName,
           quantity: p.quantity || 1,
@@ -381,7 +383,7 @@ export async function persistBotChannelOrder(
     console.log(`[${logPrefix}] Full state reset after order. last_order saved:`, {
       orderId,
       productName: confirmedProductName,
-      customerName: confirmedCustomerName
+      hasCustomerName: Boolean(confirmedCustomerName),
     });
 
     return true;

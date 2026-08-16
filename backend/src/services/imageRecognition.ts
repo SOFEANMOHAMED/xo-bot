@@ -190,8 +190,8 @@ export async function analyzeImageAndSearch(
     const products = await searchProducts(merchantId, vision.searchQuery, undefined, 5);
     logger.info('imageRecognition: vision text fallback', {
       merchantId,
-      description: vision.description,
-      searchQuery: vision.searchQuery,
+      descriptionLength: vision.description?.length || 0,
+      searchQueryLength: vision.searchQuery?.length || 0,
       productCount: products.length
     });
 

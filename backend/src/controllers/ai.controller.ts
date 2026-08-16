@@ -22,7 +22,7 @@ import {
 import { getCachedMerchantSettings } from '../services/cacheService.js';
 import { conversationIngressQueue } from '../services/conversationIngressQueue.js';
 import { getAIClient, isAIAvailable } from '../ai/gemini-client.js';
-import { generateImageWithKie } from '../ai/kie-client.js';
+import { generateImageWithKie, MAX_REFERENCE_IMAGES } from '../ai/kie-client.js';
 import { logger } from '../utils/logger.js';
 import type { ConversationState, Message, Persona, Platform } from '../core/types.js';
 
@@ -446,11 +446,16 @@ Generate the JSON now.`;
   }
 };
 
+const MARKETING_IMAGE_SIZE = '1K' as const;
+const REFERENCE_IMAGE_MAX_CHARS = 8 * 1024 * 1024;
+
+const referenceImageSchema = z.string().min(1).max(REFERENCE_IMAGE_MAX_CHARS);
+
 const marketingImageSchema = z.object({
   prompt: z.string().min(1, 'الوصف مطلوب').max(10000),
   aspectRatio: z.enum(['1:1', '16:9', '9:16', '4:3', '3:4']).default('1:1'),
-  imageSize: z.enum(['1K', '2K', '4K']).default('1K'),
-  referenceImageBase64: z.string().max(20 * 1024 * 1024).optional()
+  referenceImageBase64: referenceImageSchema.optional(),
+  referenceImageBase64s: z.array(referenceImageSchema).max(MAX_REFERENCE_IMAGES).optional()
 });
 
 const marketingImageHistoryQuerySchema = z.object({
@@ -568,29 +573,6 @@ async function saveGeneratedMarketingImage(params: {
   return toMarketingImageDto(result.rows[0]);
 }
 
-async function summarizeReferenceImage(
-  client: OpenAI,
-  dataUrl: string
-): Promise<string> {
-  const completion = await client.chat.completions.create({
-    model: 'gpt-4o-mini',
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: 'Describe this reference image in 2–4 short sentences: subject, colors, lighting, composition, and art style. English only, no preamble — for an image generation prompt.'
-          },
-          { type: 'image_url', image_url: { url: dataUrl } }
-        ]
-      }
-    ],
-    max_tokens: 250
-  });
-  return completion.choices[0]?.message?.content?.trim() || '';
-}
-
 /**
  * ستوديو التصميم — توليد صورة تسويقية عبر Kie.ai (Nano Banana Pro).
  */
@@ -605,41 +587,26 @@ export const generateMarketingImageAI = async (
     }
 
     const validated = marketingImageSchema.parse(req.body);
-    let finalPrompt = validated.prompt.trim();
-
-    if (validated.referenceImageBase64 && isAIAvailable()) {
-      const client = getAIClient();
-      if (client) {
-        const url = validated.referenceImageBase64.startsWith('data:')
-          ? validated.referenceImageBase64
-          : `data:image/jpeg;base64,${validated.referenceImageBase64}`;
-        try {
-          const refSummary = await summarizeReferenceImage(client, url);
-          if (refSummary) {
-            finalPrompt = `Visual reference (match mood, palette, and style where it fits the request): ${refSummary}\n\nUser request: ${finalPrompt}`;
-          }
-        } catch (e) {
-          logger.warn('Reference image summarization failed, continuing with text prompt only', {
-            error: (e as Error).message
-          });
-        }
-      }
-    }
-
-    if (finalPrompt.length > 10000) {
-      finalPrompt = finalPrompt.slice(0, 10000);
-    }
+    const finalPrompt = validated.prompt.trim().slice(0, 10000);
+    const referenceImages = (
+      validated.referenceImageBase64s?.length
+        ? validated.referenceImageBase64s
+        : validated.referenceImageBase64
+          ? [validated.referenceImageBase64]
+          : []
+    ).slice(0, MAX_REFERENCE_IMAGES);
 
     const result = await generateImageWithKie(
       finalPrompt,
       validated.aspectRatio,
-      validated.imageSize
+      MARKETING_IMAGE_SIZE,
+      referenceImages
     );
     const savedImage = await saveGeneratedMarketingImage({
       merchantId: req.merchantId,
       prompt: validated.prompt.trim(),
       aspectRatio: validated.aspectRatio,
-      imageSize: validated.imageSize,
+      imageSize: MARKETING_IMAGE_SIZE,
       originalImageUrl: result.imageUrl,
       imageDataUrl: result.imageDataUrl
     });
@@ -688,6 +655,11 @@ export const getMarketingImageHistory = async (
 
     await ensureMarketingImagesTable();
     const query = marketingImageHistoryQuerySchema.parse(req.query);
+
+    const { getMerchantPlanLimits, getMarketingImageCount } = await import('../utils/planLimits.js');
+    const limits = await getMerchantPlanLimits(req.merchantId);
+    const used = await getMarketingImageCount(req.merchantId, limits.billingPeriod);
+
     const result = await pool.query(
       `SELECT id, prompt, revised_prompt, aspect_ratio, image_size, mime_type, file_size, created_at
        FROM design_studio_images
@@ -700,7 +672,16 @@ export const getMarketingImageHistory = async (
     res.json({
       success: true,
       data: {
-        images: result.rows.map(toMarketingImageDto)
+        images: result.rows.map(toMarketingImageDto),
+        quota: {
+          used,
+          limit: limits.maxMonthlyMarketingImages,
+          remaining:
+            limits.maxMonthlyMarketingImages === -1
+              ? -1
+              : Math.max(0, limits.maxMonthlyMarketingImages - used),
+          billingPeriod: limits.billingPeriod
+        }
       }
     });
   } catch (error: unknown) {

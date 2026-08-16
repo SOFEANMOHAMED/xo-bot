@@ -498,6 +498,7 @@ export const updateAdminPlanLimits = async (
     const requiredFields = [
       'maxProducts',
       'maxMonthlyAIResponses',
+      'maxMonthlyMarketingImages',
       'maxFacebookPages',
       'maxInstagramAccounts',
       'maxWhatsAppAccounts',

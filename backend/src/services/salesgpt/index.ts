@@ -233,7 +233,7 @@ export const processWithSalesGPT = async (
 
     logger.info('🧠 SalesGPT pipeline started', {
         merchantId,
-        messagePreview: messageText.substring(0, 50),
+        messageLength: messageText.length,
         language
     });
 
@@ -399,11 +399,11 @@ export const processWithSalesGPT = async (
             stageId: stageId || null
         });
         console.log('⚡ SalesGPT: confirm_order fast-path engaged', {
-            userMessage: messageText.substring(0, 60),
+            messageLength: messageText.length,
             trigger: userSaidYes ? 'yes' : 'no',
-            name: e.name,
-            phone: e.phone,
-            address: e.address
+            hasName: Boolean(e.name),
+            hasPhone: Boolean(e.phone),
+            hasAddress: Boolean(e.address),
         });
 
         salesResult = {
@@ -541,7 +541,7 @@ export const processWithSalesGPT = async (
                 product: products[0].name,
                 requestedColor,
                 imageUrlForBot,
-                captionPreview: caption.substring(0, 80)
+                captionLength: caption.length,
             });
         } else if (products.length > 1) {
             const productList = products.slice(0, 3).map(p => p.name).join('، ');

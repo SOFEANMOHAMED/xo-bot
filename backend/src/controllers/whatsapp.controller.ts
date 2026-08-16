@@ -161,8 +161,9 @@ const extractOrderData = (text: string): { orderData: any | null; cleanText: str
         cleanText = cleanText.replace(/\n{3,}/g, '\n\n').trim();
         
         logger.info('[extractOrderData] ORDER_DATA extracted', {
-          customerName: orderData.customerName,
-          customerPhone: orderData.customerPhone
+          hasName: Boolean(orderData.customerName),
+          hasPhone: Boolean(orderData.customerPhone),
+          productsCount: Array.isArray(orderData.products) ? orderData.products.length : 0,
         });
         
         return { orderData, cleanText };
@@ -710,7 +711,7 @@ export const handleWhatsAppWebhook = async (
                     logger.info('WhatsApp voice transcribed', {
                       merchantId,
                       from,
-                      textPreview: voiceResult.transcript?.text?.substring(0, 80),
+                      transcriptLength: voiceResult.transcript?.text?.length || 0,
                       model: voiceResult.transcript?.model
                     });
                   }
@@ -1087,7 +1088,7 @@ export const handleWhatsAppWebhook = async (
                                 orderData.total || 0,
                                 cachedSettings?.store_currency || 'USD',
                                 'pending',
-                                'bot',
+                                'whatsapp',
                                 combinedNotes
                               ]
                             : [
@@ -1099,7 +1100,7 @@ export const handleWhatsAppWebhook = async (
                                 orderData.total || 0,
                                 cachedSettings?.store_currency || 'USD',
                                 'pending',
-                                'bot',
+                                'whatsapp',
                                 combinedNotes
                               ];
 

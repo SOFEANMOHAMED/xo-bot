@@ -4,6 +4,7 @@ import { Order, OrderStatus } from '../types';
 import { Package, Calendar, User, DollarSign, ShoppingCart, CheckCircle, XCircle, Clock, Trash2, Filter, X, Eye } from 'lucide-react';
 import { useDebounce } from '../hooks/useDebounce';
 import Pagination from './Pagination';
+import { getOrderSourceBadgeClass, getOrderSourceLabel } from '../utils/orderSource';
 
 interface OrderManagerProps {
   orders: Order[];
@@ -384,12 +385,8 @@ const OrderManager: React.FC<OrderManagerProps> = ({ orders, storeCurrency, onUp
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`text-xs px-2 py-1 rounded ${
-                        order.source === 'shopify'
-                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                          : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
-                      }`}>
-                        {order.source === 'shopify' ? 'Shopify' : 'يدوي'}
+                      <span className={`text-xs px-2 py-1 rounded ${getOrderSourceBadgeClass(order.source, order.notes)}`}>
+                        {getOrderSourceLabel(order.source, order.notes)}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -553,8 +550,8 @@ const OrderManager: React.FC<OrderManagerProps> = ({ orders, storeCurrency, onUp
                 </div>
               </div>
 
-              {/* Order Status and Notes */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Order Status, Date, and Source */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <span className="text-xs text-gray-500 dark:text-gray-400">الحالة:</span>
                   <div className="mt-1">
@@ -586,6 +583,14 @@ const OrderManager: React.FC<OrderManagerProps> = ({ orders, storeCurrency, onUp
                   <p className="text-sm font-medium text-gray-900 dark:text-white mt-1">
                     {formatDate(selectedOrder.date)}
                   </p>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">المصدر:</span>
+                  <div className="mt-1">
+                    <span className={`text-xs px-2 py-1 rounded ${getOrderSourceBadgeClass(selectedOrder.source, selectedOrder.notes)}`}>
+                      {getOrderSourceLabel(selectedOrder.source, selectedOrder.notes)}
+                    </span>
+                  </div>
                 </div>
               </div>
 

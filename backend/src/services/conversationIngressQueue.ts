@@ -264,7 +264,7 @@ class ConversationIngressQueueImpl {
       platform: bucket.platform,
       bufferedCount: bucket.parts.length,
       debounceMs: bucket.debounceMs,
-      textPreview: text.substring(0, 60),
+      textLength: text.length,
       running: bucket.running
     });
 
@@ -365,7 +365,6 @@ class ConversationIngressQueueImpl {
       platform: batch.platform,
       batchSize: parts.length,
       mergedLength: batch.mergedText.length,
-      mergedPreview: batch.mergedText.substring(0, 100)
     });
 
     try {

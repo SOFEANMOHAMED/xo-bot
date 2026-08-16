@@ -440,7 +440,9 @@ export const buildResponse = async (input: ResponseBuilderInput): Promise<Respon
     plan.oneQuestion.includes('color') || 
     plan.oneQuestion.includes('size')
   )) {
-    console.log('🎨 Using plan.oneQuestion for color/size', { oneQuestion: plan.oneQuestion });
+    console.log('🎨 Using plan.oneQuestion for color/size', {
+      oneQuestionLength: plan.oneQuestion.length,
+    });
     replyText = plan.oneQuestion;
     return { replyText, usedAI: false, guardPassed: true };
   }

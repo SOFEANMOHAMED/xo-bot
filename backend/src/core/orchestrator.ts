@@ -60,7 +60,7 @@ export const processMessage = async (
   logger.info('Orchestrator: Processing message', {
     merchantId: message.merchantId,
     platform: message.platform,
-    messagePreview: message.messageText.substring(0, 50)
+    messageLength: message.messageText.length,
   });
 
   try {

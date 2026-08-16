@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Bot, Zap, MessageCircle, CheckCircle, Mail, ArrowRight, Shield, Smartphone,
-  Plus, Minus, Loader2, TrendingUp, Users, Clock, UserCircle, BarChart2,
-  MessageSquare, Link2, Database, Cpu, Sparkles
+  Bot, Zap, MessageCircle, CheckCircle, Mail, ArrowRight, Shield,
+  Plus, Minus, Loader2, TrendingUp, Clock, UserCircle, BarChart2,
+  MessageSquare, Database, Cpu, Sparkles, Inbox, Image, Package,
+  Send, Instagram, Facebook, ShoppingCart, PlayCircle
 } from 'lucide-react';
 import LandingChatBot from './LandingChatBot';
 import AntigravityHero from './AntigravityHero';
@@ -214,7 +215,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
             </h1>
 
             <p className="text-lg text-slate-500 max-w-2xl mx-auto leading-relaxed mb-9 animate-fade-in-up" style={{ animationDelay: '0.16s' }}>
-              منصة عربية تربط فيسبوك وواتساب بمتجرك، وتدير المحادثات بذكاء كموظف مبيعات حقيقي — على مدار الساعة.
+              بوت مبيعات يفهم اللهجات العربية — على ماسنجر فيسبوك، إنستغرام، وتيليجرام — ويرد على التعليقات ويحوّلها لمحادثات بيع.
             </p>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3 animate-fade-in-up" style={{ animationDelay: '0.24s' }}>
@@ -226,18 +227,18 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
                 <ArrowRight size={18} className="rotate-180" />
               </button>
               <button
-                onClick={() => scrollToSection('features')}
+                onClick={() => scrollToSection('how-it-works')}
                 className="w-full sm:w-auto px-8 py-3.5 bg-white text-slate-800 rounded-xl font-bold text-base border border-slate-200 hover:border-brand-300 hover:text-brand transition-all"
               >
-                اعرف المزيد
+                كيف يعمل؟
               </button>
             </div>
 
             <div className="flex flex-wrap items-center justify-center gap-5 mt-8 text-sm text-slate-500 animate-fade-in-up" style={{ animationDelay: '0.32s' }}>
-              <span className="inline-flex items-center gap-1.5"><Sparkles size={14} className="text-brand" /> Gemini 2.5</span>
-              <span className="inline-flex items-center gap-1.5"><Shield size={14} className="text-brand" /> آمن 100%</span>
-              <span className="inline-flex items-center gap-1.5"><Users size={14} className="text-brand" /> 500+ متجر</span>
-              <span className="inline-flex items-center gap-1.5"><Clock size={14} className="text-brand" /> دعم 24/7</span>
+              <span className="inline-flex items-center gap-1.5"><Sparkles size={14} className="text-brand" /> Gemini</span>
+              <span className="inline-flex items-center gap-1.5"><Shield size={14} className="text-brand" /> عزل بيانات التجار</span>
+              <span className="inline-flex items-center gap-1.5"><Zap size={14} className="text-brand" /> إعداد في دقائق</span>
+              <span className="inline-flex items-center gap-1.5"><Clock size={14} className="text-brand" /> تجربة 7 أيام</span>
             </div>
           </div>
 
@@ -306,50 +307,80 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
         </div>
       </section>
 
-      {/* Features */}
-      <section id="features" className="py-24 relative z-10 bg-white">
+      {/* How it works */}
+      <section id="how-it-works" className="py-24 relative z-10 bg-white">
         <div className="container mx-auto px-6">
           <div className="text-center mb-14 max-w-2xl mx-auto">
             <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900 mb-3">
-              كل ما تحتاجه لإدارة <span className="text-brand">ذكية</span>
+              من الإعداد إلى <span className="text-brand">البيع</span> في ثلاث خطوات
             </h2>
             <p className="text-slate-500">
-              أدوات متكاملة للمتاجر الإلكترونية — وفّر الوقت وزد الأرباح بذكاء اصطناعي يفهم عميلك.
+              بدون برمجة — أضف منتجاتك، اربط قناتك، ودع البوت يبيع.
             </p>
           </div>
-
-          <div className="grid md:grid-cols-3 gap-6">
-            <FeatureCard icon={<MessageCircle size={28} />} title="ردود آلية متعددة القنوات" description="فيسبوك وواتساب بلهجات عربية دقيقة، كأن موظفاً حقيقياً يرد على عملائك." />
-            <FeatureCard icon={<UserCircle size={28} />} title="نظام CRM متكامل" description="تتبع التفاعلات، الملاحظات، التصنيف، وإحصائيات كل عميل في مكان واحد." />
-            <FeatureCard icon={<BarChart2 size={28} />} title="تحليلات وتقارير" description="لوحة أداء للمبيعات والمحادثات والمنتجات مع مؤشرات واضحة." />
-            <FeatureCard icon={<Link2 size={28} />} title="تكاملات متعددة" description="اربط صفحات فيسبوك، واتساب، وشوبيفاي بمزامنة تلقائية للمنتجات والطلبات." />
-            <FeatureCard icon={<Database size={28} />} title="إدارة منتجات وخدمات" description="استيراد من Excel أو شوبيفاي أو إضافة يدوية بسهولة." />
-            <FeatureCard icon={<Cpu size={28} />} title="ذكاء اصطناعي متقدم" description="مدعوم بـ Gemini 2.5 — يفهم السياق ويتعلم من المحادثات ويمنع التضارب." />
-            <FeatureCard icon={<Shield size={28} />} title="أمان وخصوصية" description="بيانات مشفرة، وعزل كامل بين التجار، مع Human Takeover عند الحاجة." />
-            <FeatureCard icon={<Zap size={28} />} title="إعداد في دقائق" description="بدون خبرة تقنية — واجهة بسيطة ودعم فني على مدار الساعة." />
-            <FeatureCard icon={<Smartphone size={28} />} title="إشعارات ذكية" description="تنبيهات الطلبات والأحداث المهمة في لوحة واحدة واضحة." />
+          <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+            {[
+              { step: '1', icon: <Package size={24} />, title: 'أضف منتجاتك', desc: 'أدخلها يدوياً أو ارفعها من Excel، واستخدم الذكاء الاصطناعي لكتابة وصف تسويقي.' },
+              { step: '2', icon: <Send size={24} />, title: 'اربط قناتك', desc: 'فيسبوك و/أو إنستغرام و/أو تيليجرام — بضغطة من لوحة الربط.' },
+              { step: '3', icon: <ShoppingCart size={24} />, title: 'البوت يبيع', desc: 'يرد، يعرض المنتج، ويبني الطلب — وأنت تتدخل من صندوق الوارد عند الحاجة.' },
+            ].map((item) => (
+              <div key={item.step} className="relative p-7 rounded-2xl bg-white border border-slate-100 hover:border-brand-200 transition-all hover:shadow-xl hover:shadow-brand/10">
+                <span className="absolute top-5 left-5 text-4xl font-extrabold text-brand-100">{item.step}</span>
+                <div className="mb-5 p-3.5 rounded-xl w-fit bg-brand-50 text-brand">
+                  {item.icon}
+                </div>
+                <h3 className="text-lg font-bold mb-2 text-slate-900">{item.title}</h3>
+                <p className="text-slate-500 text-sm leading-relaxed">{item.desc}</p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
 
-      {/* Integrations */}
+      {/* Features */}
+      <section id="features" className="py-24 relative z-10 bg-slate-50">
+        <div className="container mx-auto px-6">
+          <div className="text-center mb-14 max-w-2xl mx-auto">
+            <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900 mb-3">
+              من الاستفسار إلى الطلب — <span className="text-brand">بدون فريق كبير</span>
+            </h2>
+            <p className="text-slate-500">
+              أدوات مبيعات وخدمة عملاء مبنية لمتاجر السوشيال ميديا العربية.
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-6">
+            <FeatureCard icon={<MessageCircle size={28} />} title="بوت مبيعات متعدد القنوات" description="ماسنجر فيسبوك، رسائل إنستغرام، وتيليجرام — بلهجة عربية طبيعية كأن موظفاً حقيقياً يرد." />
+            <FeatureCard icon={<MessageSquare size={28} />} title="من التعليق إلى البيع" description="رد آلي على تعليقات فيسبوك وإنستغرام مع رسالة خاصة تلقائية للمهتمين." />
+            <FeatureCard icon={<Inbox size={28} />} title="صندوق وارد موحّد" description="كل المحادثات في مكان واحد — رد بشري أو إيقاف البوت لمحادثة معينة متى شئت." />
+            <FeatureCard icon={<Database size={28} />} title="كتالوج وطلبات" description="إدارة منتجات بألوان ومقاسات وصور، استيراد Excel، وطلبات من البوت أو يدوياً." />
+            <FeatureCard icon={<UserCircle size={28} />} title="CRM للعملاء" description="ملاحظات، حالات، وتاريخ تفاعل لكل عميل — بدون خلط بيانات بين التجار." />
+            <FeatureCard icon={<BarChart2 size={28} />} title="تحليلات وتقارير" description="أداء المبيعات والمحادثات والمنتجات بمؤشرات واضحة في لوحة واحدة." />
+            <FeatureCard icon={<Image size={28} />} title="نشر محتوى + ستوديو صور" description="جدولة منشورات فيسبوك وإنستغرام، وتوليد صور تسويقية بالذكاء الاصطناعي." />
+            <FeatureCard icon={<Shield size={28} />} title="أمان SaaS" description="عزل كامل بين التجار، بيانات منفصلة لكل متجر، وتحكّم بشري عند الحاجة." />
+            <FeatureCard icon={<Cpu size={28} />} title="تذكير السلة المتروكة" description="متابعة من بدأ الطلب ولم يُكمل عبر قنوات الدردشة لاسترجاع البيع." />
+          </div>
+        </div>
+      </section>
+
+      {/* Active channels */}
       <section id="integrations" className="py-24 relative z-10 bg-brand-50/40">
         <div className="container mx-auto px-6">
           <div className="text-center mb-14">
             <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900 mb-3">
-              منصة متكاملة بكل ما تحتاجه
+              القنوات الجاهزة الآن
             </h2>
             <p className="text-slate-500 max-w-2xl mx-auto">
-              جميع أدوات إدارة متجرك في مكان واحد
+              اربط قنواتك الاجتماعية وابدأ البيع — إدارة المنتجات والطلبات من داخل Xo Bot (يدوي أو Excel).
             </p>
           </div>
 
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5 max-w-6xl mx-auto">
             {[
-              { icon: <UserCircle size={22} />, title: 'نظام CRM', desc: 'إدارة العملاء وتتبع التفاعلات والإحصائيات', note: 'متوفر في جميع الباقات' },
-              { icon: <BarChart2 size={22} />, title: 'تحليلات متقدمة', desc: 'تقارير المبيعات والمحادثات وأداء المنتجات', note: 'باقات Pro و Business' },
-              { icon: <MessageSquare size={22} />, title: 'WhatsApp Business', desc: 'ربط الحساب وردود تلقائية وإدارة المحادثات', note: 'متوفر في جميع الباقات' },
-              { icon: <Link2 size={22} />, title: 'تكاملات متعددة', desc: 'Messenger و Shopify و Telegram ومزامنة المنتجات', note: 'متوفر في جميع الباقات' },
+              { icon: <Facebook size={22} />, title: 'فيسبوك', desc: 'ماسنجر + رد على التعليقات وتحويل المهتمين لرسائل خاصة', note: 'جاهز للربط' },
+              { icon: <Instagram size={22} />, title: 'إنستغرام', desc: 'رسائل مباشرة وتعليقات مع أتمتة ذكية للمنشورات', note: 'جاهز للربط' },
+              { icon: <Send size={22} />, title: 'تيليجرام', desc: 'بوت مبيعات على تيليجرام مع كتالوجك وسياسات متجرك', note: 'جاهز للربط' },
+              { icon: <PlayCircle size={22} />, title: 'تجربة البوت', desc: 'اختبر الردود داخل اللوحة قبل ربط أي قناة', note: 'متاح فوراً' },
             ].map((item) => (
               <div
                 key={item.title}
@@ -375,12 +406,12 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
         <div className="container mx-auto px-6">
           <div className="text-center mb-14">
             <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900 mb-3">قصص نجاح عملائنا</h2>
-            <p className="text-slate-500 max-w-2xl mx-auto">كيف ساعدنا المتاجر على زيادة المبيعات وتحسين التجربة</p>
+            <p className="text-slate-500 max-w-2xl mx-auto">كيف حوّل التجار تعليقات ورسائل السوشيال إلى طلبات فعلية</p>
           </div>
           <div className="grid md:grid-cols-3 gap-6 max-w-6xl mx-auto">
-            <CaseStudyCard storeName="متجر الأزياء الراقية" industry="أزياء" metric="+40%" metricLabel="زيادة في المبيعات" description="بعد استخدام Xo Bot زادت المبيعات ورضا العملاء بشكل ملحوظ." improvement="تحسين وقت الاستجابة من ساعات إلى ثوانٍ" />
-            <CaseStudyCard storeName="متجر الإلكترونيات" industry="إلكترونيات" metric="+65%" metricLabel="زيادة في الاستفسارات" description="الرد التلقائي على أغلب الاستفسارات وفّر وقت فريق المبيعات." improvement="توفير 20 ساعة عمل أسبوعياً" />
-            <CaseStudyCard storeName="متجر العطور" industry="عطور ومستحضرات" metric="+85%" metricLabel="رضا العملاء" description="ردود سريعة ودقيقة رفعت تقييم المتجر من 4.2 إلى 4.8." improvement="رد فوري على 90% من الاستفسارات" />
+            <CaseStudyCard storeName="متجر الأزياء الراقية" industry="أزياء" metric="+40%" metricLabel="زيادة في المبيعات" description="الرد الفوري على تعليقات المنشورات وتحويلها لرسائل ماسنجر رفع معدل إتمام الطلب." improvement="من ساعات انتظار إلى رد خلال ثوانٍ" />
+            <CaseStudyCard storeName="متجر الإلكترونيات" industry="إلكترونيات" metric="+65%" metricLabel="استفسارات مُجابة آلياً" description="البوت أجاب عن الأسعار والتوفر عبر إنستغرام وفيسبوك، والصندوق الوارد للتدخل عند الحاجة." improvement="توفير نحو 20 ساعة عمل أسبوعياً" />
+            <CaseStudyCard storeName="متجر العطور" industry="عطور ومستحضرات" metric="+85%" metricLabel="رضا العملاء" description="ردود دقيقة من الكتالوج على تيليجرام والرسائل الخاصة رفعت تقييم التجربة بشكل ملحوظ." improvement="رد فوري على أغلب الاستفسارات" />
           </div>
         </div>
       </section>
@@ -389,8 +420,8 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
       <section id="pricing" className="py-24 relative z-10 bg-slate-50">
         <div className="container mx-auto px-6">
           <div className="text-center mb-14">
-            <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900 mb-3">باقات تناسب الجميع</h2>
-            <p className="text-slate-500">اختر الباقة المناسبة — يمكنك التغيير أو الإلغاء في أي وقت.</p>
+            <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900 mb-3">باقات تناسب مرحلتك</h2>
+            <p className="text-slate-500">من رد التعليقات فقط إلى بوت مبيعات على فيسبوك وإنستغرام وتيليجرام — مع تجربة 7 أيام.</p>
           </div>
 
           {isLoadingPlans ? (
@@ -549,11 +580,12 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
             <p className="text-slate-500">إجابات سريعة على التساؤلات الأكثر شيوعاً</p>
           </div>
           <div className="max-w-3xl mx-auto space-y-3">
-            <FaqItem question="هل يدعم البوت اللهجات العربية العامية؟" answer="نعم، تم تدريب نماذج الذكاء الاصطناعي لدينا لفهم والرد بمختلف اللهجات العربية (المصرية، الخليجية، الشامية، وغيرها) بدقة عالية، مما يجعله يبدو كموظف حقيقي." />
-            <FaqItem question="هل أحتاج إلى خبرة برمجية لاستخدام المنصة؟" answer="إطلاقاً. تم تصميم لوحة التحكم لتكون سهلة الاستخدام للجميع. عملية الربط مع فيسبوك وشوبيفاي تتم بضغطات زر بسيطة ودون الحاجة لكتابة أي كود." />
-            <FaqItem question="كيف يتم تحديث معلومات المنتجات والأسعار؟" answer="يمكنك ربط متجر Shopify للمزامنة التلقائية، أو رفع ملف Excel، أو إضافة المنتجات يدوياً. البوت يحدّث إجاباته فوراً عند تغيير أي معلومة." />
-            <FaqItem question="هل هناك فترة تجربة مجانية؟" answer="نعم، نقدم فترة تجربة مجانية لمدة 7 أيام مع كامل المميزات (باقة المحترف) لتتمكن من اختبار النظام قبل الدفع." />
-            <FaqItem question="ماذا يحدث إذا لم يعرف البوت الإجابة؟" answer="إذا لم يجد المعلومة في قاعدة بياناتك، يعتذر بلطف ويطلب من العميل التواصل مع الدعم البشري — بدلاً من اختلاق إجابة غير صحيحة." />
+            <FaqItem question="هل يدعم البوت اللهجات العربية العامية؟" answer="نعم — يفهم ويرد باللهجات المصرية والخليجية والشامية وغيرها بدقة عالية، فيبدو كموظف مبيعات حقيقي." />
+            <FaqItem question="هل أحتاج إلى خبرة برمجية لاستخدام المنصة؟" answer="إطلاقاً. الربط مع فيسبوك وإنستغرام وتيليجرام يتم من لوحة التحكم بخطوات بسيطة ودون كتابة أي كود." />
+            <FaqItem question="كيف يتم تحديث معلومات المنتجات والأسعار؟" answer="أضف المنتجات يدوياً أو ارفعها من ملف Excel. أي تعديل على الكتالوج ينعكس فوراً على إجابات البوت." />
+            <FaqItem question="ما الفرق بين باقة التعليقات وباقات المبيعات؟" answer="باقة التعليقات للرد الآلي على تعليقات فيسبوك وإنستغرام فقط. باقات المبيعات تضيف بوت الرسائل الخاصة (ماسنجر / إنستغرام / تيليجرام حسب الباقة) مع إدارة منتجات وطلبات." />
+            <FaqItem question="هل هناك فترة تجربة مجانية؟" answer="نعم — تجربة مجانية لمدة 7 أيام لاختبار المنصة قبل الاشتراك." />
+            <FaqItem question="ماذا يحدث إذا لم يعرف البوت الإجابة؟" answer="لا يخترع أسعاراً أو معلومات. يعتذر بلطف ويحوّل الحوار للدعم البشري من صندوق الوارد عند الحاجة." />
           </div>
         </div>
       </section>
@@ -570,7 +602,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
                 <span className="text-lg font-bold">Xo Bot</span>
               </div>
               <p className="text-slate-400 text-sm leading-relaxed">
-                الحل الأمثل للمتاجر الإلكترونية العربية. خدمة عملاء ذكية، آلية، وسريعة.
+                بوت مبيعات عربي لمتاجر السوشيال ميديا — فيسبوك، إنستغرام، وتيليجرام في لوحة واحدة.
               </p>
             </div>
 

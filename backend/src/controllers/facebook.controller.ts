@@ -215,8 +215,9 @@ const extractOrderData = (text: string): { orderData: any | null; cleanText: str
         cleanText = cleanText.replace(/\n{3,}/g, '\n\n').trim();
         
         logger.info('ORDER_DATA extracted from Facebook reply', {
-          customerName: orderData.customerName,
-          customerPhone: orderData.customerPhone
+          hasName: Boolean(orderData.customerName),
+          hasPhone: Boolean(orderData.customerPhone),
+          productsCount: Array.isArray(orderData.products) ? orderData.products.length : 0,
         });
         
         return { orderData, cleanText };
@@ -289,7 +290,7 @@ const sendFacebookMessage = async (pageId: string, recipientId: string, message:
     logger.info('Sending Text message via Facebook Graph API', {
       pageId,
       recipientId,
-      messagePayload: { text: message }
+      messageLength: (message || '').length,
     });
     const url =
       `https://graph.facebook.com/v21.0/${encodeURIComponent(pageId)}/messages` +
@@ -538,7 +539,7 @@ const processFacebookMessage = async (event: any) => {
     logger.info('Processing Facebook message', {
       userId,
       merchantId,
-      messageText: (messageText || '').substring(0, 50),
+      messageLength: (messageText || '').length,
       hasImage: !!imageAttachmentUrl,
       hasAudio: !!audioAttachmentUrl
     });
@@ -561,7 +562,7 @@ const processFacebookMessage = async (event: any) => {
         logger.info('Facebook voice transcribed', {
           merchantId,
           userId,
-          textPreview: voiceResult.transcript?.text?.substring(0, 80),
+          transcriptLength: voiceResult.transcript?.text?.length || 0,
           model: voiceResult.transcript?.model
         });
       }
@@ -597,7 +598,9 @@ const processFacebookMessage = async (event: any) => {
             } else {
               messageText = `[تحليل صورة العميل: "${analysis.description}" — لم يُعثر على منتج مطابق في المتجر]\n${messageText || 'كم سعر هذا المنتج؟'}`;
             }
-            console.log('[processFacebookMessage] Image analyzed, augmented messageText:', messageText.substring(0, 200));
+            console.log('[processFacebookMessage] Image analyzed', {
+              messageLength: messageText.length,
+            });
           }
         }
       } catch (imgErr) {
@@ -837,7 +840,7 @@ const processFacebookMessage = async (event: any) => {
 
     console.log('[processFacebookMessage] Conversation ready for NEW orchestrator:', { 
       conversationId, 
-      messageText: messageText.substring(0, 50),
+      messageLength: messageText.length,
       recentMessagesCount: recentMessages.length,
       hasConversationState: Object.keys(conversationState).length > 0
     }); 
@@ -912,7 +915,7 @@ const processFacebookMessage = async (event: any) => {
 
       if (result.next_action === 'confirm_order' && responseText.includes('[ORDER_DATA]')) {
         console.log('[processFacebookMessage] Full AI Mode: Order confirmed, ORDER_DATA attached:', {
-          name: entities.name,
+          hasName: Boolean(entities.name),
           productsCount: products.length,
           next_action: result.next_action
         });
@@ -936,7 +939,6 @@ const processFacebookMessage = async (event: any) => {
       console.log('[processFacebookMessage] NEW Orchestrator response generated:', {
         conversationId,
         responseLength: responseText.length,
-        responsePreview: responseText.substring(0, 100),
         pipelineUsed: result.meta.pipelineUsed,
         aiCallsCount: result.meta.aiCallsCount,
         processingTimeMs: result.meta.processingTimeMs,
@@ -1063,7 +1065,7 @@ const processFacebookMessage = async (event: any) => {
       
       console.log('[processFacebookMessage] ORDER_DATA detected, processing order:', {
         merchantId,
-        customerName: orderData.customerName,
+        hasName: Boolean(orderData.customerName),
         productsCount: orderData.products.length
       });
       
@@ -1238,7 +1240,7 @@ const processFacebookMessage = async (event: any) => {
                 orderData.total || 0,
                 settings.store_currency || 'USD',
                 'pending',
-                'bot',
+                'facebook',
                 combinedNotes
               ]
             : [
@@ -1250,7 +1252,7 @@ const processFacebookMessage = async (event: any) => {
                 orderData.total || 0,
                 settings.store_currency || 'USD',
                 'pending',
-                'bot',
+                'facebook',
                 combinedNotes
               ];
 
@@ -1414,7 +1416,7 @@ const processFacebookMessage = async (event: any) => {
         console.log('🧹 Facebook: Full state reset after order. last_order saved:', {
           orderId,
           productName: confirmedProductName,
-          customerName: confirmedCustomerName
+          hasCustomerName: Boolean(confirmedCustomerName),
         });
 
         // 💾 Persist reset state + last_order (was only in memory — next message must load this from DB)

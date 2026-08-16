@@ -40,6 +40,7 @@ import { initializeTools } from './services/tools/index.js';
 import { startSyncScheduler } from './services/syncScheduler.js';
 import { startAbandonedCheckoutScheduler } from './services/abandonedCheckout/index.js';
 import { startContentPublishingScheduler } from './services/contentPublishing/index.js';
+import { startLifecycleEmailsScheduler } from './services/lifecycleEmails/index.js';
 import contentPublishingRoutes from './routes/contentPublishing.routes.js';
 import { startInboxRealtime, stopInboxRealtime } from './services/inbox/inboxRealtime.js';
 
@@ -340,6 +341,9 @@ async function startServer() {
 
       startContentPublishingScheduler(1);
       console.log('📣 Content publishing scheduler started (every 1 minute)');
+
+      startLifecycleEmailsScheduler(15);
+      console.log('📧 Lifecycle emails scheduler started (every 15 minutes)');
     });
   } catch (error) {
     console.error('❌ Failed to connect to database:', error);

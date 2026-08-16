@@ -314,7 +314,9 @@ export const guardReply = (input: GuardInput): GuardResult => {
   // ==================== CHECK 1: Internal Repetition ====================
   const { hasRepetition, repeatedPhrase } = hasRepetitivePhrases(cleanedReply);
   if (hasRepetition) {
-    violations.push(`Reply contains repetitive content: "${repeatedPhrase?.substring(0, 30)}..."`);
+    violations.push(
+      `Reply contains repetitive content (phraseLength=${repeatedPhrase?.length || 0})`
+    );
     cleanedReply = removeRepetition(cleanedReply);
     warnings.push('Removed repetitive phrases');
   }
