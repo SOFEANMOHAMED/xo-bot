@@ -7,6 +7,7 @@ import { generateLog } from '../services/mockBackend';
 import { apiService } from '../services/api';
 import { Product } from '../types';
 import { logger } from '../utils/logger';
+import { useWhatsAppPairing } from '../hooks/useWhatsAppPairing';
 
 interface FacebookPageInfo {
   id: string;
@@ -100,6 +101,8 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
   });
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
   const [whatsappAutoReply, setWhatsappAutoReply] = useState(false);
+  const [whatsappQrDataUrl, setWhatsappQrDataUrl] = useState<string | null>(null);
+  const [whatsappPairingError, setWhatsappPairingError] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSyncingOrders, setIsSyncingOrders] = useState(false);
   
@@ -154,6 +157,54 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
     loadTelegramBots();
     loadSocialCommentTemplates();
   }, []);
+
+  useEffect(() => {
+    if (!whatsappStatus.isConnected) return;
+    void apiService.getWhatsAppStatus().then((status) => {
+      if (typeof status.autoReplyEnabled === 'boolean') {
+        setWhatsappAutoReply(status.autoReplyEnabled);
+      }
+    }).catch(() => undefined);
+  }, [whatsappStatus.isConnected]);
+
+  useEffect(() => {
+    if (!showWhatsAppModal || whatsappStatus.isConnected || whatsappQrDataUrl || whatsappPairingError) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      setWhatsappPairingError((prev) => prev || 'تأخر ظهور الرمز. اضغط «تحديث الرمز» للمحاولة من جديد.');
+      setIsLoadingWhatsApp(false);
+    }, 25000);
+    return () => clearTimeout(timer);
+  }, [showWhatsAppModal, whatsappStatus.isConnected, whatsappQrDataUrl, whatsappPairingError]);
+
+  useWhatsAppPairing({
+    enabled: showWhatsAppModal && !whatsappStatus.isConnected,
+    onEvent: (event) => {
+      if (event.type === 'qr') {
+        setWhatsappQrDataUrl(event.qrDataUrl);
+        setWhatsappPairingError(null);
+        setIsLoadingWhatsApp(false);
+        return;
+      }
+      if (event.type === 'status' && event.status === 'connected') {
+        setWhatsappStatus({
+          isConnected: true,
+          accountName: event.phoneNumber || whatsappStatus.accountName || '',
+          lastSync: new Date()
+        });
+        setShowWhatsAppModal(false);
+        setWhatsappQrDataUrl(null);
+        addLog(generateLog('WhatsApp', 'تم ربط واتساب بنجاح', 'success'));
+        showNotification?.('تم ربط واتساب بنجاح', 'success');
+        return;
+      }
+      if (event.type === 'error') {
+        setWhatsappPairingError(event.message);
+        setIsLoadingWhatsApp(false);
+      }
+    }
+  });
 
   useEffect(() => {
     if (fbLinkingSessionId) {
@@ -743,7 +794,8 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
   const connectedChannelCount =
     (fbStatus.isConnected ? 1 : 0) +
     (igStatus.isConnected ? 1 : 0) +
-    (telegramBots.length > 0 ? 1 : 0);
+    (telegramBots.length > 0 ? 1 : 0) +
+    (whatsappStatus.isConnected ? 1 : 0);
   const singleChannelPlan = caps.maxTotalChannels === 1;
   const showTelegramCard = caps.maxTelegramBots > 0 || telegramBots.length > 0;
   const showShopifyCard = caps.maxShopifyStores > 0 || shopifyStatus.isConnected;
@@ -764,7 +816,7 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
 
       {singleChannelPlan && caps.hasSalesBot && (
         <div className="rounded-xl border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50 dark:bg-indigo-900/20 px-4 py-3 text-sm text-indigo-900 dark:text-indigo-100">
-          باقتك تسمح بربط <strong>قناة مبيعات واحدة</strong> فقط (فيسبوك أو إنستغرام أو تيليجرام).
+          باقتك تسمح بربط <strong>قناة مبيعات واحدة</strong> فقط (فيسبوك أو إنستغرام أو تيليجرام أو واتساب).
           {connectedChannelCount >= 1
             ? ' لربط قناة أخرى، افصل القناة الحالية أولاً أو رقِّ الباقة.'
             : ' اختر القناة التي تناسبك.'}
@@ -1196,8 +1248,7 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
 
         {/* WhatsApp Card */}
         {showWhatsAppCard && (
-        <div className="relative pointer-events-none opacity-60 grayscale bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 transition-all duration-300 overflow-hidden">
-          <div className="absolute top-4 left-4 bg-gray-700 dark:bg-gray-600 text-white text-xs font-bold px-3 py-1 rounded-full z-10 border border-gray-600 shadow-sm">قريباً</div>
+        <div className={`bg-white dark:bg-gray-800 rounded-2xl shadow-sm border transition-all duration-300 overflow-hidden ${whatsappStatus.isConnected ? 'border-green-200 dark:border-green-900 ring-1 ring-green-100 dark:ring-green-900/50' : 'border-gray-100 dark:border-gray-700'}`}>
           <div className="p-6 border-b border-gray-100 dark:border-gray-700 bg-gradient-to-l from-white to-green-50/50 dark:from-gray-800 dark:to-green-900/20 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className={`p-2 rounded-xl transition-colors ${whatsappStatus.isConnected ? 'bg-green-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}`}>
@@ -1224,9 +1275,18 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
           <div className="p-6">
             {!whatsappStatus.isConnected ? (
               <div className="text-center py-6">
-                <p className="text-gray-600 dark:text-gray-400 mb-6 text-sm max-w-xs mx-auto">اربط حساب WhatsApp Business لتمكين الردود التلقائية الذكية على الرسائل.</p>
+                <p className="text-gray-600 dark:text-gray-400 mb-6 text-sm max-w-xs mx-auto">امسح رمز QR من واتساب لربط رقم المتجر بالبوت والرد تلقائياً على الزبائن.</p>
                 <button 
-                  onClick={() => setShowWhatsAppModal(true)}
+                  onClick={() => {
+                    if (singleChannelPlan && connectedChannelCount >= 1) {
+                      showNotification?.('باقتك تسمح بقناة واحدة. افصل القناة الحالية أولاً.', 'warning');
+                      return;
+                    }
+                    setWhatsappQrDataUrl(null);
+                    setWhatsappPairingError(null);
+                    setIsLoadingWhatsApp(true);
+                    setShowWhatsAppModal(true);
+                  }}
                   disabled={isLoadingWhatsApp}
                   className="bg-[#25D366] text-white px-6 py-2.5 rounded-xl hover:bg-green-600 transition-all shadow-md shadow-green-100 dark:shadow-none flex items-center gap-2 mx-auto disabled:opacity-70 disabled:cursor-not-allowed"
                 >
@@ -1274,17 +1334,20 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
                         className="sr-only peer"
                         checked={whatsappAutoReply}
                         onChange={async (e) => {
+                          const next = e.target.checked;
+                          setWhatsappAutoReply(next);
                           try {
-                            await apiService.updateWhatsAppSettings({ autoReplyEnabled: e.target.checked });
-                            setWhatsappAutoReply(e.target.checked);
-                            addLog(generateLog('WhatsApp', e.target.checked ? 'تم تفعيل الرد التلقائي' : 'تم إيقاف الرد التلقائي', 'info'));
+                            await apiService.updateWhatsAppSettings({ autoReplyEnabled: next });
+                            addLog(generateLog('WhatsApp', next ? 'تم تفعيل الرد التلقائي' : 'تم إيقاف الرد التلقائي', 'info'));
                           } catch (error: any) {
+                            setWhatsappAutoReply(!next);
                             logger.error('Failed to update WhatsApp settings:', error);
                             addLog(generateLog('WhatsApp', `فشل تحديث الإعدادات: ${error.message}`, 'error'));
+                            showNotification?.('تعذر تحديث الرد التلقائي', 'error');
                           }
                         }}
                       />
-                      <div className="w-9 h-5 bg-gray-200 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-brand"></div>
+                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-green-300 dark:peer-focus:ring-green-800 rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-500 peer-checked:bg-green-500"></div>
                     </label>
                   </div>
                 </div>
@@ -1386,6 +1449,63 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
                 className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold shadow-md shadow-red-200 dark:shadow-none transition-colors"
               >
                 تأكيد الإلغاء
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {showWhatsAppModal && ReactDOM.createPortal(
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9999] flex items-center justify-center p-4" style={{ margin: 0 }}>
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 border border-gray-100 dark:border-gray-700">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">ربط واتساب</h3>
+              <button
+                onClick={() => {
+                  setShowWhatsAppModal(false);
+                  setWhatsappQrDataUrl(null);
+                  setWhatsappPairingError(null);
+                  setIsLoadingWhatsApp(false);
+                }}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              >
+                <XCircle size={24} />
+              </button>
+            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-5">
+              افتح واتساب على الجوال ← الأجهزة المرتبطة ← مسح رمز QR. الرقم يبقى على هاتفك، والمنصة تظهر كجهاز مرتبط.
+            </p>
+            <div className="flex flex-col items-center gap-4">
+              {whatsappQrDataUrl ? (
+                <img
+                  src={whatsappQrDataUrl}
+                  alt="رمز QR لواتساب"
+                  className="w-64 h-64 rounded-xl border border-gray-200 dark:border-gray-600 bg-white p-2"
+                />
+              ) : (
+                <div className="w-64 h-64 rounded-xl border border-dashed border-gray-300 dark:border-gray-600 flex flex-col items-center justify-center text-gray-500 dark:text-gray-400">
+                  <RefreshCw size={28} className="animate-spin mb-3" />
+                  <span className="text-sm">جاري تجهيز الرمز...</span>
+                </div>
+              )}
+              {whatsappPairingError && (
+                <p className="text-sm text-red-600 dark:text-red-400 text-center">{whatsappPairingError}</p>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setWhatsappQrDataUrl(null);
+                  setWhatsappPairingError(null);
+                  setIsLoadingWhatsApp(true);
+                  void apiService.startWhatsAppWebPairing().catch((error: Error) => {
+                    setWhatsappPairingError(error.message || 'تعذر تحديث الرمز');
+                    setIsLoadingWhatsApp(false);
+                  });
+                }}
+                className="text-sm font-medium text-green-700 dark:text-green-400 hover:underline"
+              >
+                تحديث الرمز
               </button>
             </div>
           </div>

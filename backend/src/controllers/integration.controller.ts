@@ -20,7 +20,7 @@ export const getIntegrations = async (
   next: NextFunction
 ) => {
   try {
-    const [fbResult, shopifyResult, telegramResult, whatsappResult, igResult] = await Promise.all([
+    const [fbResult, shopifyResult, telegramResult, whatsappResult, igResult, whatsappWebResult] = await Promise.all([
       pool.query(
         `SELECT page_id, page_name, auto_reply_messenger, auto_reply_comments, last_sync,
                 comment_reply_template, comment_dm_template, send_dm_on_comment,
@@ -44,6 +44,13 @@ export const getIntegrations = async (
         `SELECT ig_user_id, ig_username, auto_reply_comments, auto_reply_dm, send_dm_on_comment,
                 comment_reply_template, comment_dm_template, comment_automation_mode, created_at
          FROM instagram_accounts WHERE merchant_id = $1 LIMIT 1`,
+        [req.merchantId]
+      ).catch(() => ({ rows: [] })),
+      pool.query(
+        `SELECT phone_number, auto_reply_enabled, last_connected_at, status
+         FROM whatsapp_web_sessions
+         WHERE merchant_id = $1 AND status = 'connected'
+         LIMIT 1`,
         [req.merchantId]
       ).catch(() => ({ rows: [] }))
     ]);
@@ -101,11 +108,20 @@ export const getIntegrations = async (
           lastSync: shopifyResult.rows[0].last_sync
         } : { isConnected: false },
         telegram: telegramInfo,
-        whatsapp: whatsappResult.rows.length > 0 ? {
+        whatsapp: whatsappWebResult.rows.length > 0 ? {
+          isConnected: true,
+          accountName: whatsappWebResult.rows[0].phone_number,
+          platformId: whatsappWebResult.rows[0].phone_number,
+          lastSync: whatsappWebResult.rows[0].last_connected_at,
+          connectionMode: 'web',
+          autoReplyEnabled: whatsappWebResult.rows[0].auto_reply_enabled === true
+        } : whatsappResult.rows.length > 0 ? {
           isConnected: true,
           accountName: whatsappResult.rows[0].phone_number,
           platformId: whatsappResult.rows[0].phone_number_id,
-          lastSync: whatsappResult.rows[0].last_sync
+          lastSync: whatsappResult.rows[0].last_sync,
+          connectionMode: 'cloud',
+          autoReplyEnabled: whatsappResult.rows[0].auto_reply_enabled === true
         } : { isConnected: false },
         instagram: igResult.rows.length > 0 ? {
           isConnected: true,

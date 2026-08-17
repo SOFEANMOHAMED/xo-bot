@@ -110,9 +110,9 @@ export const checkMarketingImageLimit = async (
   }
 };
 
-async function assertChannelSlotAvailable(
+export async function assertChannelSlotAvailable(
   merchantId: string,
-  channel: 'facebook' | 'instagram' | 'telegram'
+  channel: 'facebook' | 'instagram' | 'telegram' | 'whatsapp'
 ) {
   const limits = await getMerchantPlanLimits(merchantId);
 
@@ -157,11 +157,23 @@ async function assertChannelSlotAvailable(
     }
   }
 
+  if (channel === 'whatsapp') {
+    const currentCount = await getWhatsAppAccountsCount(merchantId);
+    if (!isWithinLimit(currentCount, limits.maxWhatsAppAccounts)) {
+      throw createError(
+        'واتساب غير متاح في باقتك الحالية، أو وصلت إلى الحد الأقصى للحسابات. يرجى ترقية الخطة.',
+        403,
+        true,
+        'WHATSAPP_ACCOUNTS_LIMIT'
+      );
+    }
+  }
+
   if (limits.maxTotalChannels !== -1) {
     const total = await getTotalChannelsCount(merchantId);
     if (!isWithinLimit(total, limits.maxTotalChannels)) {
       throw createError(
-        `باقتك تسمح بربط قناة واحدة فقط (فيسبوك أو إنستغرام أو تيليجرام). افصل القناة الحالية أولاً أو رقِّ الباقة.`,
+        `باقتك تسمح بربط قناة واحدة فقط (فيسبوك أو إنستغرام أو تيليجرام أو واتساب). افصل القناة الحالية أولاً أو رقِّ الباقة.`,
         403,
         true,
         'TOTAL_CHANNELS_LIMIT'
@@ -215,17 +227,7 @@ export const checkWhatsAppAccountsLimit = async (
       return next(createError('Unauthorized', 401));
     }
 
-    const limits = await getMerchantPlanLimits(merchantId);
-    const currentCount = await getWhatsAppAccountsCount(merchantId);
-
-    if (!isWithinLimit(currentCount, limits.maxWhatsAppAccounts)) {
-      const limitText = limits.maxWhatsAppAccounts === -1 ? 'غير محدود' : limits.maxWhatsAppAccounts.toString();
-      return next(createError(
-        `لقد وصلت إلى الحد الأقصى لحسابات WhatsApp (${limitText}). يرجى ترقية خطتك لإضافة المزيد من الحسابات.`,
-        403
-      ));
-    }
-
+    await assertChannelSlotAvailable(merchantId, 'whatsapp');
     next();
   } catch (error) {
     next(error);

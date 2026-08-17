@@ -186,11 +186,19 @@ export async function getInstagramAccountsCount(merchantId: string): Promise<num
 
 export async function getWhatsAppAccountsCount(merchantId: string): Promise<number> {
   try {
-    const result = await pool.query(
-      `SELECT COUNT(*)::int as count FROM whatsapp_accounts WHERE merchant_id = $1 AND is_verified = true`,
-      [merchantId]
-    );
-    return result.rows[0]?.count || 0;
+    const [cloud, web] = await Promise.all([
+      pool.query(
+        `SELECT COUNT(*)::int as count FROM whatsapp_accounts WHERE merchant_id = $1 AND is_verified = true`,
+        [merchantId]
+      ),
+      pool.query(
+        `SELECT COUNT(*)::int as count
+         FROM whatsapp_web_sessions
+         WHERE merchant_id = $1 AND status = 'connected'`,
+        [merchantId]
+      ).catch(() => ({ rows: [{ count: 0 }] }))
+    ]);
+    return (cloud.rows[0]?.count || 0) + (web.rows[0]?.count || 0);
   } catch (error) {
     logger.error('Error getting WhatsApp accounts count', error as Error, { merchantId });
     return 0;
@@ -236,12 +244,13 @@ export async function getTelegramBotsCount(merchantId: string): Promise<number> 
   }
 }
 
-/** FB pages + IG accounts + active Telegram bots */
+/** FB pages + IG accounts + active Telegram bots + WhatsApp */
 export async function getTotalChannelsCount(merchantId: string): Promise<number> {
-  const [fb, ig, tg] = await Promise.all([
+  const [fb, ig, tg, wa] = await Promise.all([
     getFacebookPagesCount(merchantId),
     getInstagramAccountsCount(merchantId),
-    getTelegramBotsCount(merchantId)
+    getTelegramBotsCount(merchantId),
+    getWhatsAppAccountsCount(merchantId)
   ]);
-  return fb + ig + tg;
+  return fb + ig + tg + wa;
 }

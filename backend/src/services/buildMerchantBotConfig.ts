@@ -4,7 +4,7 @@
  */
 
 import type { MerchantConfig, Persona } from '../core/types.js';
-import { shouldAppendOrderData } from './salesgpt/orderConfirmationPolicy.js';
+import { shouldAppendOrderData, sanitizeCollectedText } from './salesgpt/orderConfirmationPolicy.js';
 
 export type MerchantSettingsLike = {
   store_name?: string | null;
@@ -77,10 +77,14 @@ export function appendOrderDataIfConfirmed(params: {
     channelLabel,
   } = params;
 
+  const name = sanitizeCollectedText(entities.name);
+  const phone = sanitizeCollectedText(entities.phone);
+  const address = sanitizeCollectedText(entities.address);
+
   const hasAllOrderInfo = !!(
-    entities.name &&
-    entities.phone &&
-    entities.address &&
+    name &&
+    phone &&
+    address &&
     productIds.length > 0
   );
 
@@ -89,9 +93,9 @@ export function appendOrderDataIfConfirmed(params: {
   }
 
   const fullAIOrderData = {
-    customerName: entities.name,
-    customerPhone: entities.phone,
-    customerAddress: entities.address,
+    customerName: name,
+    customerPhone: phone,
+    customerAddress: address,
     customerEmail: entities.email || null,
     deliveryTime: entities.delivery_time || null,
     notes: `Order via ${channelLabel} | Product: ${entities.product_query || 'N/A'}${entities.color ? ` | Color: ${entities.color}` : ''}${entities.size ? ` | Size: ${entities.size}` : ''}`,

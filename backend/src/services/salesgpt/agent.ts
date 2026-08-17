@@ -34,6 +34,9 @@ import { getCurrencyDisplayName } from '../../utils/currencyDisplayName.js';
 import { detectEscalationMarker, stripInternalControlMarkers } from '../../response/sanitize-reply.js';
 import {
     isProductInfoRequest,
+    isPlaceholderCollectedValue,
+    sanitizeCollectedText,
+    sanitizeCollectedSnapshot,
     resolveOrderNextAction,
     sanitizeProductDescriptionForPrompt
 } from './orderConfirmationPolicy.js';
@@ -43,7 +46,7 @@ import {
     type CustomerRequestSignals
 } from './customerRequest.js';
 import { formatColorOptionsForDisplay } from '../../catalog/color-options.js';
-import { isColorInProductCatalog } from './orderColorPolicy.js';
+import { extractColorFromUserText, isColorInProductCatalog } from './orderColorPolicy.js';
 
 /** Values the sales-response model may return in JSON `next_action` */
 const SALESGPT_MODEL_NEXT_ACTIONS = new Set([
@@ -255,8 +258,7 @@ export class SalesGPTAgent {
 
         // Restore collected info from conversation state
         if (conversationState.extracted_entities) {
-            this.state.collectedInfo = {
-                ...this.state.collectedInfo,
+            const restored = sanitizeCollectedSnapshot({
                 product_name: conversationState.extracted_entities.product_query,
                 color: conversationState.extracted_entities.color,
                 size: conversationState.extracted_entities.size,
@@ -264,6 +266,11 @@ export class SalesGPTAgent {
                 name: conversationState.extracted_entities.name,
                 phone: conversationState.extracted_entities.phone,
                 address: conversationState.extracted_entities.address
+            });
+            this.state.collectedInfo = {
+                ...this.state.collectedInfo,
+                ...restored,
+                product_id: sanitizeCollectedText(conversationState.extracted_entities.product_id)
             };
         }
 
@@ -387,9 +394,14 @@ export class SalesGPTAgent {
             });
         }
 
-        // Step 4.1: Image safety — honor send_image only when model classified a photo ask.
-        // Fail closed when customer_request is missing (degraded/AI parse failure).
-        const allowSendImage = customerRequest?.wantsPhoto === true;
+        // Step 4.1: Image safety — honor send_image when the model asked for a photo
+        // OR the customer answered a color after we offered to send one.
+        const colorReply = this.isCatalogOrShortColorReply(messageText);
+        const offeredPhoto = this.lastAssistantOfferedPhoto() || this.previousUserAskedForPhoto();
+        const askedColorChoice = this.lastAssistantAskedColorChoice();
+        const preferSendImage = colorReply && offeredPhoto;
+        const allowSendImage =
+            customerRequest?.wantsPhoto === true || preferSendImage;
         if (nextAction === 'send_image' && !allowSendImage) {
             nextAction = 'present_product';
             intent = 'product_query';
@@ -397,6 +409,10 @@ export class SalesGPTAgent {
                 aiNextAction,
                 messageLength: messageText.length,
             });
+        }
+        if (preferSendImage) {
+            nextAction = 'send_image';
+            intent = 'product_query';
         }
 
         // Step 4.1b: Alternatives → stay in product presentation (never invent "only one product").
@@ -419,7 +435,9 @@ export class SalesGPTAgent {
             responseText: response,
             // undefined → policy falls back to heuristic; boolean → model owns the classification
             modelAsksProductInfo:
-                customerRequest === null ? undefined : customerRequest.asksProductInfo
+                customerRequest === null ? undefined : customerRequest.asksProductInfo,
+            missingFields: orderCompleteness.missing,
+            preferSendImage: preferSendImage || (colorReply && askedColorChoice && !orderCompleteness.complete)
         });
         if (resolvedOrder.nextAction !== nextAction || resolvedOrder.responseText !== response) {
             logger.debug('SalesGPT: order confirmation policy applied', {
@@ -440,7 +458,7 @@ export class SalesGPTAgent {
             nextAction === 'collect_info'
         ) {
             intent = 'order';
-        } else if (nextAction === 'present_product') {
+        } else if (nextAction === 'present_product' || nextAction === 'send_image') {
             intent = 'product_query';
         } else if (customerRequest?.wantsAlternatives) {
             intent = 'browse';
@@ -500,20 +518,20 @@ export class SalesGPTAgent {
     private getOrderFieldCompleteness(): { complete: boolean; missing: string[] } {
         const { name, phone, address, product_name, color, size } = this.state.collectedInfo;
         const missing: string[] = [];
-        if (!product_name) missing.push('product_name');
-        if (!name) missing.push('name');
-        if (!phone) missing.push('phone');
-        if (!address) missing.push('address');
-        if (this.currentProductsHaveColors && !color) missing.push('color');
+        if (isPlaceholderCollectedValue(product_name)) missing.push('product_name');
+        if (isPlaceholderCollectedValue(name)) missing.push('name');
+        if (isPlaceholderCollectedValue(phone)) missing.push('phone');
+        if (isPlaceholderCollectedValue(address)) missing.push('address');
+        if (this.currentProductsHaveColors && isPlaceholderCollectedValue(color)) missing.push('color');
         if (
             this.currentProductsHaveColors &&
-            color &&
+            !isPlaceholderCollectedValue(color) &&
             this.currentProductColors.length > 0 &&
             !isColorInProductCatalog(color, this.currentProductColors)
         ) {
             missing.push('color');
         }
-        if (this.currentProductsHaveSizes && !size) missing.push('size');
+        if (this.currentProductsHaveSizes && isPlaceholderCollectedValue(size)) missing.push('size');
         return { complete: missing.length === 0, missing };
     }
 
@@ -530,7 +548,7 @@ export class SalesGPTAgent {
      */
     private mergeCollectedInfo(newInfo: Partial<SalesGPTState['collectedInfo']>): void {
         for (const [key, value] of Object.entries(newInfo)) {
-            if (value === null || value === undefined || value === '') continue;
+            if (isPlaceholderCollectedValue(value)) continue;
             if (key === 'quantity') {
                 const n = typeof value === 'number' ? value : parseInt(String(value), 10);
                 if (!Number.isNaN(n) && n > 0) {
@@ -543,8 +561,56 @@ export class SalesGPTAgent {
                     continue;
                 }
             }
-            (this.state.collectedInfo as any)[key] = value;
+            (this.state.collectedInfo as any)[key] = sanitizeCollectedText(value) ?? value;
         }
+    }
+
+    private getLastAssistantHistoryText(): string {
+        for (let i = this.state.conversationHistory.length - 1; i >= 0; i--) {
+            const line = this.state.conversationHistory[i];
+            if (line.startsWith('المستخدم:') || line.startsWith('نظام:')) continue;
+            return line;
+        }
+        return '';
+    }
+
+    private previousUserAskedForPhoto(): boolean {
+        const userTurns = this.state.conversationHistory.filter((line) =>
+            line.startsWith('المستخدم:')
+        );
+        if (userTurns.length < 2) return false;
+        return /صورة|صوره|صور |وريني|فرجيني|ارني|أرني|photo|picture|image/i.test(
+            userTurns[userTurns.length - 2]
+        );
+    }
+
+    private lastAssistantOfferedPhoto(): boolean {
+        return /صورة|صوره|صور |وريني|فرجيني|سأرسل|رح أرسل|رح ارسل|رح ابعت|أرسلك|ابعثلك|photo|picture|image/i.test(
+            this.getLastAssistantHistoryText()
+        );
+    }
+
+    private lastAssistantAskedColorChoice(): boolean {
+        return /لون|ألوان|الالوان|الألوان|color|colours?|أسود|اسود|أحمر|احمر|black|red/i.test(
+            this.getLastAssistantHistoryText()
+        );
+    }
+
+    private isCatalogOrShortColorReply(messageText: string): boolean {
+        if (!messageText?.trim()) return false;
+        if (this.currentProductColors.length > 0) {
+            if (extractColorFromUserText(messageText, this.currentProductColors)) {
+                return true;
+            }
+        }
+        const trimmed = messageText.trim();
+        if (trimmed.split(/\s+/).length > 3) return false;
+        if (/(طلب|اشتري|عنوان|هاتف|تأكيد|أكد|confirm|order|buy|yes|نعم)/i.test(trimmed)) {
+            return false;
+        }
+        return /^(أحمر|احمر|أسود|اسود|أبيض|ابيض|أزرق|ازرق|أخضر|اخضر|ذهبي|فضي|red|black|white|blue|green|gold|silver)$/i.test(
+            trimmed
+        );
     }
 
     /**
@@ -724,7 +790,7 @@ export class SalesGPTAgent {
 
         // Build collected info summary
         const collectedSummary = Object.entries(this.state.collectedInfo)
-            .filter(([_, v]) => v !== null && v !== undefined)
+            .filter(([_, v]) => !isPlaceholderCollectedValue(v))
             .map(([k, v]) => `${k}: ${v}`)
             .join(', ');
 
@@ -775,9 +841,13 @@ export class SalesGPTAgent {
                 enColorSizeRules += '- 🚨 This product has multiple sizes! If customer hasn\'t chosen one → you MUST ask for their preferred size before completing the order (show available sizes from product data)\n';
             }
             arColorSizeRules += '- 🚨 لا تؤكد الطلب نهائياً إلا بعد اختيار ' + (hasColors && hasSizes ? 'اللون والمقاس' : hasColors ? 'اللون' : 'المقاس') + '\n';
+            arColorSizeRules += '- اختيار لون بعد أن عرضت إرسال صورة ≠ شراء. next_action: send_image و wants_photo=true. ممنوع await_confirmation.\n';
             arColorSizeRules += '- إذا كل المعلومات مكتملة (اسم + هاتف + عنوان + منتج' + (hasColors ? ' + اللون' : '') + (hasSizes ? ' + المقاس' : '') + ') → اعرض ملخص الطلب واطلب تأكيداً صريحاً (next_action: await_confirmation). لا تستخدم confirm_order قبل أن يقول العميل نعم/أكد\n';
+            arColorSizeRules += '- ممنوع ملخص تأكيد أو كلمة null إذا كان الاسم أو الهاتف أو العنوان ناقصاً.\n';
             enColorSizeRules += '- 🚨 NEVER confirm an order without ' + (hasColors && hasSizes ? 'color and size' : hasColors ? 'color' : 'size') + ' selection\n';
+            enColorSizeRules += '- A color reply after you offered a photo is NOT a purchase. next_action: send_image and wants_photo=true. Never await_confirmation.\n';
             enColorSizeRules += '- If all info complete (name + phone + address + product' + (hasColors ? ' + color' : '') + (hasSizes ? ' + size' : '') + ') → show a summary and ask for explicit confirmation (next_action: await_confirmation). NEVER use confirm_order until the customer says yes/confirm\n';
+            enColorSizeRules += '- Never write a confirmation summary or the word null when name, phone, or address is missing.\n';
         } else {
             arColorSizeRules = '- ⚠️ هذا المنتج ليس فيه ألوان ولا مقاسات. لا تسأل العميل عن لون أو مقاس نهائياً!\n- إذا كل المعلومات مكتملة (اسم + هاتف + عنوان + منتج) → اعرض الملخص واطلب تأكيداً صريحاً (next_action: await_confirmation). ممنوع confirm_order قبل موافقة العميل\n';
             enColorSizeRules = '- ⚠️ This product does NOT have colors or sizes. Do NOT ask the customer about color or size at all!\n- If all info complete (name + phone + address + product) → show a summary and ask for explicit confirmation (next_action: await_confirmation). NEVER use confirm_order until the customer says yes/confirm\n';
@@ -814,7 +884,8 @@ ${conversationHistoryText || 'هذه أول رسالة'}
 - إذا wants_photo=true فقط → next_action="send_image".
 - ready_to_confirm=true فقط عندما يوافق العميل صراحة على تثبيت الطلب (نعم/أكد)، وليس عند لفظة مجاملة مثل «تمام» داخل سؤال آخر.
 - إذا العميل قدم اسماً/هاتفاً/عنواناً → اشكره ثم اسأل المعلومة التالية أو اعرض ملخصاً لـ await_confirmation.
-- في extracted_info: املأ من تاريخ المحادثة والرسالة الحالية معاً؛ null لما لم يُذكر.
+- في extracted_info: استخدم JSON null فقط (وليس النص "null") لما لم يُذكر.
+- ممنوع await_confirmation أو كتابة «طلبك جاهز للتأكيد» قبل توفر اسم وهاتف وعنوان حقيقيين.
 
 🧭 سياسة الكتالوج:
 - المنتج النشط للتفاصيل العميقة؛ باقي الكتالوج للإجابة عن البدائل بصدق.
@@ -860,7 +931,8 @@ Current customer message: "${messageText}"
 - If wants_photo=true only → next_action="send_image".
 - ready_to_confirm=true only when the customer explicitly affirms placing the order — not polite fillers like "ok" inside another question.
 - If customer provided name/phone/address → acknowledge, then ask next missing field or show await_confirmation summary.
-- In extracted_info: fill from history + current message; null when absent.
+- In extracted_info: fill from history + current message; use JSON null (never the string "null") when absent.
+- Never await_confirmation or write "ready to confirm" until real name, phone, and address exist.
 
 🧭 Catalog policy:
 - Active product for deep detail; rest of catalog for truthful alternatives.
@@ -933,9 +1005,16 @@ Return JSON only:
     ): { intent: Intent; nextAction: string } {
         if (['6', '7', '8'].includes(stageId)) {
             const { name, phone, address, product_name, color, size } = this.state.collectedInfo;
-            const needsColor = this.currentProductsHaveColors && !color;
-            const needsSize = this.currentProductsHaveSizes && !size;
-            if (name && phone && address && product_name && !needsColor && !needsSize) {
+            const needsColor = this.currentProductsHaveColors && isPlaceholderCollectedValue(color);
+            const needsSize = this.currentProductsHaveSizes && isPlaceholderCollectedValue(size);
+            if (
+                !isPlaceholderCollectedValue(name) &&
+                !isPlaceholderCollectedValue(phone) &&
+                !isPlaceholderCollectedValue(address) &&
+                !isPlaceholderCollectedValue(product_name) &&
+                !needsColor &&
+                !needsSize
+            ) {
                 return { intent: 'order', nextAction: 'await_confirmation' };
             }
             return { intent: 'order', nextAction: stageId === '6' ? 'close_sale' : 'collect_info' };

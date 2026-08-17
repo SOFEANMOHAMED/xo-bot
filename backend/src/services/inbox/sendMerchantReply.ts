@@ -12,6 +12,11 @@ import {
 } from '../channels/facebook.adapter.js';
 import { sendTelegramMessage, sendTelegramPhoto } from '../channels/telegram.adapter.js';
 import { toPublicMediaUrl } from './messageMedia.js';
+import {
+  isWhatsAppWebConnected,
+  sendWhatsAppWebImage,
+  sendWhatsAppWebText
+} from '../whatsappWeb/index.js';
 
 export type InboxPlatform =
   | 'facebook_messenger'
@@ -285,6 +290,22 @@ export async function sendMerchantReply(
       }
 
       case 'whatsapp': {
+        if (isWhatsAppWebConnected(merchantId)) {
+          let ok = false;
+          if (imageUrl) {
+            ok = await sendWhatsAppWebImage(merchantId, recipientUserId, imageUrl, text || '');
+          } else if (text) {
+            ok = await sendWhatsAppWebText(merchantId, recipientUserId, text);
+          }
+          return ok
+            ? { delivered: true, source: 'whatsapp_web' }
+            : {
+                delivered: false,
+                source: 'whatsapp_web',
+                errorCode: 'SEND_FAILED',
+                errorMessage: 'فشل إرسال الرسالة عبر واتساب',
+              };
+        }
         const wa = await pool.query(
           `SELECT phone_number_id, access_token
            FROM whatsapp_accounts

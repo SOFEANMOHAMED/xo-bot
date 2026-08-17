@@ -178,44 +178,158 @@ export interface OrderCollectedSnapshot {
   quantity?: number;
 }
 
+const PLACEHOLDER_COLLECTED_VALUES = new Set([
+  'null',
+  'undefined',
+  'none',
+  'n/a',
+  'na',
+  'nil',
+  'unknown',
+  '-',
+  '—',
+  '–',
+  'empty'
+]);
+
+/** True when a model/JSON field is missing or the literal string "null". */
+export function isPlaceholderCollectedValue(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (typeof value === 'number') return !Number.isFinite(value);
+  const text = String(value).trim();
+  if (!text) return true;
+  return PLACEHOLDER_COLLECTED_VALUES.has(text.toLowerCase());
+}
+
+/** Keep real customer text only — drops JSON-null lookalikes. */
+export function sanitizeCollectedText(value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    return undefined;
+  }
+  const text = String(value).trim();
+  if (!text || isPlaceholderCollectedValue(text)) return undefined;
+  return text;
+}
+
+export function sanitizeCollectedSnapshot(
+  info: OrderCollectedSnapshot | Record<string, unknown> | null | undefined
+): OrderCollectedSnapshot {
+  if (!info) return {};
+  const quantityRaw = (info as OrderCollectedSnapshot).quantity;
+  const quantity =
+    typeof quantityRaw === 'number' && quantityRaw > 0
+      ? quantityRaw
+      : undefined;
+  return {
+    name: sanitizeCollectedText(info.name),
+    phone: sanitizeCollectedText(info.phone),
+    address: sanitizeCollectedText(info.address),
+    product_name: sanitizeCollectedText(info.product_name),
+    color: sanitizeCollectedText(info.color),
+    size: sanitizeCollectedText(info.size),
+    quantity
+  };
+}
+
+export function hasRealCustomerIdentity(
+  info: OrderCollectedSnapshot | Record<string, unknown> | null | undefined
+): boolean {
+  const snap = sanitizeCollectedSnapshot(info);
+  return Boolean(snap.name && snap.phone && snap.address);
+}
+
+/** Assistant copy that jumped to checkout with empty/placeholder fields. */
+export function isPrematureCheckoutCopy(text: string): boolean {
+  if (!text?.trim()) return false;
+  if (botReplyAsksForConfirmation(text) || botReplyAnnouncesConfirmation(text)) {
+    return true;
+  }
+  if (/\bnull\b/i.test(text)) return true;
+  return /جاهز\s*(ة)?\s*(للتاكيد|للتأكيد)|طلبك جاهز|ready to confirm/i.test(text);
+}
+
+const MISSING_FIELD_LABELS_AR: Record<string, string> = {
+  name: 'اسمك',
+  phone: 'رقم هاتفك',
+  address: 'عنوان التوصيل',
+  product_name: 'المنتج',
+  product: 'المنتج',
+  color: 'اللون',
+  size: 'المقاس'
+};
+
+const MISSING_FIELD_LABELS_EN: Record<string, string> = {
+  name: 'your name',
+  phone: 'your phone number',
+  address: 'the delivery address',
+  product_name: 'the product',
+  product: 'the product',
+  color: 'the color',
+  size: 'the size'
+};
+
+export function buildCollectMissingFieldsMessage(
+  language: Language,
+  missingFields: string[]
+): string {
+  const first = missingFields.find((field) =>
+    ['name', 'phone', 'address', 'product_name', 'product', 'color', 'size'].includes(field)
+  ) || missingFields[0] || 'name';
+  if (language === 'arabic') {
+    const label = MISSING_FIELD_LABELS_AR[first] || 'المعلومة التالية';
+    return `تمام! حتى نكمّل الطلب أحتاج ${label} 😊`;
+  }
+  const label = MISSING_FIELD_LABELS_EN[first] || 'the next detail';
+  return `Got it! To continue the order I just need ${label}.`;
+}
+
+function displayCollectedText(value: string | undefined): string | undefined {
+  return sanitizeCollectedText(value);
+}
+
 export function buildOrderConfirmedMessage(
   language: Language,
   info: OrderCollectedSnapshot
 ): string {
+  const snap = sanitizeCollectedSnapshot(info);
   if (language === 'arabic') {
-    return `تم تأكيد طلبك${info.name ? ` يا ${info.name}` : ''} 🎉 رح نتواصل معك قريباً لترتيب التوصيل.`;
+    return `تم تأكيد طلبك${snap.name ? ` يا ${snap.name}` : ''} 🎉 رح نتواصل معك قريباً لترتيب التوصيل.`;
   }
-  return `Your order has been confirmed${info.name ? `, ${info.name}` : ''}! 🎉 We'll contact you shortly to arrange delivery.`;
+  return `Your order has been confirmed${snap.name ? `, ${snap.name}` : ''}! 🎉 We'll contact you shortly to arrange delivery.`;
 }
 
 export function buildAwaitConfirmationMessage(
   language: Language,
   info: OrderCollectedSnapshot
 ): string {
-  const qty = info.quantity && info.quantity > 0 ? info.quantity : 1;
+  const snap = sanitizeCollectedSnapshot(info);
+  const qty = snap.quantity && snap.quantity > 0 ? snap.quantity : 1;
   const productLine = [
-    info.product_name || (language === 'arabic' ? 'المنتج' : 'the product'),
-    info.color,
-    info.size
+    snap.product_name || (language === 'arabic' ? 'المنتج' : 'the product'),
+    displayCollectedText(snap.color),
+    displayCollectedText(snap.size)
   ].filter(Boolean).join(' — ');
 
   if (language === 'arabic') {
-    const nameBit = info.name ? ` يا ${info.name}` : '';
+    const nameBit = snap.name ? ` يا ${snap.name}` : '';
     return (
       `تمام${nameBit}! طلبك جاهز للتأكيد:\n` +
       `• ${productLine} × ${qty}\n` +
-      `• الهاتف: ${info.phone || '—'}\n` +
-      `• العنوان: ${info.address || '—'}\n\n` +
+      `• الهاتف: ${snap.phone || '—'}\n` +
+      `• العنوان: ${snap.address || '—'}\n\n` +
       `اكتب «نعم» أو «أكد» لتثبيت الطلب الآن.`
     );
   }
 
-  const nameBit = info.name ? `, ${info.name}` : '';
+  const nameBit = snap.name ? `, ${snap.name}` : '';
   return (
     `Perfect${nameBit}! Your order is ready to confirm:\n` +
     `• ${productLine} × ${qty}\n` +
-    `• Phone: ${info.phone || '—'}\n` +
-    `• Address: ${info.address || '—'}\n\n` +
+    `• Phone: ${snap.phone || '—'}\n` +
+    `• Address: ${snap.address || '—'}\n\n` +
     `Reply "yes" or "confirm" to place the order now.`
   );
 }
@@ -241,6 +355,13 @@ export interface ResolveOrderActionInput {
    * When omitted, falls back to isProductInfoRequest(userMessage).
    */
   modelAsksProductInfo?: boolean;
+  /** Missing identity/product fields after sanitizing placeholders. */
+  missingFields?: string[];
+  /**
+   * Customer picked a color/size after the bot offered a photo (or asked
+   * which colour to show). Never treat that as checkout.
+   */
+  preferSendImage?: boolean;
 }
 
 export interface ResolveOrderActionResult {
@@ -265,8 +386,14 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
     language,
     collectedInfo,
     responseText,
-    modelAsksProductInfo
+    modelAsksProductInfo,
+    missingFields = [],
+    preferSendImage = false
   } = input;
+
+  const safeCollected = sanitizeCollectedSnapshot(collectedInfo);
+  const identityComplete = hasRealCustomerIdentity(safeCollected);
+  const effectivelyComplete = fieldsComplete && identityComplete;
 
   // Product Q&A always wins over checkout rails — never inject order summary here.
   // Prefer model classification; heuristic is fallback only when the model omitted the flag.
@@ -283,23 +410,41 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
     return {
       nextAction: safeAction,
       responseText,
-      awaitingConfirmation: wasAwaitingConfirmation && fieldsComplete,
+      awaitingConfirmation: wasAwaitingConfirmation && effectivelyComplete,
       reason: 'product_info_request_blocks_checkout'
     };
   }
 
   const customerFinalizing = isCustomerFinalizingOrder(userMessage);
   const allowedToFinalize =
-    fieldsComplete &&
+    effectivelyComplete &&
     customerFinalizing &&
     (wasAwaitingConfirmation || fieldsWereCompleteBeforeTurn);
+
+  const photoCaptionFallback =
+    language === 'arabic'
+      ? 'تمام، رح أرسلك صورة هذا الخيار.'
+      : 'Sure — I will send a photo of that option.';
+
+  // Color/size after a photo offer is browsing, not checkout.
+  if (preferSendImage && !allowedToFinalize) {
+    const keepCaption =
+      responseText.trim().length > 0 &&
+      !isPrematureCheckoutCopy(responseText);
+    return {
+      nextAction: 'send_image',
+      responseText: keepCaption ? responseText : photoCaptionFallback,
+      awaitingConfirmation: false,
+      reason: 'variant_after_photo_offer'
+    };
+  }
 
   // Finalize only after an explicit yes while we were already ready / awaiting.
   if (allowedToFinalize) {
     const safeThanks =
       !responseText.trim() ||
       botReplyAsksForConfirmation(responseText)
-        ? buildOrderConfirmedMessage(language, collectedInfo)
+        ? buildOrderConfirmedMessage(language, safeCollected)
         : responseText;
     return {
       nextAction: CONFIRM_ORDER_ACTION,
@@ -309,12 +454,19 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
     };
   }
 
-  // Incomplete → never confirm; keep collecting if AI tried to confirm.
-  if (!fieldsComplete) {
-    if (aiNextAction === CONFIRM_ORDER_ACTION || aiNextAction === AWAIT_CONFIRMATION_ACTION) {
+  // Incomplete → never confirm; rewrite leaked checkout copy (including literal "null").
+  if (!effectivelyComplete) {
+    const triedCheckout =
+      aiNextAction === CONFIRM_ORDER_ACTION ||
+      aiNextAction === AWAIT_CONFIRMATION_ACTION ||
+      aiNextAction === 'close_sale';
+    const leakedCheckout = isPrematureCheckoutCopy(responseText);
+    if (triedCheckout || leakedCheckout) {
       return {
         nextAction: 'collect_info',
-        responseText,
+        responseText: leakedCheckout || triedCheckout
+          ? buildCollectMissingFieldsMessage(language, missingFields)
+          : responseText,
         awaitingConfirmation: false,
         reason: 'incomplete_fields_blocked_confirm'
       };
@@ -339,13 +491,14 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
     const keepAsk =
       botReplyAsksForConfirmation(responseText) &&
       !botReplyAnnouncesConfirmation(responseText) &&
+      !/\bnull\b/i.test(responseText) &&
       responseText.trim().length > 0;
 
     return {
       nextAction: AWAIT_CONFIRMATION_ACTION,
       responseText: keepAsk
         ? responseText
-        : buildAwaitConfirmationMessage(language, collectedInfo),
+        : buildAwaitConfirmationMessage(language, safeCollected),
       awaitingConfirmation: true,
       reason: keepAsk ? 'await_keep_model_ask' : 'await_inject_summary_ask'
     };

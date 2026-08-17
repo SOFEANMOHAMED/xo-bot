@@ -2696,6 +2696,14 @@ class ApiService {
     });
   }
 
+  async startWhatsAppWebPairing() {
+    return this.request<{
+      status: string;
+      phoneNumber?: string | null;
+      alreadyConnected?: boolean;
+    }>('/whatsapp/web/pair', { method: 'POST' });
+  }
+
   async disconnectWhatsApp() {
     return this.request<{ success: boolean; message: string }>('/whatsapp/disconnect', {
       method: 'DELETE'

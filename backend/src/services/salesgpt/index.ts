@@ -50,6 +50,9 @@ import {
     botReplyAsksForConfirmation,
     buildOrderConfirmedMessage,
     isProductInfoRequest,
+    isPlaceholderCollectedValue,
+    sanitizeCollectedSnapshot,
+    sanitizeCollectedText,
     AWAIT_CONFIRMATION_ACTION,
     CONFIRM_ORDER_ACTION,
     shouldAppendOrderData
@@ -160,28 +163,28 @@ export function checkOrderCompleteness(
     state: ConversationState,
     product?: Product
 ): CompletenessCheck {
-    const e = state.extracted_entities || {};
+    const e = sanitizeCollectedSnapshot(state.extracted_entities || {});
     const missing: string[] = [];
-    if (!e.name) missing.push('name');
-    if (!e.phone) missing.push('phone');
-    if (!e.address) missing.push('address');
+    if (isPlaceholderCollectedValue(e.name)) missing.push('name');
+    if (isPlaceholderCollectedValue(e.phone)) missing.push('phone');
+    if (isPlaceholderCollectedValue(e.address)) missing.push('address');
 
     const hasProduct = !!(
         product ||
         (state.last_recommended_products && state.last_recommended_products.length > 0) ||
-        e.product_query ||
-        e.product_id
+        sanitizeCollectedText((state.extracted_entities || {}).product_query) ||
+        sanitizeCollectedText((state.extracted_entities || {}).product_id)
     );
     if (!hasProduct) missing.push('product');
 
     if (product) {
         const hasColors = Array.isArray(product.colors) && product.colors.length > 0;
         const hasSizes = Array.isArray(product.sizes) && product.sizes.length > 0;
-        if (hasColors && !e.color) missing.push('color');
-        if (hasColors && e.color && !isColorInProductCatalog(e.color, product.colors)) {
+        if (hasColors && isPlaceholderCollectedValue(e.color)) missing.push('color');
+        if (hasColors && !isPlaceholderCollectedValue(e.color) && !isColorInProductCatalog(e.color, product.colors)) {
             missing.push('color');
         }
-        if (hasSizes && !e.size) missing.push('size');
+        if (hasSizes && isPlaceholderCollectedValue(e.size)) missing.push('size');
     }
 
     return { complete: missing.length === 0, missing };
@@ -720,13 +723,23 @@ export const processWithSalesGPT = async (
         awaiting_order_confirmation: salesResult.nextAction === AWAIT_CONFIRMATION_ACTION,
         extracted_entities: {
             ...(conversationState.extracted_entities || {}),
-            product_query: salesResult.collectedInfo.product_name || conversationState.extracted_entities?.product_query,
+            product_query:
+                sanitizeCollectedText(salesResult.collectedInfo.product_name) ||
+                sanitizeCollectedText(conversationState.extracted_entities?.product_query),
             color: resolvedColor || undefined,
-            size: salesResult.collectedInfo.size || conversationState.extracted_entities?.size,
+            size:
+                sanitizeCollectedText(salesResult.collectedInfo.size) ||
+                sanitizeCollectedText(conversationState.extracted_entities?.size),
             quantity: salesResult.collectedInfo.quantity || conversationState.extracted_entities?.quantity,
-            name: salesResult.collectedInfo.name || conversationState.extracted_entities?.name,
-            phone: salesResult.collectedInfo.phone || conversationState.extracted_entities?.phone,
-            address: salesResult.collectedInfo.address || conversationState.extracted_entities?.address
+            name:
+                sanitizeCollectedText(salesResult.collectedInfo.name) ||
+                sanitizeCollectedText(conversationState.extracted_entities?.name),
+            phone:
+                sanitizeCollectedText(salesResult.collectedInfo.phone) ||
+                sanitizeCollectedText(conversationState.extracted_entities?.phone),
+            address:
+                sanitizeCollectedText(salesResult.collectedInfo.address) ||
+                sanitizeCollectedText(conversationState.extracted_entities?.address)
         },
         last_interaction: new Date().toISOString(),
         message_count: (conversationState.message_count || 0) + 1

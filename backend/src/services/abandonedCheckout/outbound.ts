@@ -6,6 +6,7 @@
 import pool from '../../database/connection.js';
 import { logger } from '../../utils/logger.js';
 import type { AbandonedCheckoutPlatform } from './constants.js';
+import { isWhatsAppWebConnected, sendWhatsAppWebText } from '../whatsappWeb/index.js';
 
 async function sendFacebookMessenger(
   merchantId: string,
@@ -164,6 +165,9 @@ async function sendTelegram(merchantId: string, chatId: string, text: string): P
 }
 
 async function sendWhatsApp(merchantId: string, to: string, text: string): Promise<boolean> {
+  if (isWhatsAppWebConnected(merchantId)) {
+    return sendWhatsAppWebText(merchantId, to, text);
+  }
   const result = await pool.query(
     `SELECT phone_number_id, access_token
      FROM whatsapp_accounts

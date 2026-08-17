@@ -22,6 +22,12 @@ import {
 } from '../services/conversationIngressQueue.js';
 import { notifyMerchantNewOrderAsync } from '../services/notifyMerchantNewOrder.js';
 import { persistInboundImageBuffer, toPublicMediaUrl } from '../services/inbox/messageMedia.js';
+import {
+  disconnectWhatsAppWeb,
+  getWhatsAppWebLiveStatus,
+  getWhatsAppWebSession,
+  updateWhatsAppWebSettings
+} from '../services/whatsappWeb/index.js';
 
 // ==================== UUID VALIDATION ====================
 
@@ -393,6 +399,9 @@ export const disconnectWhatsApp = async (
       return next(createError('Unauthorized', 401));
     }
 
+    await disconnectWhatsAppWeb(merchantId).catch((error) => {
+      logger.error('WhatsApp Web disconnect failed', error as Error, { merchantId });
+    });
     await pool.query(
       'DELETE FROM whatsapp_accounts WHERE merchant_id = $1',
       [merchantId]
@@ -420,6 +429,25 @@ export const getWhatsAppStatus = async (
       return next(createError('Unauthorized', 401));
     }
 
+    const live = getWhatsAppWebLiveStatus(merchantId);
+    const webRow = await getWhatsAppWebSession(merchantId);
+    const webConnected = live.status === 'connected' || webRow?.status === 'connected';
+    if (webConnected || live.status === 'qr' || live.status === 'connecting') {
+      const phoneNumber = live.phoneNumber || webRow?.phone_number || null;
+      return res.json({
+        success: true,
+        data: {
+          isConnected: webConnected,
+          connectionMode: 'web',
+          status: live.status,
+          phoneNumber,
+          autoReplyEnabled: webRow?.auto_reply_enabled === true,
+          welcomeMessage: webRow?.welcome_message || null,
+          lastSync: webRow?.last_connected_at || null
+        }
+      });
+    }
+
     const result = await pool.query(
       `SELECT phone_number_id, phone_number, business_account_id, 
               auto_reply_enabled, welcome_message, last_sync, is_verified
@@ -443,6 +471,7 @@ export const getWhatsAppStatus = async (
       success: true,
       data: {
         isConnected: account.is_verified,
+        connectionMode: 'cloud',
         phoneNumber: account.phone_number,
         phoneNumberId: account.phone_number_id,
         businessAccountId: account.business_account_id,
@@ -471,14 +500,30 @@ export const updateWhatsAppSettings = async (
 
     const { autoReplyEnabled, welcomeMessage } = req.body;
 
-    await pool.query(
-      `UPDATE whatsapp_accounts 
-       SET auto_reply_enabled = COALESCE($1, auto_reply_enabled),
-           welcome_message = COALESCE($2, welcome_message),
-           updated_at = CURRENT_TIMESTAMP
-       WHERE merchant_id = $3`,
-      [autoReplyEnabled, welcomeMessage || null, merchantId]
-    );
+    const webUpdated = await updateWhatsAppWebSettings(merchantId, {
+      autoReplyEnabled: typeof autoReplyEnabled === 'boolean' ? autoReplyEnabled : undefined,
+      welcomeMessage: typeof welcomeMessage === 'string' ? welcomeMessage : undefined
+    });
+    if (!webUpdated) {
+      await pool.query(
+        `UPDATE whatsapp_accounts 
+         SET auto_reply_enabled = CASE
+               WHEN $1::boolean IS NULL THEN auto_reply_enabled
+               ELSE $1::boolean
+             END,
+             welcome_message = CASE
+               WHEN $2::text IS NULL THEN welcome_message
+               ELSE $2::text
+             END,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE merchant_id = $3::uuid`,
+        [
+          typeof autoReplyEnabled === 'boolean' ? autoReplyEnabled : null,
+          typeof welcomeMessage === 'string' ? welcomeMessage : null,
+          merchantId
+        ]
+      );
+    }
 
     res.json({
       success: true,

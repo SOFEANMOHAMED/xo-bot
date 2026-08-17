@@ -9,7 +9,7 @@ import { handleIncomingMessage } from '../bot/index.js';
 import type { Message, ConversationState, MerchantConfig } from '../bot/index.js';
 import { escalateConversationToHuman } from '../services/escalation.js';
 import { stripInternalControlMarkers } from '../response/sanitize-reply.js';
-import { appendOrderDataIfConfirmed } from '../services/buildMerchantBotConfig.js';
+import { buildMerchantBotConfig, appendOrderDataIfConfirmed } from '../services/buildMerchantBotConfig.js';
 import { telegramAdapter, sendTelegramTyping } from '../services/channels/telegram.adapter.js';
 import { startTypingKeepalive } from '../services/channels/replyDelivery.js';
 import {
@@ -363,7 +363,8 @@ const processTelegramMessage = async (update: any) => {
       payment_methods: cachedSettings.payment_methods,
       return_policy: cachedSettings.return_policy,
       additional_notes: cachedSettings.additional_notes,
-      enable_ai_injection: cachedSettings.enable_ai_injection
+      enable_ai_injection: cachedSettings.enable_ai_injection,
+      ai_mode: cachedSettings.ai_mode
     };
 
     // ==================== VOICE TRANSCRIPTION (OpenAI STT) ====================
@@ -602,20 +603,10 @@ const processTelegramMessage = async (update: any) => {
     
     try {
       // ✅ بناء merchantConfig للنظام الجديد
-      const merchantConfig: Partial<MerchantConfig> = {
+      const merchantConfig: Partial<MerchantConfig> = buildMerchantBotConfig({
         merchantId,
-        storeName: settings.store_name || 'المتجر',
-        storeCurrency: settings.store_currency || 'USD',
-        systemPrompt: settings.system_prompt || '',
-        persona: (settings.bot_persona || 'friendly') as any,
-        shippingPolicy: settings.shipping_policy || '',
-        deliveryTime: settings.delivery_time || '',
-        paymentMethods: settings.payment_methods || '',
-        returnPolicy: settings.return_policy || '',
-        additionalNotes: settings.additional_notes || '',
-        botLanguage: 'auto',
-        
-      };
+        settings,
+      });
 
       const result = await handleIncomingMessage({
         merchantId,

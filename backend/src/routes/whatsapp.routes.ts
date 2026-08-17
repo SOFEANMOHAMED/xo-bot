@@ -7,6 +7,10 @@ import {
   verifyWhatsAppWebhook,
   handleWhatsAppWebhook
 } from '../controllers/whatsapp.controller.js';
+import {
+  startWhatsAppWebPairingHandler,
+  streamWhatsAppWebEvents
+} from '../controllers/whatsappWeb.controller.js';
 import { authenticate } from '../middleware/auth.js';
 import { checkSubscriptionStatus } from '../middleware/subscriptionCheck.js';
 import { checkWhatsAppAccountsLimit } from '../middleware/planLimits.js';
@@ -25,6 +29,9 @@ router.get('/status', getWhatsAppStatus);
 router.post('/connect', checkWhatsAppAccountsLimit, connectWhatsApp);
 router.delete('/disconnect', disconnectWhatsApp);
 router.put('/settings', updateWhatsAppSettings);
+
+router.post('/web/pair', startWhatsAppWebPairingHandler);
+router.get('/web/events', streamWhatsAppWebEvents);
 
 export default router;
 

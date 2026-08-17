@@ -14,6 +14,8 @@ const PLACEHOLDER_NAMES = new Set([
   'عميل فيسبوك',
   'facebook user',
   'instagram user',
+  'عميل واتساب',
+  'whatsapp user',
   'عميل تجريبي',
   'unknown',
   'user',

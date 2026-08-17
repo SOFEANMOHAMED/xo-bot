@@ -153,6 +153,61 @@ function run(): void {
   );
   passed++;
 
+  // Literal "null" fields are incomplete — do not keep checkout copy
+  const nullFields = resolveOrderNextAction({
+    aiNextAction: 'await_confirmation',
+    fieldsComplete: true,
+    fieldsWereCompleteBeforeTurn: false,
+    wasAwaitingConfirmation: false,
+    userMessage: 'أحمر',
+    language: 'arabic',
+    collectedInfo: {
+      name: 'null',
+      phone: 'null',
+      address: 'null',
+      product_name: 'Watch',
+      color: 'أحمر'
+    },
+    responseText: 'تمام null! طلبك جاهز للتأكيد:\n• Watch — أحمر × 1\n• الهاتف: null',
+    missingFields: ['name', 'phone', 'address']
+  });
+  assert(
+    nullFields.nextAction === 'collect_info',
+    `null placeholders must block checkout, got ${nullFields.nextAction}`
+  );
+  assert(
+    !/\bnull\b/i.test(nullFields.responseText),
+    'customer-facing text must not contain literal null'
+  );
+  assert(
+    !/جاهز للتأكيد/.test(nullFields.responseText),
+    'must not keep premature confirmation copy'
+  );
+  passed++;
+
+  // Color after photo offer → send_image, never await_confirmation
+  const photoColor = resolveOrderNextAction({
+    aiNextAction: 'await_confirmation',
+    fieldsComplete: false,
+    fieldsWereCompleteBeforeTurn: false,
+    wasAwaitingConfirmation: false,
+    userMessage: 'أحمر',
+    language: 'arabic',
+    collectedInfo: { product_name: 'Watch', color: 'أحمر' },
+    responseText: 'تمام null! طلبك جاهز للتأكيد',
+    missingFields: ['name', 'phone', 'address'],
+    preferSendImage: true
+  });
+  assert(
+    photoColor.nextAction === 'send_image',
+    `color after photo should send_image, got ${photoColor.nextAction}`
+  );
+  assert(
+    !/جاهز للتأكيد/.test(photoColor.responseText),
+    'photo color reply must not show confirmation summary'
+  );
+  passed++;
+
   console.log(`✅ SalesGPT golden tests passed: ${passed}`);
 }
 

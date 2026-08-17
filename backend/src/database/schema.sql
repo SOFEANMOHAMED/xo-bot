@@ -301,7 +301,7 @@ CREATE TABLE IF NOT EXISTS shopify_stores (
     UNIQUE(merchant_id, shop_domain)
 );
 
--- WhatsApp Business Integration
+-- WhatsApp Business Integration (Cloud API — optional / non-Syria)
 CREATE TABLE IF NOT EXISTS whatsapp_accounts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
@@ -319,6 +319,26 @@ CREATE TABLE IF NOT EXISTS whatsapp_accounts (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(merchant_id, phone_number_id)
+);
+
+-- WhatsApp Web QR sessions (one isolated encrypted session per merchant)
+CREATE TABLE IF NOT EXISTS whatsapp_web_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+    phone_number VARCHAR(32),
+    phone_digits VARCHAR(20),
+    status VARCHAR(32) NOT NULL DEFAULT 'disconnected',
+    creds_ciphertext TEXT,
+    keys_ciphertext TEXT,
+    auto_reply_enabled BOOLEAN NOT NULL DEFAULT false,
+    welcome_message TEXT,
+    last_connected_at TIMESTAMP,
+    last_disconnect_at TIMESTAMP,
+    last_disconnect_reason TEXT,
+    last_qr_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (merchant_id)
 );
 
 -- Conversations Table (for chat history)

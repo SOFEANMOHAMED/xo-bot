@@ -9,7 +9,7 @@ module.exports = {
     max_restarts: 50,
     min_uptime: '10s',
     restart_delay: 5000,
-    max_memory_restart: '500M',
+    max_memory_restart: '800M',
     error_file: 'logs/pm2-error.log',
     out_file: 'logs/pm2-out.log',
     merge_logs: true,

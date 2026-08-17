@@ -42,6 +42,11 @@ import { startContentPublishingScheduler } from './services/contentPublishing/in
 import { startLifecycleEmailsScheduler } from './services/lifecycleEmails/index.js';
 import contentPublishingRoutes from './routes/contentPublishing.routes.js';
 import { startInboxRealtime, stopInboxRealtime } from './services/inbox/inboxRealtime.js';
+import {
+  ensureWhatsAppWebSessionsSchema,
+  restoreConnectedWhatsAppSessions,
+  shutdownWhatsAppWebSessions
+} from './services/whatsappWeb/index.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -151,6 +156,7 @@ app.use(
   compression({
     filter: (req, res) => {
       if (req.path.includes('/conversations/stream')) return false;
+      if (req.path.includes('/whatsapp/web/events')) return false;
       return compression.filter(req, res);
     },
   })
@@ -327,6 +333,7 @@ async function connectDatabaseWithRetry(maxAttempts = 15, delayMs = 3000): Promi
 async function shutdown(signal: string) {
   logger.info(`Received ${signal}, shutting down gracefully`);
   await stopInboxRealtime().catch(() => undefined);
+  await shutdownWhatsAppWebSessions().catch(() => undefined);
   if (server) {
     await new Promise<void>((resolve) => server!.close(() => resolve()));
   }
@@ -353,6 +360,14 @@ async function startServer() {
 
     await initializeTools();
     console.log('🔧 Tools system initialized');
+
+    try {
+      await ensureWhatsAppWebSessionsSchema();
+      console.log('📱 WhatsApp Web sessions schema ready');
+    } catch (error) {
+      logger.error('WhatsApp Web schema failed', error as Error);
+      console.error('❌ WhatsApp Web schema failed:', error);
+    }
 
     try {
       await startInboxRealtime();
@@ -395,6 +410,12 @@ async function startServer() {
 
       startLifecycleEmailsScheduler(15);
       console.log('📧 Lifecycle emails scheduler started (every 15 minutes)');
+
+      void restoreConnectedWhatsAppSessions()
+        .then(() => console.log('📱 WhatsApp Web sessions restore started'))
+        .catch((error) => {
+          logger.error('WhatsApp Web session restore failed', error as Error);
+        });
     });
   } catch (error) {
     console.error('❌ Failed to connect to database:', error);
