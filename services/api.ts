@@ -723,6 +723,21 @@ class ApiService {
           enableAIInjection: boolean;
         };
         signupDate: string;
+        abandonedReminderEnabled?: boolean;
+        abandonedReminderDelayMinutes?: number;
+        abandonedReminderMessage?: string;
+      };
+      planCapabilities?: {
+        hasSalesBot: boolean;
+        hasAdvancedAnalytics: boolean;
+        maxTelegramBots: number;
+        maxTotalChannels: number;
+        maxFacebookPages: number;
+        maxInstagramAccounts: number;
+        maxWhatsAppAccounts: number;
+        maxShopifyStores: number;
+        maxMonthlyMarketingImages: number;
+        billingPeriod: 'monthly' | 'yearly';
       };
     }>('/settings');
   }

@@ -1,6 +1,11 @@
 /**
  * Canonical subscription plan definitions for Xo Bot.
  * All paid plans: unlimited monthly AI usage (maxMonthlyAIResponses = -1).
+ *
+ * Legacy plan aliases (existing subscribers — do not remove):
+ * - starter  ≈ comments  (comments-only, no sales bot)
+ * - pro      ≈ single    (one sales channel)
+ * - business ≈ social    (FB + IG sales bot, no Telegram)
  */
 
 export const PAID_PLAN_KEYS = ['comments', 'single', 'social', 'yearly'] as const;
@@ -29,6 +34,35 @@ export interface PlanLimits {
   /** When false: comment automation only — no Messenger / IG DM / Telegram sales bot. */
   hasSalesBot: boolean;
   billingPeriod: 'monthly' | 'yearly';
+}
+
+/** Merchant-facing feature flags derived from PlanLimits (for settings API + UI). */
+export interface PlanCapabilities {
+  hasSalesBot: boolean;
+  hasAdvancedAnalytics: boolean;
+  maxTelegramBots: number;
+  maxTotalChannels: number;
+  maxFacebookPages: number;
+  maxInstagramAccounts: number;
+  maxWhatsAppAccounts: number;
+  maxShopifyStores: number;
+  maxMonthlyMarketingImages: number;
+  billingPeriod: 'monthly' | 'yearly';
+}
+
+export function toPlanCapabilities(limits: PlanLimits): PlanCapabilities {
+  return {
+    hasSalesBot: limits.hasSalesBot,
+    hasAdvancedAnalytics: limits.hasAdvancedAnalytics,
+    maxTelegramBots: limits.maxTelegramBots,
+    maxTotalChannels: limits.maxTotalChannels,
+    maxFacebookPages: limits.maxFacebookPages,
+    maxInstagramAccounts: limits.maxInstagramAccounts,
+    maxWhatsAppAccounts: limits.maxWhatsAppAccounts,
+    maxShopifyStores: limits.maxShopifyStores,
+    maxMonthlyMarketingImages: limits.maxMonthlyMarketingImages,
+    billingPeriod: limits.billingPeriod
+  };
 }
 
 export interface PlanConfig {
@@ -81,7 +115,7 @@ export const DEFAULT_PLAN_CONFIGS: Record<PaidPlanKey, PlanConfig> = {
       'استخدام AI غير محدود',
       '40 صورة تسويقية بالذكاء الاصطناعي شهرياً',
       'إدارة منتجات وطلبات',
-      'تحليلات أساسية',
+      'تحليلات متقدمة',
       'دعم فني أولوية'
     ]
   },
@@ -182,7 +216,7 @@ export const DEFAULT_PLAN_LIMITS: Record<string, PlanLimits> = {
     maxTotalChannels: -1,
     maxCustomers: -1,
     hasAdvancedAnalytics: true,
-    hasAPIAccess: true,
+    hasAPIAccess: false,
     hasSalesBot: true,
     billingPeriod: 'monthly'
   },

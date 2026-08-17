@@ -1768,6 +1768,19 @@ export const updateInstagramSettings = async (
     const { autoReplyComments, autoReplyDM, sendDmOnComment, commentReplyTemplate, commentDmTemplate } =
       req.body;
 
+    if (autoReplyDM === true) {
+      const { merchantHasSalesBot } = await import('../utils/planLimits.js');
+      const allowed = await merchantHasSalesBot(req.merchantId!);
+      if (!allowed) {
+        return next(createError(
+          'باقتك الحالية مخصّصة للرد على التعليقات فقط ولا تشمل بوت المبيعات. رقِّ الباقة لتفعيل الرسائل الخاصة.',
+          403,
+          true,
+          'SALES_BOT_NOT_INCLUDED'
+        ));
+      }
+    }
+
     const updates: string[] = [];
     const values: any[] = [];
     let idx = 1;

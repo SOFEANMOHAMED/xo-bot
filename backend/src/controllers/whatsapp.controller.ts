@@ -955,7 +955,9 @@ export const handleWhatsAppWebhook = async (
                   const limits = await getMerchantPlanLimits(merchantId);
                   const currentCount = await getMonthlyAIResponseCount(merchantId);
 
-                  if (!isWithinLimit(currentCount, limits.maxMonthlyAIResponses)) {
+                  if (!limits.hasSalesBot) {
+                    logger.info('Sales bot not included in plan — skipping WhatsApp auto-reply', { merchantId });
+                  } else if (!isWithinLimit(currentCount, limits.maxMonthlyAIResponses)) {
                     logger.warn('AI response limit exceeded for WhatsApp', {
                       merchantId,
                       currentCount,

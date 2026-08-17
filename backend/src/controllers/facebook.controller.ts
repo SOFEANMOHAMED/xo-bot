@@ -848,6 +848,10 @@ const processFacebookMessage = async (event: any) => {
     // ✅ فحص حد الردود الذكية - نفس تلجرام
     const { getMerchantPlanLimits, getMonthlyAIResponseCount, isWithinLimit } = await import('../utils/planLimits.js');
     const limits = await getMerchantPlanLimits(merchantId);
+    if (!limits.hasSalesBot) {
+      logger.info('Sales bot not included in plan — skipping Facebook Messenger auto-reply', { merchantId });
+      return;
+    }
     const currentCount = await getMonthlyAIResponseCount(merchantId);
 
     console.log('[processFacebookMessage] Plan limits check:', { merchantId, currentCount, limit: limits.maxMonthlyAIResponses, isWithinLimit: isWithinLimit(currentCount, limits.maxMonthlyAIResponses) });

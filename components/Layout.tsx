@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { AppView } from '../types';
+import { AppView, DEFAULT_PLAN_CAPABILITIES, type PlanCapabilities } from '../types';
 import { appPath } from '../routes/paths';
 import { 
   LayoutDashboard, 
@@ -47,9 +47,19 @@ interface LayoutProps {
   toggleDarkMode: () => void;
   onLogout: () => void;
   newOrdersCount?: number;
+  planCapabilities?: PlanCapabilities;
 }
 
-const Layout: React.FC<LayoutProps> = ({ currentView, onChangeView, children, isDarkMode, toggleDarkMode, onLogout, newOrdersCount = 0 }) => {
+const Layout: React.FC<LayoutProps> = ({
+  currentView,
+  onChangeView,
+  children,
+  isDarkMode,
+  toggleDarkMode,
+  onLogout,
+  newOrdersCount = 0,
+  planCapabilities = DEFAULT_PLAN_CAPABILITIES
+}) => {
   const navigate = useNavigate();
   const goToView = (view: AppView) => {
     if (onChangeView) onChangeView(view);
@@ -117,7 +127,9 @@ const Layout: React.FC<LayoutProps> = ({ currentView, onChangeView, children, is
     { id: AppView.SUPPORT_TICKETS, label: 'رسائل الدعم', icon: HelpCircle },
     { id: AppView.PROFILE, label: 'الملف الشخصي', icon: UserCircle },
     { id: AppView.SETTINGS, label: 'الإعدادات', icon: Settings },
-  ];
+  ].filter((item) =>
+    item.id !== AppView.ANALYTICS || planCapabilities.hasAdvancedAnalytics
+  );
 
   const handleSupportSuccess = () => {
     // Show success notification

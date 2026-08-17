@@ -25,6 +25,7 @@ const SocialAutomationPage: React.FC<SocialAutomationPageProps> = ({
   const [igAutoReplyDM, setIgAutoReplyDM] = useState(true);
   const notifyRef = useRef(showNotification);
   notifyRef.current = showNotification;
+  const hasSalesBot = settings.planCapabilities?.hasSalesBot !== false;
 
   // Load connection status once on mount — never remount UI on later parent re-renders
   useEffect(() => {
@@ -98,47 +99,60 @@ const SocialAutomationPage: React.FC<SocialAutomationPageProps> = ({
 
       <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 space-y-3">
         <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100">الرد على الرسائل</h3>
-        {facebookConnected && (
-          <label className="flex items-center justify-between p-3 border border-gray-100 dark:border-gray-700 rounded-xl">
-            <div className="flex items-center gap-2">
-              <MessageCircle size={16} className="text-brand" />
-              <span className="text-sm font-medium text-gray-800 dark:text-gray-200">الرد على Messenger</span>
-            </div>
-            <input
-              type="checkbox"
-              checked={!!settings.autoReplyMessenger}
-              onChange={(e) =>
-                onUpdateSettings({ ...settings, autoReplyMessenger: e.target.checked })
-              }
-              className="w-4 h-4"
-            />
-          </label>
-        )}
-        {instagramConnected && (
-          <label className="flex items-center justify-between p-3 border border-gray-100 dark:border-gray-700 rounded-xl">
-            <div className="flex items-center gap-2">
-              <MessageSquare size={16} className="text-pink-600" />
-              <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
-                الرد على رسائل إنستغرام المباشرة
-              </span>
-            </div>
-            <input
-              type="checkbox"
-              checked={igAutoReplyDM}
-              onChange={async (e) => {
-                const v = e.target.checked;
-                const prev = igAutoReplyDM;
-                setIgAutoReplyDM(v);
-                try {
-                  await apiService.updateInstagramSettings({ autoReplyDM: v });
-                } catch {
-                  setIgAutoReplyDM(prev);
-                  notifyRef.current?.('فشل حفظ إعداد إنستغرام', 'error');
-                }
-              }}
-              className="w-4 h-4"
-            />
-          </label>
+        {!hasSalesBot ? (
+          <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-900/40">
+            باقتك الحالية مخصّصة للرد على التعليقات فقط. بوت المبيعات (Messenger ورسائل إنستغرام المباشرة) غير متاح —
+            يمكنك ترقية الباقة لتفعيله.
+          </p>
+        ) : (
+          <>
+            {facebookConnected && (
+              <label className="flex items-center justify-between p-3 border border-gray-100 dark:border-gray-700 rounded-xl">
+                <div className="flex items-center gap-2">
+                  <MessageCircle size={16} className="text-brand" />
+                  <span className="text-sm font-medium text-gray-800 dark:text-gray-200">الرد على Messenger</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={!!settings.autoReplyMessenger}
+                  onChange={(e) =>
+                    onUpdateSettings({ ...settings, autoReplyMessenger: e.target.checked })
+                  }
+                  className="w-4 h-4"
+                />
+              </label>
+            )}
+            {instagramConnected && (
+              <label className="flex items-center justify-between p-3 border border-gray-100 dark:border-gray-700 rounded-xl">
+                <div className="flex items-center gap-2">
+                  <MessageSquare size={16} className="text-pink-600" />
+                  <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                    الرد على رسائل إنستغرام المباشرة
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={igAutoReplyDM}
+                  onChange={async (e) => {
+                    const v = e.target.checked;
+                    const prev = igAutoReplyDM;
+                    setIgAutoReplyDM(v);
+                    try {
+                      await apiService.updateInstagramSettings({ autoReplyDM: v });
+                    } catch (err: unknown) {
+                      setIgAutoReplyDM(prev);
+                      const msg =
+                        err instanceof Error && err.message.includes('SALES_BOT')
+                          ? 'باقتك لا تشمل بوت المبيعات'
+                          : 'فشل حفظ إعداد إنستغرام';
+                      notifyRef.current?.(msg, 'error');
+                    }
+                  }}
+                  className="w-4 h-4"
+                />
+              </label>
+            )}
+          </>
         )}
       </div>
 

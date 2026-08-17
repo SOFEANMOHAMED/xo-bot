@@ -86,6 +86,12 @@ export function isWithinLimit(current: number, limit: number): boolean {
   return current < limit;
 }
 
+/** Whether the merchant's plan includes Messenger / IG DM / Telegram sales bot. */
+export async function merchantHasSalesBot(merchantId: string): Promise<boolean> {
+  const limits = await getMerchantPlanLimits(merchantId);
+  return limits.hasSalesBot;
+}
+
 /** Start of current billing period for marketing image quota. */
 export function getMarketingImagePeriodStart(billingPeriod: 'monthly' | 'yearly'): Date {
   const now = new Date();

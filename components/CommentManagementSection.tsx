@@ -13,6 +13,8 @@ interface CommentManagementSectionProps {
   /** Merchant-level Messenger auto-reply */
   autoReplyMessenger: boolean;
   autoReplyComments: boolean;
+  /** When false, Messenger / IG DM sales bot toggles are hidden (comments-only plan). */
+  hasSalesBot?: boolean;
   onUpdateMerchantSettings: (patch: {
     autoReplyMessenger?: boolean;
     autoReplyComments?: boolean;
@@ -59,6 +61,7 @@ const CommentManagementSection: React.FC<CommentManagementSectionProps> = ({
   showNotification,
   autoReplyMessenger,
   autoReplyComments,
+  hasSalesBot = true,
   onUpdateMerchantSettings
 }) => {
   const [platform, setPlatform] = useState<PlatformTab>(
@@ -227,12 +230,14 @@ const CommentManagementSection: React.FC<CommentManagementSectionProps> = ({
         {platform === 'facebook' && facebookConnected && (
           <>
             <div className="space-y-3">
-              <ToggleRow
-                icon={<MessageCircle size={16} className="text-brand" />}
-                title="الرد على Messenger"
-                checked={autoReplyMessenger}
-                onChange={(v) => onUpdateMerchantSettings({ autoReplyMessenger: v })}
-              />
+              {hasSalesBot && (
+                <ToggleRow
+                  icon={<MessageCircle size={16} className="text-brand" />}
+                  title="الرد على Messenger"
+                  checked={autoReplyMessenger}
+                  onChange={(v) => onUpdateMerchantSettings({ autoReplyMessenger: v })}
+                />
+              )}
               <ToggleRow
                 icon={<MessageCircle size={16} className="text-green-600" />}
                 title="الرد على التعليقات"
@@ -348,12 +353,14 @@ const CommentManagementSection: React.FC<CommentManagementSectionProps> = ({
                 onChange={(v) => toggleIg('sendDmOnComment', v)}
                 accentClass="peer-checked:bg-orange-500"
               />
-              <ToggleRow
-                icon={<MessageSquare size={16} className="text-brand" />}
-                title="الرد على الرسائل المباشرة"
-                checked={ig.autoReplyDM}
-                onChange={(v) => toggleIg('autoReplyDM', v)}
-              />
+              {hasSalesBot && (
+                <ToggleRow
+                  icon={<MessageSquare size={16} className="text-brand" />}
+                  title="الرد على الرسائل المباشرة"
+                  checked={ig.autoReplyDM}
+                  onChange={(v) => toggleIg('autoReplyDM', v)}
+                />
+              )}
             </div>
 
             <div className="rounded-xl border border-pink-100 dark:border-pink-900/40 bg-pink-50/30 dark:bg-slate-900/40 p-4 space-y-3">

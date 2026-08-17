@@ -10,6 +10,8 @@ import {
 } from '../services/cacheService.js';
 import { clearProductKeywordsCache } from '../services/tools/catalogTool.js';
 import { maskSecret, isMaskedSecret } from '../utils/logPrivacy.js';
+import { getMerchantPlanLimits, merchantHasSalesBot } from '../utils/planLimits.js';
+import { toPlanCapabilities } from '../utils/planDefinitions.js';
 
 const settingsSchema = z.object({
   storeName: z.string().optional(),
@@ -152,9 +154,14 @@ export const getSettings = async (
     }
 
     const settings = formatSettings(row);
+    const planLimits = await getMerchantPlanLimits(req.merchantId!);
+    const planCapabilities = toPlanCapabilities(planLimits);
     return res.json({
       success: true,
-      data: { settings }
+      data: {
+        settings,
+        planCapabilities
+      }
     });
   } catch (error) {
     next(error);
@@ -170,6 +177,18 @@ export const updateSettings = async (
     
 
     const validated = settingsSchema.parse(req.body);
+
+    if (validated.autoReplyMessenger === true) {
+      const allowed = await merchantHasSalesBot(req.merchantId!);
+      if (!allowed) {
+        return next(createError(
+          'باقتك الحالية مخصّصة للرد على التعليقات فقط ولا تشمل بوت المبيعات. رقِّ الباقة لتفعيل الرسائل الخاصة.',
+          403,
+          true,
+          'SALES_BOT_NOT_INCLUDED'
+        ));
+      }
+    }
 
     // Check if settings exist
     const checkResult = await pool.query(
@@ -258,9 +277,14 @@ export const updateSettings = async (
     // Invalidate merchant settings cache after update
     invalidateMerchantSettings(req.merchantId!);
 
+    const planLimits = await getMerchantPlanLimits(req.merchantId!);
+    const planCapabilities = toPlanCapabilities(planLimits);
     res.json({
       success: true,
-      data: { settings }
+      data: {
+        settings,
+        planCapabilities
+      }
     });
   } catch (error: any) {
     if (error instanceof z.ZodError) {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Navigate, useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom';
 import { DEFAULT_SETTINGS } from '../constants';
-import { Product, MerchantSettings, AppView, IntegrationStatus, Order, Service, BotPersona } from '../types';
+import { Product, MerchantSettings, AppView, IntegrationStatus, Order, Service, BotPersona, DEFAULT_PLAN_CAPABILITIES } from '../types';
 import Layout from './Layout';
 import DashboardStats from './DashboardStats';
 import ProductManager from './ProductManager';
@@ -379,6 +379,7 @@ const MerchantApp: React.FC = () => {
         abandonedReminderEnabled: response.settings.abandonedReminderEnabled ?? true,
         abandonedReminderDelayMinutes: response.settings.abandonedReminderDelayMinutes ?? 45,
         abandonedReminderMessage: response.settings.abandonedReminderMessage || '',
+        planCapabilities: response.planCapabilities ?? DEFAULT_PLAN_CAPABILITIES,
       };
       setSettings(settingsData);
     } catch (error: unknown) {
@@ -1090,6 +1091,24 @@ const MerchantApp: React.FC = () => {
       case AppView.CRM:
         return <CrmPage storeCurrency={settings?.storeCurrency || 'USD'} />;
       case AppView.ANALYTICS:
+        if (!(settings.planCapabilities ?? DEFAULT_PLAN_CAPABILITIES).hasAdvancedAnalytics) {
+          return (
+            <div className="max-w-lg mx-auto mt-16 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-8 text-center shadow-sm">
+              <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-2">التحليلات المتقدمة</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                هذه الميزة غير متاحة في باقتك الحالية. يمكنك متابعة إحصائيات أساسية من لوحة التحكم، أو ترقية
+                الباقة للوصول إلى تقارير المبيعات والمحادثات والمنتجات.
+              </p>
+              <button
+                type="button"
+                onClick={() => navigateToView(AppView.DASHBOARD)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-brand hover:bg-brand-700 text-white text-sm font-medium"
+              >
+                العودة إلى لوحة التحكم
+              </button>
+            </div>
+          );
+        }
         return <AnalyticsPage storeCurrency={settings?.storeCurrency || 'USD'} />;
       case AppView.SUPPORT_TICKETS:
         return <UserSupportTickets />;
@@ -1163,6 +1182,7 @@ const MerchantApp: React.FC = () => {
           toggleDarkMode={toggleDarkMode}
           onLogout={handleLogout}
           newOrdersCount={newOrders.length}
+          planCapabilities={settings.planCapabilities ?? DEFAULT_PLAN_CAPABILITIES}
         >
           {renderContent()}
         </Layout>

@@ -121,7 +121,36 @@ export interface MerchantSettings {
   abandonedReminderDelayMinutes?: number;
   /** Optional template: {name}, {product}, {product_clause} */
   abandonedReminderMessage?: string;
+  /** Plan feature flags (from GET /settings) */
+  planCapabilities?: PlanCapabilities;
 }
+
+export interface PlanCapabilities {
+  hasSalesBot: boolean;
+  hasAdvancedAnalytics: boolean;
+  maxTelegramBots: number;
+  maxTotalChannels: number;
+  maxFacebookPages: number;
+  maxInstagramAccounts: number;
+  maxWhatsAppAccounts: number;
+  maxShopifyStores: number;
+  maxMonthlyMarketingImages: number;
+  billingPeriod: 'monthly' | 'yearly';
+}
+
+/** Optimistic defaults until GET /settings returns planCapabilities. */
+export const DEFAULT_PLAN_CAPABILITIES: PlanCapabilities = {
+  hasSalesBot: true,
+  hasAdvancedAnalytics: true,
+  maxTelegramBots: 1,
+  maxTotalChannels: -1,
+  maxFacebookPages: 1,
+  maxInstagramAccounts: 1,
+  maxWhatsAppAccounts: 0,
+  maxShopifyStores: 0,
+  maxMonthlyMarketingImages: -1,
+  billingPeriod: 'monthly'
+};
 
 export enum AppView {
   DASHBOARD = 'DASHBOARD',

@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { Facebook, ShoppingBag, CheckCircle, XCircle, RefreshCw, Activity, MessageCircle, Clock, Link as LinkIcon, AlertCircle, Trash2, Send, AlertTriangle, ShoppingCart, MessageSquare, Plus, Edit2, Settings } from 'lucide-react';
-import { IntegrationStatus, IntegrationLog, MerchantSettings } from '../types';
+import { IntegrationStatus, IntegrationLog, MerchantSettings, DEFAULT_PLAN_CAPABILITIES } from '../types';
 import { generateLog } from '../services/mockBackend';
 import { apiService } from '../services/api';
 import { Product } from '../types';
@@ -739,12 +739,43 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
     }
   };
 
+  const caps = settings.planCapabilities ?? DEFAULT_PLAN_CAPABILITIES;
+  const connectedChannelCount =
+    (fbStatus.isConnected ? 1 : 0) +
+    (igStatus.isConnected ? 1 : 0) +
+    (telegramBots.length > 0 ? 1 : 0);
+  const singleChannelPlan = caps.maxTotalChannels === 1;
+  const showTelegramCard = caps.maxTelegramBots > 0 || telegramBots.length > 0;
+  const showShopifyCard = caps.maxShopifyStores > 0 || shopifyStatus.isConnected;
+  const showWhatsAppCard = caps.maxWhatsAppAccounts > 0 || whatsappStatus.isConnected;
+
   return (
     <div className="space-y-8 animate-fade-in pb-10 relative">
       <div>
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white">الربط والتكامل</h2>
         <p className="text-gray-500 dark:text-gray-400 mt-1">قم بربط متجرك وحسابات التواصل الاجتماعي في مكان واحد.</p>
       </div>
+
+      {!caps.hasSalesBot && (
+        <div className="rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-sm text-amber-900 dark:text-amber-100">
+          باقتك مخصّصة للرد على التعليقات. يمكنك ربط فيسبوك وإنستغرام للتعليقات فقط — بوت المبيعات (Messenger / DM / Telegram) غير متاح.
+        </div>
+      )}
+
+      {singleChannelPlan && caps.hasSalesBot && (
+        <div className="rounded-xl border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50 dark:bg-indigo-900/20 px-4 py-3 text-sm text-indigo-900 dark:text-indigo-100">
+          باقتك تسمح بربط <strong>قناة مبيعات واحدة</strong> فقط (فيسبوك أو إنستغرام أو تيليجرام).
+          {connectedChannelCount >= 1
+            ? ' لربط قناة أخرى، افصل القناة الحالية أولاً أو رقِّ الباقة.'
+            : ' اختر القناة التي تناسبك.'}
+        </div>
+      )}
+
+      {caps.hasSalesBot && caps.maxTelegramBots === 0 && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 px-4 py-3 text-sm text-slate-700 dark:text-slate-300">
+          تيليجرام غير متاح في باقتك الحالية — متاح في <strong>الباقة السنوية</strong>.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
@@ -931,6 +962,7 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
         </div>
 
         {/* Shopify Card */}
+        {showShopifyCard && (
         <div className="relative pointer-events-none opacity-60 grayscale bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 transition-all duration-300 overflow-hidden">
           <div className="absolute top-4 left-4 bg-gray-700 dark:bg-gray-600 text-white text-xs font-bold px-3 py-1 rounded-full z-10 border border-gray-600 shadow-sm">قريباً</div>
           <div className="p-6 border-b border-gray-100 dark:border-gray-700 bg-gradient-to-l from-white to-green-50/50 dark:from-gray-800 dark:to-green-900/20 flex items-center justify-between">
@@ -1034,8 +1066,10 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
             )}
           </div>
         </div>
+        )}
 
         {/* Telegram Card */}
+        {showTelegramCard && (
         <div className={`bg-white dark:bg-gray-800 rounded-2xl shadow-sm border transition-all duration-300 overflow-hidden ${telegramStatus.isConnected ? 'border-sky-200 dark:border-sky-900 ring-1 ring-sky-100 dark:ring-sky-900/50' : 'border-gray-100 dark:border-gray-700'}`}>
           <div className="p-6 border-b border-gray-100 dark:border-gray-700 bg-gradient-to-l from-white to-sky-50/50 dark:from-gray-800 dark:to-sky-900/20 flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -1158,8 +1192,10 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
             </div>
           </div>
         </div>
+        )}
 
         {/* WhatsApp Card */}
+        {showWhatsAppCard && (
         <div className="relative pointer-events-none opacity-60 grayscale bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 transition-all duration-300 overflow-hidden">
           <div className="absolute top-4 left-4 bg-gray-700 dark:bg-gray-600 text-white text-xs font-bold px-3 py-1 rounded-full z-10 border border-gray-600 shadow-sm">قريباً</div>
           <div className="p-6 border-b border-gray-100 dark:border-gray-700 bg-gradient-to-l from-white to-green-50/50 dark:from-gray-800 dark:to-green-900/20 flex items-center justify-between">
@@ -1263,6 +1299,7 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
             )}
           </div>
         </div>
+        )}
 
       </div>
 
