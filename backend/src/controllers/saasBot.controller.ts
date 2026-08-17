@@ -11,7 +11,7 @@ const DEFAULT_MODEL = 'gpt-4o-mini';
 const ai = API_KEY ? new OpenAI({ apiKey: API_KEY }) : null;
 
 const saasBotRequestSchema = z.object({
-  query: z.string().min(1),
+  query: z.string().min(1).max(500),
   botType: z.enum(['marketing', 'support']),
 });
 

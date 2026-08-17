@@ -3,6 +3,8 @@ import { AuthRequest } from '../middleware/auth.js';
 import { createError } from '../middleware/errorHandler.js';
 import pool from '../database/connection.js';
 import { getPlanConfig } from '../utils/planConfig.js';
+import path from 'path';
+import fs from 'fs';
 
 const ensurePaymentRequestsTable = async () => {
   await pool.query(`
@@ -406,6 +408,60 @@ export const reviewPaymentRequest = async (
         status: newStatus
       }
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+function resolveProofDiskPath(proofUrl: string, merchantId: string): string | null {
+  const pathPart = proofUrl.replace(/^https?:\/\/[^/]+/, '').split('?')[0];
+  const marker = `/uploads/${merchantId}/`;
+  if (!pathPart.includes(marker) && !pathPart.startsWith(marker)) {
+    return null;
+  }
+  const uploadsIdx = pathPart.indexOf('/uploads/');
+  if (uploadsIdx === -1) return null;
+  const relative = pathPart.slice(uploadsIdx + '/uploads/'.length);
+  const uploadsRoot = path.resolve(process.cwd(), process.env.UPLOAD_DIR || 'uploads');
+  const full = path.resolve(uploadsRoot, relative);
+  if (full !== uploadsRoot && !full.startsWith(uploadsRoot + path.sep)) {
+    return null;
+  }
+  return full;
+}
+
+/** Authenticated download of a payment proof (admin). */
+export const serveAdminPaymentProof = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    await ensurePaymentRequestsTable();
+    const { id } = req.params;
+    const result = await pool.query(
+      `SELECT merchant_id, proof_url FROM subscription_payment_requests WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return next(createError('Not found', 404));
+    }
+    const { merchant_id: merchantId, proof_url: proofUrl } = result.rows[0];
+    const diskPath = resolveProofDiskPath(proofUrl, merchantId);
+    if (!diskPath || !fs.existsSync(diskPath) || !fs.statSync(diskPath).isFile()) {
+      return next(createError('Proof file not found', 404));
+    }
+    const ext = path.extname(diskPath).toLowerCase();
+    const mime =
+      ext === '.pdf' ? 'application/pdf'
+      : ext === '.webp' ? 'image/webp'
+      : ext === '.png' ? 'image/png'
+      : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+      : 'application/octet-stream';
+    res.setHeader('Content-Type', mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.sendFile(diskPath);
   } catch (error) {
     next(error);
   }

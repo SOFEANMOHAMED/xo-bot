@@ -19,7 +19,14 @@ import {
     getCatalogMeta
 } from '../../catalog/product-search.js';
 import { resolveProductImageForBot } from '../../catalog/resolve-product-image.js';
-import { resolveColorEntity, formatColorOptionsForDisplay } from '../../catalog/color-options.js';
+import { formatColorOptionsForDisplay } from '../../catalog/color-options.js';
+import {
+    isColorInProductCatalog,
+    resolveOrderColor,
+    buildUnavailableColorMessage,
+    buildAskColorMessage,
+    type ResolveOrderColorResult
+} from './orderColorPolicy.js';
 import {
     sanitizeCaptionWhenImageSent,
     stripFalseImageDeliveryClaims
@@ -171,6 +178,9 @@ export function checkOrderCompleteness(
         const hasColors = Array.isArray(product.colors) && product.colors.length > 0;
         const hasSizes = Array.isArray(product.sizes) && product.sizes.length > 0;
         if (hasColors && !e.color) missing.push('color');
+        if (hasColors && e.color && !isColorInProductCatalog(e.color, product.colors)) {
+            missing.push('color');
+        }
         if (hasSizes && !e.size) missing.push('size');
     }
 
@@ -208,6 +218,106 @@ async function buildColorAwareImageTag(
 
 // Re-export for callers that imported from salesgpt
 export { sanitizeCaptionWhenImageSent } from '../../response/image-caption.js';
+
+function collectUserMessageTexts(recentMessages: Message[], currentMessage: string): string[] {
+    const history = recentMessages
+        .filter((m) => m.role === 'user')
+        .map((m) => m.content || '');
+    return [...history, currentMessage];
+}
+
+/**
+ * Strict catalog-bound color for the active product.
+ * User history wins over AI / stale state (prevents hallucinated overwrite on confirm).
+ */
+function resolveProductOrderColor(params: {
+    product: Product | undefined;
+    messageText: string;
+    recentMessages: Message[];
+    conversationState: ConversationState;
+    aiColor?: string | null;
+    language: Language;
+    replyText: string;
+}): {
+    color: string | null;
+    replyText: string;
+    policy: ResolveOrderColorResult | null;
+} {
+    const catalogColors = params.product?.colors;
+    if (!catalogColors?.length) {
+        const fallback =
+            params.aiColor ||
+            params.conversationState.extracted_entities?.color ||
+            null;
+        return { color: fallback, replyText: params.replyText, policy: null };
+    }
+
+    const userMessages = collectUserMessageTexts(params.recentMessages, params.messageText);
+    const policy = resolveOrderColor({
+        catalogColors,
+        currentMessage: params.messageText,
+        userMessages,
+        storedColor: params.conversationState.extracted_entities?.color,
+        aiColor: params.aiColor ?? null
+    });
+
+    let replyText = params.replyText;
+
+    if (policy.needsClarification && policy.ambiguous.length > 1) {
+        const options = formatColorOptionsForDisplay(
+            policy.ambiguous,
+            params.language === 'english' ? 'english' : 'arabic'
+        );
+        replyText = params.language === 'arabic'
+            ? `تقصد أي خيار لون؟ 🎨\n${options}`
+            : `Which color option did you mean? 🎨\n${options}`;
+        return { color: null, replyText, policy };
+    }
+
+    if (!policy.color && policy.rejectedAiColor) {
+        replyText = buildUnavailableColorMessage(
+            params.language === 'english' ? 'english' : 'arabic',
+            catalogColors,
+            policy.rejectedAiColor
+        );
+        return { color: null, replyText, policy };
+    }
+
+    return { color: policy.color, replyText, policy };
+}
+
+/** Block order finalization when the product requires a catalog color that is missing/invalid. */
+function gateConfirmWhenColorInvalid(params: {
+    nextAction: string;
+    product: Product | undefined;
+    resolvedColor: string | null;
+    language: Language;
+    replyText: string;
+    rejectedColor?: string | null;
+}): { nextAction: string; replyText: string; awaitingConfirmation: boolean } {
+    const catalogColors = params.product?.colors;
+    const needsColor = Array.isArray(catalogColors) && catalogColors.length > 0;
+    const colorOk = !needsColor || isColorInProductCatalog(params.resolvedColor, catalogColors);
+
+    if (params.nextAction !== CONFIRM_ORDER_ACTION || colorOk) {
+        return {
+            nextAction: params.nextAction,
+            replyText: params.replyText,
+            awaitingConfirmation: params.nextAction === AWAIT_CONFIRMATION_ACTION
+        };
+    }
+
+    const lang = params.language === 'english' ? 'english' : 'arabic';
+    const replyText = params.resolvedColor
+        ? buildUnavailableColorMessage(lang, catalogColors!, params.resolvedColor)
+        : buildAskColorMessage(lang, catalogColors!);
+
+    return {
+        nextAction: AWAIT_CONFIRMATION_ACTION,
+        replyText,
+        awaitingConfirmation: true
+    };
+}
 
 // ==================== MAIN SALESGPT PIPELINE ====================
 
@@ -373,20 +483,40 @@ export const processWithSalesGPT = async (
     // Affirmative confirm OR decline of upsell/"anything else?" while order is complete → finalize.
     // Never finalize when the customer is asking for product details (e.g. "تمام، معلومات أكثر؟").
     const askingProductInfo = isProductInfoRequest(messageText);
+
+    const catalogColorsForConfirm = products[0]?.colors;
+    const colorForFastPath = catalogColorsForConfirm?.length
+        ? resolveProductOrderColor({
+            product: products[0],
+            messageText,
+            recentMessages,
+            conversationState,
+            aiColor: null,
+            language,
+            replyText: ''
+        }).color
+        : conversationState.extracted_entities?.color ?? null;
+
+    const fastPathColorReady =
+        !catalogColorsForConfirm?.length ||
+        isColorInProductCatalog(colorForFastPath, catalogColorsForConfirm);
+
     if (
         wasInClosingFlow &&
         completeness.complete &&
+        fastPathColorReady &&
         (userSaidYes || userSaidNo) &&
         !askingProductInfo
     ) {
         const e = conversationState.extracted_entities || {};
         const productName = products[0]?.name || e.product_query || '';
+        const confirmedColor = colorForFastPath ?? e.color;
         const thankMsg = buildOrderConfirmedMessage(language, {
             name: e.name,
             phone: e.phone,
             address: e.address,
             product_name: productName,
-            color: e.color,
+            color: confirmedColor,
             size: e.size,
             quantity: e.quantity
         });
@@ -415,7 +545,7 @@ export const processWithSalesGPT = async (
             collectedInfo: {
                 product_name: productName,
                 product_id: products[0]?.id,
-                color: e.color,
+                color: confirmedColor,
                 size: e.size,
                 quantity: e.quantity || 1,
                 name: e.name,
@@ -438,7 +568,7 @@ export const processWithSalesGPT = async (
                 ...(conversationState.extracted_entities || {}),
                 product_query: productName || conversationState.extracted_entities?.product_query,
                 product_id: products[0]?.id || conversationState.extracted_entities?.product_id,
-                color: e.color,
+                color: confirmedColor,
                 size: e.size,
                 quantity: e.quantity,
                 name: e.name,
@@ -463,7 +593,7 @@ export const processWithSalesGPT = async (
             stage: 'close',
             entities: {
                 product_query: productName,
-                color: e.color,
+                color: confirmedColor,
                 size: e.size,
                 quantity: e.quantity,
                 product_id: products[0]?.id
@@ -562,28 +692,22 @@ export const processWithSalesGPT = async (
     }
 
     // ==================== STEP 4: Build Updated Conversation State ====================
-    // Resolve color against product options (compound options stay whole)
-    let resolvedColor =
-        salesResult.collectedInfo.color || conversationState.extracted_entities?.color || null;
-    if (products[0]?.colors?.length && (resolvedColor || messageText)) {
-        const colorResolution = resolveColorEntity(
-            resolvedColor,
-            products[0].colors,
-            messageText
-        );
-        if (colorResolution.needsClarification && colorResolution.ambiguous.length > 1) {
-            const options = formatColorOptionsForDisplay(
-                colorResolution.ambiguous,
-                language === 'english' ? 'english' : 'arabic'
-            );
-            finalReplyText = language === 'arabic'
-                ? `تقصد أي خيار لون؟ 🎨\n${options}`
-                : `Which color option did you mean? 🎨\n${options}`;
-            resolvedColor = null;
-        } else if (colorResolution.color) {
-            resolvedColor = colorResolution.color;
-            salesResult.collectedInfo.color = colorResolution.color;
-        }
+    // Strict catalog-bound color — user history beats AI (prevents hallucinated overwrite)
+    const colorResolution = resolveProductOrderColor({
+        product: products[0],
+        messageText,
+        recentMessages,
+        conversationState,
+        aiColor: salesResult.collectedInfo.color,
+        language,
+        replyText: finalReplyText
+    });
+    let resolvedColor = colorResolution.color;
+    finalReplyText = colorResolution.replyText;
+    if (resolvedColor) {
+        salesResult.collectedInfo.color = resolvedColor;
+    } else if (products[0]?.colors?.length) {
+        salesResult.collectedInfo.color = undefined;
     }
 
     const updatedState: ConversationState = {
@@ -616,7 +740,17 @@ export const processWithSalesGPT = async (
     // ==================== STEP 5: Return Result ====================
     // next_action is already policy-gated in the agent: confirm_order only after
     // explicit customer finalization; otherwise await_confirmation.
-    const effectiveNextAction = salesResult.nextAction;
+    const confirmGate = gateConfirmWhenColorInvalid({
+        nextAction: salesResult.nextAction,
+        product: products[0],
+        resolvedColor,
+        language,
+        replyText: finalReplyText,
+        rejectedColor: colorResolution.policy?.rejectedAiColor
+    });
+    let effectiveNextAction = confirmGate.nextAction;
+    finalReplyText = confirmGate.replyText;
+
     if (effectiveNextAction === AWAIT_CONFIRMATION_ACTION) {
         updatedState.salesgpt_stage_id = '8';
         updatedState.current_stage = 'close';

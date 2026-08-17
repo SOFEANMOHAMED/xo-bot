@@ -53,20 +53,26 @@ const sanitizeUUID = (str: string | null | undefined): string | null => {
   return null;
 };
 
-// Verify WhatsApp webhook signature
+// Verify WhatsApp webhook signature (Meta signs the raw body with the App Secret)
 const verifyWhatsAppSignature = (req: any, secret: string): boolean => {
   const signature = req.headers['x-hub-signature-256'];
-  if (!signature) return false;
+  if (!signature || typeof signature !== 'string') return false;
 
-  const hmac = crypto.createHmac('sha256', secret);
-  const payload = JSON.stringify(req.body);
-  hmac.update(payload);
-  const expectedSignature = `sha256=${hmac.digest('hex')}`;
+  const payloadBuffer: Buffer = req.rawBody
+    ? Buffer.isBuffer(req.rawBody)
+      ? req.rawBody
+      : Buffer.from(String(req.rawBody), 'utf8')
+    : Buffer.from(JSON.stringify(req.body ?? {}), 'utf8');
 
-  return crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(expectedSignature)
-  );
+  const expectedSignature = `sha256=${crypto
+    .createHmac('sha256', secret)
+    .update(payloadBuffer)
+    .digest('hex')}`;
+
+  const a = Buffer.from(signature, 'utf8');
+  const b = Buffer.from(expectedSignature, 'utf8');
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
 };
 
 // Get WhatsApp access token for a merchant
@@ -495,18 +501,31 @@ export const verifyWhatsAppWebhook = async (
     const token = (req as any).query['hub.verify_token'];
     const challenge = (req as any).query['hub.challenge'];
 
-    // Get verify token from database (first verified account)
-    const result = await pool.query(
-      'SELECT webhook_verify_token FROM whatsapp_accounts WHERE is_verified = true AND webhook_verify_token IS NOT NULL LIMIT 1'
-    );
+    // Multi-tenant: match the submitted token (never pick LIMIT 1 across merchants)
+    let matched = false;
+    if (typeof token === 'string' && token.length > 0) {
+      const result = await pool.query(
+        `SELECT 1 FROM whatsapp_accounts
+         WHERE is_verified = true
+           AND webhook_verify_token IS NOT NULL
+           AND webhook_verify_token = $1
+         LIMIT 1`,
+        [token]
+      );
+      matched = result.rows.length > 0;
+      if (!matched && process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN) {
+        matched = token === process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
+      }
+    }
 
-    const verifyToken = result.rows[0]?.webhook_verify_token || process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
-
-    if (mode === 'subscribe' && token === verifyToken) {
+    if (mode === 'subscribe' && matched) {
       logger.info('WhatsApp webhook verified');
       res.status(200).send(challenge);
     } else {
-      logger.warn('WhatsApp webhook verification failed', { mode, token, expectedToken: verifyToken });
+      logger.warn('WhatsApp webhook verification failed', {
+        mode,
+        hasToken: typeof token === 'string' && token.length > 0
+      });
       res.status(403).send('Forbidden');
     }
   } catch (error: any) {
@@ -522,10 +541,36 @@ export const handleWhatsAppWebhook = async (
   next: NextFunction
 ) => {
   try {
-    // Send 200 OK immediately to acknowledge receipt
-    res.status(200).send('OK');
-
     const body = (req as any).body;
+
+    // Resolve App Secret: platform env, then per-account secret by phone_number_id
+    let appSecret =
+      process.env.WHATSAPP_APP_SECRET || process.env.FACEBOOK_APP_SECRET || '';
+    const phoneNumberIdForSig =
+      body?.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
+    if (!appSecret && phoneNumberIdForSig) {
+      const secretRow = await pool.query(
+        `SELECT app_secret FROM whatsapp_accounts
+         WHERE phone_number_id = $1 AND app_secret IS NOT NULL AND app_secret != ''
+         LIMIT 1`,
+        [String(phoneNumberIdForSig)]
+      );
+      appSecret = secretRow.rows[0]?.app_secret || '';
+    }
+
+    if (!appSecret) {
+      if (process.env.NODE_ENV === 'production') {
+        logger.warn('WhatsApp webhook rejected: app secret not configured');
+        return res.status(403).send('Forbidden');
+      }
+      logger.warn('WhatsApp webhook: no app secret configured (dev allow)');
+    } else if (!verifyWhatsAppSignature(req, appSecret)) {
+      logger.warn('WhatsApp webhook signature verification failed');
+      return res.status(403).send('Forbidden');
+    }
+
+    // Acknowledge only after signature checks
+    res.status(200).send('OK');
     
     // WhatsApp webhook structure
     if (body.object === 'whatsapp_business_account') {

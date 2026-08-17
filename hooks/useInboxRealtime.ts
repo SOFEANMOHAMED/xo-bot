@@ -51,14 +51,9 @@ type Options = {
 
 const API_BASE = (import.meta as any).env?.VITE_API_URL || 'https://xo-bot.com/api';
 
-function getAuthToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem('auth_token');
-}
-
 /**
  * Merchant inbox realtime via SSE (fetch + stream).
- * Uses Authorization header (SaaS-safe; no token in URL).
+ * Auth via HttpOnly cookie (credentials: include).
  */
 export function useInboxRealtime({ enabled = true, onEvent }: Options) {
   const [connected, setConnected] = useState(false);
@@ -75,19 +70,13 @@ export function useInboxRealtime({ enabled = true, onEvent }: Options) {
 
     const connect = async () => {
       if (cancelled) return;
-      const token = getAuthToken();
-      if (!token) {
-        setConnected(false);
-        retryTimer = setTimeout(connect, 4000);
-        return;
-      }
 
       abort = new AbortController();
       try {
         const response = await fetch(`${API_BASE}/conversations/stream`, {
           method: 'GET',
+          credentials: 'include',
           headers: {
-            Authorization: `Bearer ${token}`,
             Accept: 'text/event-stream',
           },
           signal: abort.signal,

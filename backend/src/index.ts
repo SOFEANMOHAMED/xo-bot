@@ -29,7 +29,6 @@ import analyticsRoutes from './routes/analytics.routes.js';
 import whatsappRoutes from './routes/whatsapp.routes.js';
 import pagesRoutes from './routes/pages.routes.js';
 import supportRoutes from './routes/support.routes.js';
-import enableAIRoutes from './routes/enable-ai.js';
 import { autoReenableBot } from './controllers/conversation.controller.js';
 import pool from './database/connection.js';
 import { createRequire } from 'module';
@@ -58,9 +57,19 @@ const helmetConfig = {
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "http:", "https:", "*"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.tailwindcss.com"]
+      baseUri: ["'self'"],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+      formAction: ["'self'"],
+      // Scripts: same-origin only (no CDNs, no inline/eval)
+      scriptSrc: ["'self'"],
+      scriptSrcAttr: ["'none'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      workerSrc: ["'self'"],
+      manifestSrc: ["'self'"],
     }
   }
 };
@@ -75,22 +84,55 @@ app.use((req, res, next) => {
 });
 
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'https://xo-bot.com',
+  origin: (origin, callback) => {
+    const raw = process.env.CORS_ORIGIN || 'https://xo-bot.com';
+    const allowed = raw.split(',').map((s) => s.trim()).filter(Boolean);
+    // Allow non-browser clients (no Origin) and exact allowlist matches
+    if (!origin || allowed.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(null, false);
+  },
   credentials: true
 }));
 
-// Body Parsing Middleware (50mb to support product updates with large images/base64)
-app.use(express.json({ 
-  limit: '50mb',
-  verify: (req: any, res, buf) => {
-    req.rawBody = buf;
-  }
-}));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+// Default JSON body limit is small; large payloads only on known heavy routes
+const attachRawBody = (req: any, _res: any, buf: Buffer) => {
+  req.rawBody = buf;
+};
+const jsonSmall = express.json({ limit: '1mb', verify: attachRawBody });
+const jsonLarge = express.json({ limit: '50mb', verify: attachRawBody });
+app.use((req, res, next) => {
+  const p = req.path || '';
+  const needsLarge =
+    p.startsWith('/api/products') ||
+    p.startsWith('/api/upload') ||
+    p.startsWith('/api/ai/marketing') ||
+    p.startsWith('/api/settings') ||
+    p.startsWith('/webhooks');
+  return (needsLarge ? jsonLarge : jsonSmall)(req, res, next);
+});
+app.use((req, res, next) => {
+  const p = req.path || '';
+  const needsLarge =
+    p.startsWith('/api/products') ||
+    p.startsWith('/api/upload') ||
+    p.startsWith('/api/ai/marketing') ||
+    p.startsWith('/api/settings') ||
+    p.startsWith('/webhooks');
+  return express.urlencoded({ extended: true, limit: needsLarge ? '50mb' : '1mb' })(req, res, next);
+});
 
 // Session Configuration (for OAuth)
+const sessionSecret = process.env.SESSION_SECRET || process.env.JWT_SECRET;
+if (!sessionSecret) {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('SESSION_SECRET or JWT_SECRET is required in production');
+  }
+  logger.warn('SESSION_SECRET/JWT_SECRET missing — using insecure dev session secret');
+}
 app.use(session({
-  secret: process.env.JWT_SECRET || 'your-secret-key-change-in-production',
+  secret: sessionSecret || 'dev-only-insecure-session-secret',
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -237,11 +279,20 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/pages', pagesRoutes);
 app.use('/api/support', supportRoutes);
-app.use('/', enableAIRoutes); // Admin routes for enabling/disabling Full AI Mode
 app.use('/webhooks', webhookRoutes);
 
-// Serve uploaded files
-app.use('/uploads', express.static('uploads'));
+// Serve uploaded files (product images for channels). Sensitive dirs stay private.
+app.use('/uploads', (req, res, next) => {
+  const p = req.path.toLowerCase();
+  if (
+    p.includes('/payment-proofs/') ||
+    p.includes('/design-studio/') ||
+    p.endsWith('.pdf')
+  ) {
+    return res.status(404).end();
+  }
+  next();
+}, express.static('uploads', { index: false, dotfiles: 'deny' }));
 
 // 404 Handler
 app.use((req, res) => {

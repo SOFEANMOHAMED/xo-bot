@@ -5,6 +5,7 @@ import { Package, Calendar, User, DollarSign, ShoppingCart, CheckCircle, XCircle
 import { useDebounce } from '../hooks/useDebounce';
 import Pagination from './Pagination';
 import { getOrderSourceBadgeClass, getOrderSourceLabel } from '../utils/orderSource';
+import { formatCurrency as formatCurrencyAmount } from '../utils/locale';
 
 interface OrderManagerProps {
   orders: Order[];
@@ -107,14 +108,12 @@ const OrderManager: React.FC<OrderManagerProps> = ({ orders, storeCurrency, onUp
     });
   };
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('ar-EG-u-nu-latn', {
-      style: 'currency',
-      currency: storeCurrency || 'USD',
+  const formatCurrency = (amount: number) =>
+    formatCurrencyAmount(amount, storeCurrency || 'USD', {
+      round: true,
       minimumFractionDigits: 0,
       maximumFractionDigits: 0
-    }).format(Math.round(amount));
-  };
+    });
 
   // Generate short unique order number
   const getShortOrderNumber = (order: Order): string => {

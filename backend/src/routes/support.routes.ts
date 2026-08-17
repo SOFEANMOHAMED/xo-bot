@@ -17,13 +17,13 @@ const router = express.Router();
 // User routes (require authentication)
 router.post('/', authenticate, createSupportTicket);
 router.get('/my-tickets', authenticate, getUserSupportTickets);
-router.get('/:id', authenticate, getSupportTicket);
-router.post('/:ticketId/reply', authenticate, addSupportTicketReply);
 
-// Admin routes (gate + auth + role)
+// Admin routes MUST be registered before /:id so "admin" is not captured as an id
 router.get('/admin/all', requireAdminGate, authenticate, requireRole('owner', 'admin'), getAllSupportTickets);
 router.get('/admin/stats', requireAdminGate, authenticate, requireRole('owner', 'admin'), getSupportTicketsStats);
 router.put('/admin/:id', requireAdminGate, authenticate, requireRole('owner', 'admin'), updateSupportTicket);
 
-export default router;
+router.get('/:id', authenticate, getSupportTicket);
+router.post('/:ticketId/reply', authenticate, addSupportTicketReply);
 
+export default router;

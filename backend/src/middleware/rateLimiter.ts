@@ -2,25 +2,15 @@ import rateLimit from 'express-rate-limit';
 
 export const rateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // ✅ Increased limit to 1000 requests per 15 minutes (was 100)
+  max: 1000,
   message: {
     error: 'Too many requests from this IP, please try again later.'
   },
   standardHeaders: true,
   legacyHeaders: false,
-  // ✅ Skip rate limiting for authenticated users (they have subscription limits)
-  skip: (req) => {
-    // If user is authenticated, skip rate limiting (they have subscription limits)
-    return !!req.headers.authorization;
-  },
-  // ✅ Use a more lenient key generator (by IP + user if authenticated)
-  keyGenerator: (req) => {
-    // If authenticated, use user ID instead of IP
-    if (req.headers.authorization) {
-      return req.headers.authorization;
-    }
-    return req.ip || req.socket.remoteAddress || 'unknown';
-  }
+  // Always key by IP — do not skip when an Authorization header is present
+  // (a forged header previously bypassed limits on public endpoints).
+  keyGenerator: (req) => req.ip || req.socket.remoteAddress || 'unknown'
 });
 
 /** Login only — separate store so register/forgot-password do not consume the same budget. */
@@ -57,3 +47,14 @@ export const passwordResetRateLimiter = rateLimit({
   legacyHeaders: false
 });
 
+/** Public AI / bot endpoints that burn provider quota */
+export const publicAiRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: {
+    error: 'Too many AI requests from this IP, please try again later.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.ip || req.socket.remoteAddress || 'unknown'
+});

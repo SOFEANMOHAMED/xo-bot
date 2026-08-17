@@ -1661,9 +1661,15 @@ export const facebookWebhook = async (
     }
     
 
-    // Verify signature
+    // Verify signature (fail closed in production when secret is missing)
     const appSecret = process.env.FACEBOOK_APP_SECRET;
-    if (appSecret && !verifyFacebookSignature(req, appSecret)) {
+    if (!appSecret) {
+      if (process.env.NODE_ENV === 'production') {
+        logger.warn('Facebook webhook rejected: FACEBOOK_APP_SECRET not configured');
+        return next(createError('Webhook not configured', 503));
+      }
+      logger.warn('Facebook webhook: FACEBOOK_APP_SECRET missing (dev allow)');
+    } else if (!verifyFacebookSignature(req, appSecret)) {
       logger.warn('Invalid Facebook webhook signature');
       return next(createError('Invalid signature', 403));
     }

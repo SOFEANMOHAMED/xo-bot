@@ -3,7 +3,7 @@ import React, { useState, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Product } from '../types';
 import { Plus, Search, Trash2, Edit2, FileSpreadsheet, Download, Upload, Sparkles, Loader2, X, AlertCircle, Package, Star } from 'lucide-react';
-import { utils, writeFile } from 'xlsx';
+import { downloadRowsAsXlsx } from '../utils/spreadsheetExport';
 import apiService from '../services/api';
 import { useDebounce } from '../hooks/useDebounce';
 import { validateProduct, validateURL, validateLength } from '../utils/validation';
@@ -365,7 +365,7 @@ const ProductManager: React.FC<ProductManagerProps> = ({ products, onAddProduct,
     }
   };
 
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
     // Transform data for Excel (Arabic headers)
     const exportData = products.map(p => ({
       'المعرف': p.id,
@@ -380,15 +380,11 @@ const ProductManager: React.FC<ProductManagerProps> = ({ products, onAddProduct,
       'المصدر': p.source || 'يدوي'
     }));
 
-    // Create Worksheet
-    const ws = utils.json_to_sheet(exportData);
-    
-    // Create Workbook and append worksheet
-    const wb = utils.book_new();
-    utils.book_append_sheet(wb, ws, "المنتجات");
-
-    // Generate Excel file
-    writeFile(wb, `products_export_${new Date().toISOString().split('T')[0]}.xlsx`);
+    await downloadRowsAsXlsx(
+      exportData,
+      'المنتجات',
+      `products_export_${new Date().toISOString().split('T')[0]}.xlsx`
+    );
   };
 
   return (

@@ -81,6 +81,14 @@ const AdminPaymentRequests: React.FC = () => {
     }
   };
 
+  const handleOpenProof = async (requestId: string) => {
+    try {
+      await apiService.openAdminPaymentProof(requestId);
+    } catch (error) {
+      logger.error('Failed to open payment proof', error);
+    }
+  };
+
   const isPdf = (url: string) => /\.pdf($|\?)/i.test(url);
 
   const statusBadge = (status: string) => {
@@ -168,16 +176,15 @@ const AdminPaymentRequests: React.FC = () => {
                       ${req.amount}
                     </td>
                     <td className="px-4 py-4">
-                      <a
-                        href={req.proofUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                      <button
+                        type="button"
+                        onClick={() => handleOpenProof(req.id)}
                         className="inline-flex items-center gap-1.5 text-indigo-400 hover:text-indigo-300 text-sm"
                       >
                         {isPdf(req.proofUrl) ? <FileText size={14} /> : <ImageIcon size={14} />}
                         عرض
                         <ExternalLink size={12} />
-                      </a>
+                      </button>
                     </td>
                     <td className="px-4 py-4">{statusBadge(req.status)}</td>
                     <td className="px-4 py-4 text-slate-400 text-xs" dir="ltr">

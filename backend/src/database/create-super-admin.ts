@@ -10,9 +10,15 @@ import pool from './connection.js';
 dotenv.config();
 
 async function createSuperAdmin() {
+  // Require explicit env — never fall back to weak defaults
+  if (!process.env.SUPER_ADMIN_EMAIL?.trim() || !process.env.SUPER_ADMIN_PASSWORD?.trim()) {
+    console.error('❌ SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD must be set in the environment');
+    process.exit(1);
+  }
+
   // تطبيع البريد مثل مسار تسجيل الدخول؛ قصّ المسافات من كلمة المرور في .env لتفادي أخطاء النسخ
-  const email = (process.env.SUPER_ADMIN_EMAIL || 'admin@xobot.ai').trim().toLowerCase();
-  const password = (process.env.SUPER_ADMIN_PASSWORD || 'admin123456').trim();
+  const email = process.env.SUPER_ADMIN_EMAIL.trim().toLowerCase();
+  const password = process.env.SUPER_ADMIN_PASSWORD.trim();
   const name = (process.env.SUPER_ADMIN_NAME || 'Super Admin').trim() || 'Super Admin';
 
   try {
@@ -39,7 +45,7 @@ async function createSuperAdmin() {
       
       console.log('✅ Super admin updated successfully!');
       console.log(`📧 Email: ${email}`);
-      console.log(`🔑 Password: ${password}`);
+      console.log('🔑 Password: set from SUPER_ADMIN_PASSWORD env (not printed)');
       console.log(`👤 Role: owner`);
     } else {
       // Create new admin
@@ -69,7 +75,7 @@ async function createSuperAdmin() {
 
       console.log('✅ Super admin created successfully!');
       console.log(`📧 Email: ${email}`);
-      console.log(`🔑 Password: ${password}`);
+      console.log('🔑 Password: set from SUPER_ADMIN_PASSWORD env (not printed)');
       console.log(`👤 Role: owner`);
       console.log(`🆔 ID: ${merchant.id}`);
     }

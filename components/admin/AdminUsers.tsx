@@ -11,7 +11,7 @@ import { useDebounce } from '../../hooks/useDebounce';
 import Pagination from '../Pagination';
 import { validateEmail, validatePassword, validateRequired } from '../../utils/validation';
 import { handleApiError } from '../../utils/errorHandler';
-import { utils, writeFile } from 'xlsx';
+import { downloadRowsAsCsv, downloadRowsAsXlsx } from '../../utils/spreadsheetExport';
 
 interface AdminUsersProps {
   filterByTrial?: boolean;
@@ -460,7 +460,7 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
   };
 
   // Export users to Excel/CSV
-  const handleExportUsers = (format: 'excel' | 'csv' = 'excel') => {
+  const handleExportUsers = async (format: 'excel' | 'csv' = 'excel') => {
     try {
       const exportData = filteredUsers.map(user => ({
         'المعرف': user.id,
@@ -473,21 +473,12 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
         'تاريخ التسجيل': user.registrationDate.toLocaleDateString('ar-SA-u-nu-latn'),
       }));
 
-      const ws = utils.json_to_sheet(exportData);
-      const wb = utils.book_new();
-      utils.book_append_sheet(wb, ws, 'المستخدمين');
-
       const fileName = `users_export_${new Date().toISOString().split('T')[0]}.${format === 'excel' ? 'xlsx' : 'csv'}`;
-      
+
       if (format === 'csv') {
-        const csv = utils.sheet_to_csv(ws);
-        const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = fileName;
-        link.click();
+        downloadRowsAsCsv(exportData, fileName);
       } else {
-        writeFile(wb, fileName);
+        await downloadRowsAsXlsx(exportData, 'المستخدمين', fileName);
       }
 
       showSuccess(`تم تصدير ${filteredUsers.length} مستخدم بنجاح`);

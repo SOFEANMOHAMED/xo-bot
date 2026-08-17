@@ -1,11 +1,23 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { createError } from './errorHandler.js';
+import { parseCookies, AUTH_COOKIE } from '../utils/authCookies.js';
 
 export interface AuthRequest extends Request {
   userId?: string;
   merchantId?: string;
   userRole?: string;
+}
+
+function extractToken(req: AuthRequest): string | null {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const bearer = authHeader.substring(7).trim();
+    if (bearer) return bearer;
+  }
+  const cookies = parseCookies(req);
+  const cookieToken = (cookies[AUTH_COOKIE] || '').trim();
+  return cookieToken || null;
 }
 
 export const authenticate = (
@@ -14,15 +26,12 @@ export const authenticate = (
   next: NextFunction
 ) => {
   try {
-    const authHeader = req.headers.authorization;
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const token = extractToken(req);
+    if (!token) {
       throw createError('Authentication required', 401);
     }
 
-    const token = authHeader.substring(7);
     const jwtSecret = process.env.JWT_SECRET;
-
     if (!jwtSecret) {
       throw createError('JWT secret not configured', 500);
     }
@@ -62,4 +71,3 @@ export const requireRole = (...allowedRoles: string[]) => {
     next();
   };
 };
-

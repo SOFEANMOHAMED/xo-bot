@@ -549,7 +549,14 @@ export const getProductImage = async (
     const trimmed = imageUrl.trim();
     if (trimmed.startsWith('/uploads/') || trimmed.startsWith('uploads/')) {
       const relative = trimmed.startsWith('/') ? trimmed.slice(1) : trimmed;
-      const localPath = pathMod.default.join(process.cwd(), relative);
+      const uploadsRoot = pathMod.default.resolve(process.cwd(), 'uploads');
+      const localPath = pathMod.default.resolve(process.cwd(), relative);
+      const underUploads =
+        localPath === uploadsRoot ||
+        localPath.startsWith(uploadsRoot + pathMod.default.sep);
+      if (!underUploads) {
+        return next(createError('Invalid image path', 400));
+      }
       if (fsMod.existsSync(localPath) && fsMod.statSync(localPath).isFile()) {
         const ext = pathMod.default.extname(localPath).toLowerCase();
         const mimeTypes: Record<string, string> = {

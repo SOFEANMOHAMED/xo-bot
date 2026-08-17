@@ -1085,7 +1085,13 @@ export const shopifyWebhook = async (
     }
 
     const shopifySecret = process.env.SHOPIFY_API_SECRET;
-    if (shopifySecret) {
+    if (!shopifySecret) {
+      if (process.env.NODE_ENV === 'production') {
+        logger.warn('Shopify webhook rejected: SHOPIFY_API_SECRET not configured');
+        return next(createError('Webhook not configured', 503));
+      }
+      logger.warn('Shopify webhook: SHOPIFY_API_SECRET missing (dev allow)');
+    } else {
       const originalBody = req.body;
       req.body = rawBodyForVerification;
       const isValid = verifyShopifySignature(req, shopifySecret);

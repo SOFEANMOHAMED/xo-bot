@@ -69,12 +69,15 @@ const sanitizeUUID = (str: string | null | undefined): string | null => {
   return null;
 };
 
-// Verify Telegram webhook secret (if configured)
+// Verify Telegram webhook secret (required — empty secret rejects)
 const verifyTelegramSecret = (req: any, secret: string): boolean => {
-  if (!secret) return true; // If no secret configured, allow all
-  
+  if (!secret) return false;
   const receivedSecret = req.headers['x-telegram-bot-api-secret-token'];
-  return receivedSecret === secret;
+  if (typeof receivedSecret !== 'string' || !receivedSecret) return false;
+  const a = Buffer.from(receivedSecret, 'utf8');
+  const b = Buffer.from(secret, 'utf8');
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
 };
 
 // Extract image URL from response text
@@ -1508,133 +1511,76 @@ export const telegramWebhook = async (
       bodyKeys: req.body ? Object.keys(req.body) : []
     });
 
-    // ✅ SaaS: Identify merchant by webhook secret (unique per merchant)
+    // ✅ SaaS: Identify merchant by webhook secret (unique per merchant) — required
     const receivedSecret = req.headers['x-telegram-bot-api-secret-token'];
-    
+
+    if (typeof receivedSecret !== 'string' || !receivedSecret) {
+      logger.warn('Telegram webhook rejected: missing secret token');
+      return res.status(403).send('Forbidden');
+    }
+
     console.log('[Telegram Webhook] Identifying merchant:', {
-      hasSecret: !!receivedSecret,
-      secretPreview: receivedSecret ? receivedSecret.substring(0, 10) + '...' : 'none'
+      hasSecret: true
     });
-    
+
     let merchantId: string | null = null;
     let merchantResult: any;
 
-    if (receivedSecret) {
-      // Try to find bot by webhook secret (new multiple bots approach)
-      try {
-        // First try telegram_bots table (new approach)
-        let botResult = await pool.query(
-          `SELECT merchant_id, bot_token, bot_type, id as bot_id
-           FROM telegram_bots 
-           WHERE webhook_secret = $1 AND is_active = true`,
+    try {
+      let botResult = await pool.query(
+        `SELECT merchant_id, bot_token, bot_type, id as bot_id
+         FROM telegram_bots 
+         WHERE webhook_secret = $1 AND is_active = true`,
+        [receivedSecret]
+      );
+
+      if (botResult.rows.length > 0) {
+        merchantId = botResult.rows[0].merchant_id;
+        const botId = botResult.rows[0].bot_id;
+        const botType = botResult.rows[0].bot_type;
+        console.log('[Telegram Webhook] Bot identified by secret:', { merchantId, botId, botType });
+        logger.info('Telegram webhook bot identified by secret', { merchantId, botId });
+
+        (req as any).telegramBotId = botId;
+        (req as any).telegramBotType = botType;
+      } else {
+        merchantResult = await pool.query(
+          `SELECT merchant_id, telegram_bot_token 
+           FROM merchant_settings 
+           WHERE telegram_webhook_secret = $1`,
           [receivedSecret]
         );
 
-        if (botResult.rows.length > 0) {
-          merchantId = botResult.rows[0].merchant_id;
-          // Store bot info for later use (update will be defined later)
-          const botId = botResult.rows[0].bot_id;
-          const botType = botResult.rows[0].bot_type;
-          console.log('[Telegram Webhook] Bot identified by secret:', { merchantId, botId, botType });
-          logger.info('Telegram webhook bot identified by secret', { merchantId, botId });
-          
-          // Store in a way that processTelegramMessage can access
-          (req as any).telegramBotId = botId;
-          (req as any).telegramBotType = botType;
+        if (merchantResult.rows.length > 0) {
+          merchantId = merchantResult.rows[0].merchant_id;
+          (req as any).telegramBotType = 'both';
+          console.log('[Telegram Webhook] Merchant identified by secret (legacy):', { merchantId });
+          logger.info('Telegram webhook merchant identified by secret (legacy)', { merchantId });
         } else {
-          // Fallback to legacy merchant_settings table
-          merchantResult = await pool.query(
-            `SELECT merchant_id, telegram_bot_token 
-             FROM merchant_settings 
-             WHERE telegram_webhook_secret = $1`,
-            [receivedSecret]
-          );
-
-          if (merchantResult.rows.length > 0) {
-            merchantId = merchantResult.rows[0].merchant_id;
-            (req as any).telegramBotType = 'both'; // Default for legacy bots
-            console.log('[Telegram Webhook] Merchant identified by secret (legacy):', { merchantId });
-            logger.info('Telegram webhook merchant identified by secret (legacy)', { merchantId });
-          } else {
-            console.log('[Telegram Webhook] No bot or merchant found with this secret');
-          }
+          console.log('[Telegram Webhook] No bot or merchant found with this secret');
+          logger.warn('Telegram webhook: unknown webhook secret');
         }
-      } catch (error) {
-        console.error('[Telegram Webhook] Error querying by secret:', error);
-        logger.error('Error querying bot by webhook secret', error as Error);
       }
-    }
-
-    // ✅ Fallback: If no merchant found by secret, try legacy approach (for existing bots)
-    // This allows existing bots to continue working until they reconnect
-    if (!merchantId) {
-      console.log('[Telegram Webhook] Trying legacy fallback...');
-      logger.warn('Telegram webhook: No merchant found by secret, trying legacy fallback', {
-        hasSecret: !!receivedSecret,
-        secretPreview: receivedSecret ? receivedSecret.substring(0, 10) + '...' : 'none'
-      });
-
-      try {
-        // Legacy: Find merchant by testing bot tokens (for backward compatibility)
-        const allMerchantsResult = await pool.query(
-          `SELECT merchant_id, telegram_bot_token 
-           FROM merchant_settings 
-           WHERE telegram_bot_token IS NOT NULL AND telegram_bot_token != ''`
-        );
-
-        console.log('[Telegram Webhook] Found merchants with bot tokens:', { count: allMerchantsResult.rows.length });
-
-        if (allMerchantsResult.rows.length === 0) {
-          console.log('[Telegram Webhook] No merchants found with Telegram bot configured');
-          logger.warn('No merchants found with Telegram bot configured');
-          return next(createError('No merchant found', 404));
-        }
-
-        // If only one merchant, use it directly
-        if (allMerchantsResult.rows.length === 1) {
-          merchantId = allMerchantsResult.rows[0].merchant_id;
-          console.log('[Telegram Webhook] Using single merchant (legacy fallback):', { merchantId });
-          logger.info('Telegram webhook: Using single merchant (legacy fallback)', { merchantId });
-        } else {
-          // Multiple merchants - need to identify by bot token
-          // This is less efficient but necessary for backward compatibility
-          console.log('[Telegram Webhook] Multiple merchants found, using first as fallback:', {
-            merchantCount: allMerchantsResult.rows.length,
-            firstMerchantId: allMerchantsResult.rows[0].merchant_id
-          });
-          logger.warn('Telegram webhook: Multiple merchants found, using legacy token matching (inefficient)', {
-            merchantCount: allMerchantsResult.rows.length
-          });
-          
-          // Try to identify by matching bot token (if we can extract bot info from update)
-          // For now, use first merchant as fallback (not ideal but works)
-          merchantId = allMerchantsResult.rows[0].merchant_id;
-          logger.warn('Telegram webhook: Using first merchant as fallback (should reconnect bot for proper SaaS support)', {
-            merchantId
-          });
-        }
-      } catch (error) {
-        console.error('[Telegram Webhook] Error in legacy fallback:', error);
-        logger.error('Error in legacy fallback for Telegram webhook', error as Error);
-        return next(createError('Error identifying merchant', 500));
-      }
+    } catch (error) {
+      console.error('[Telegram Webhook] Error querying by secret:', error);
+      logger.error('Error querying bot by webhook secret', error as Error);
     }
 
     if (!merchantId) {
       console.error('[Telegram Webhook] Could not identify merchant');
       logger.error('Telegram webhook: Could not identify merchant', new Error('Merchant identification failed'), {
-        hasSecret: !!receivedSecret
+        hasSecret: true
       });
-      return next(createError('Could not identify merchant', 500));
+      return res.status(403).send('Forbidden');
     }
     
     console.log('[Telegram Webhook] Merchant identified successfully:', {
       merchantId,
-      method: receivedSecret ? 'webhook_secret' : 'legacy_fallback'
+      method: 'webhook_secret'
     });
     logger.info('Telegram webhook merchant identified', {
       merchantId,
-      method: receivedSecret ? 'webhook_secret' : 'legacy_fallback'
+      method: 'webhook_secret'
     });
 
     const update = req.body;
@@ -1839,14 +1785,16 @@ export const listTelegramBots = async (
       [req.merchantId]
     );
 
-    // Don't expose full bot_token, only show last 10 characters
+    // Don't expose full bot_token — mask like settings API
     const bots = result.rows.map(row => ({
       id: row.id,
       botName: row.bot_name,
       botUsername: row.bot_username,
       botType: row.bot_type,
       isActive: row.is_active,
-      tokenPreview: row.bot_token ? `${row.bot_token.substring(0, 10)}...` : null,
+      tokenPreview: row.bot_token
+        ? (row.bot_token.length <= 4 ? '****' : `****${row.bot_token.slice(-4)}`)
+        : null,
       createdAt: row.created_at,
       updatedAt: row.updated_at
     }));

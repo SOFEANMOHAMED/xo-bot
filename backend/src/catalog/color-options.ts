@@ -6,7 +6,8 @@
 
 const COLOR_CANONICAL: Array<{ canonical: string; aliases: string[] }> = [
   { canonical: 'احمر', aliases: ['احمر', 'أحمر', 'حمرا', 'حمراء', 'حمره', 'red', 'maroon', 'burgundy'] },
-  { canonical: 'ازرق', aliases: ['ازرق', 'أزرق', 'زرقا', 'زرقاء', 'زرقه', 'blue', 'navy', 'كحلي', 'كحليه'] },
+  { canonical: 'ازرق', aliases: ['ازرق', 'أزرق', 'زرقا', 'زرقاء', 'زرقه', 'blue'] },
+  { canonical: 'كحلي', aliases: ['كحلي', 'كحليه', 'navy'] },
   { canonical: 'اخضر', aliases: ['اخضر', 'أخضر', 'خضرا', 'خضراء', 'خضره', 'green', 'olive'] },
   { canonical: 'اصفر', aliases: ['اصفر', 'أصفر', 'صفرا', 'صفراء', 'صفره', 'yellow', 'gold', 'ذهبي', 'ذهبيه'] },
   { canonical: 'اسود', aliases: ['اسود', 'أسود', 'سودا', 'سوداء', 'سوده', 'black'] },
@@ -329,8 +330,8 @@ export function resolveColorEntity(
     return { color: null, needsClarification: true, ambiguous: match.ambiguous };
   }
 
-  // Keep free-text if no catalog match (custom wording)
-  return { color: candidate, needsClarification: false, ambiguous: [] };
+  // Product defines options — reject colors outside the catalog (no free-text fallback)
+  return { color: null, needsClarification: false, ambiguous: [] };
 }
 
 export { COLOR_CANONICAL };

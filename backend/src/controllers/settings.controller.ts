@@ -9,6 +9,7 @@ import {
   getCacheStats 
 } from '../services/cacheService.js';
 import { clearProductKeywordsCache } from '../services/tools/catalogTool.js';
+import { maskSecret, isMaskedSecret } from '../utils/logPrivacy.js';
 
 const settingsSchema = z.object({
   storeName: z.string().optional(),
@@ -184,6 +185,10 @@ export const updateSettings = async (
       // Include all values including boolean false (false is a valid value that should be saved)
       // Only skip undefined values - but include explicit false values
       if (value !== undefined) {
+        // Do not persist masked telegram token echoes from the client
+        if (key === 'telegramBotToken' && typeof value === 'string' && isMaskedSecret(value)) {
+          return;
+        }
         // Convert camelCase to snake_case, handling special cases like "AI" in "enableAIInjection"
         let dbKey = key.replace(/([A-Z])/g, '_$1').toLowerCase();
         // Fix special cases: enableAIInjection -> enable_ai_injection (not enable_a_i_injection)
@@ -415,7 +420,7 @@ function formatSettings(row: any) {
 
   return {
     storeName: row.store_name,
-    telegramBotToken: row.telegram_bot_token || '',
+    telegramBotToken: maskSecret(row.telegram_bot_token),
     welcomeMessage: row.welcome_message || '',
     systemPrompt: row.system_prompt || '',
     autoReplyComments: row.auto_reply_comments || false,

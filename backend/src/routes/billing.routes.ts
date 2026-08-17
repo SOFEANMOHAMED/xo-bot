@@ -4,7 +4,8 @@ import {
   submitPaymentRequest,
   getMyPaymentRequests,
   getAdminPaymentRequests,
-  reviewPaymentRequest
+  reviewPaymentRequest,
+  serveAdminPaymentProof
 } from '../controllers/billing.controller.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { requireAdminGate } from '../middleware/adminGate.js';
@@ -23,6 +24,13 @@ router.get(
   authenticate,
   requireRole('owner', 'admin'),
   getAdminPaymentRequests
+);
+router.get(
+  '/admin/payment-requests/:id/proof',
+  requireAdminGate,
+  authenticate,
+  requireRole('owner', 'admin'),
+  serveAdminPaymentProof
 );
 router.put(
   '/admin/payment-requests/:id',

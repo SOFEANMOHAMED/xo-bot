@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import DOMPurify from 'dompurify';
 import { Bot, Loader2 } from 'lucide-react';
 import apiService from '../services/api';
 import { logger } from '../utils/logger';
@@ -29,22 +30,31 @@ const PageView: React.FC<PageViewProps> = ({
   const cmsFooterPages = usePublishedFooterPages();
 
   const formatContent = (content: string): string => {
+    let html: string;
     if (/<[a-z][\s\S]*>/i.test(content)) {
-      return content;
+      html = content;
+    } else {
+      const paragraphs = content.split(/\n\s*\n/);
+      html = paragraphs.map(paragraph => {
+        const trimmed = paragraph.trim();
+        if (!trimmed) return '';
+        const withBreaks = trimmed.replace(/\n/g, '<br>');
+        if (/^[\d]+[)\-\.]/.test(trimmed) || /^[أ-ي][)\-\.]/.test(trimmed)) {
+          return `<h3>${withBreaks}</h3>`;
+        }
+        if (trimmed.length < 60 && !trimmed.includes(':') && !trimmed.includes('،')) {
+          return `<h2>${withBreaks}</h2>`;
+        }
+        return `<p>${withBreaks}</p>`;
+      }).filter(p => p).join('\n');
     }
-    const paragraphs = content.split(/\n\s*\n/);
-    return paragraphs.map(paragraph => {
-      const trimmed = paragraph.trim();
-      if (!trimmed) return '';
-      const withBreaks = trimmed.replace(/\n/g, '<br>');
-      if (/^[\d]+[)\-\.]/.test(trimmed) || /^[أ-ي][)\-\.]/.test(trimmed)) {
-        return `<h3>${withBreaks}</h3>`;
-      }
-      if (trimmed.length < 60 && !trimmed.includes(':') && !trimmed.includes('،')) {
-        return `<h2>${withBreaks}</h2>`;
-      }
-      return `<p>${withBreaks}</p>`;
-    }).filter(p => p).join('\n');
+    return DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: [
+        'p', 'br', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li',
+        'a', 'strong', 'em', 'b', 'i', 'u', 'img', 'blockquote', 'hr', 'span', 'div'
+      ],
+      ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'target', 'rel']
+    });
   };
 
   useEffect(() => {

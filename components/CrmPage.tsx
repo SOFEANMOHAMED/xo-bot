@@ -26,6 +26,7 @@ import {
 import apiService from '../services/api';
 import { Customer, CustomerStats } from '../types';
 import { logger } from '../utils/logger';
+import { formatCurrency as formatCurrencyAmount } from '../utils/locale';
 
 type CrmPageProps = {
   storeCurrency?: string;
@@ -225,19 +226,7 @@ const CrmPage: React.FC<CrmPageProps> = ({ storeCurrency = 'USD' }) => {
   };
 
   const currencyCode = (storeCurrency || 'USD').trim().toUpperCase() || 'USD';
-  const formatCurrency = (amount: number) => {
-    try {
-      return new Intl.NumberFormat('ar-EG-u-nu-latn', {
-        style: 'currency',
-        currency: currencyCode
-      }).format(amount);
-    } catch {
-      return new Intl.NumberFormat('ar-EG-u-nu-latn', {
-        style: 'currency',
-        currency: 'USD'
-      }).format(amount);
-    }
-  };
+  const formatCurrency = (amount: number) => formatCurrencyAmount(amount, currencyCode);
 
   return (
     <div className="space-y-6 animate-fade-in">

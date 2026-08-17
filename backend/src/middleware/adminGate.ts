@@ -1,11 +1,20 @@
 import { Response, NextFunction } from 'express';
 import { AuthRequest } from './auth.js';
 import { createError } from './errorHandler.js';
+import {
+  parseCookies,
+  ADMIN_GATE_COOKIE,
+  secretsEqual,
+  verifyAdminGateProof,
+  setAdminGateCookie,
+  clearAdminGateCookie,
+  createAdminGateProof
+} from '../utils/authCookies.js';
 
 /**
- * Extra gate for admin APIs: requires `X-Admin-Gate` matching ADMIN_GATE_SECRET.
- * Returns 404 (not 403) so scanners do not learn that an admin surface exists.
- * Public admin endpoints (e.g. subscription plans) must be registered before this middleware.
+ * Extra gate for admin APIs.
+ * Accepts HttpOnly unlock cookie (preferred) or legacy X-Admin-Gate header.
+ * Returns 404 so scanners do not learn that an admin surface exists.
  */
 export const requireAdminGate = (
   req: AuthRequest,
@@ -18,14 +27,55 @@ export const requireAdminGate = (
     if (process.env.NODE_ENV === 'production') {
       return next(createError('Not found', 404));
     }
-    // Dev convenience when secret is not set yet
     return next();
   }
 
-  const provided = String(req.headers['x-admin-gate'] || '').trim();
-  if (!provided || provided !== secret) {
-    return next(createError('Not found', 404));
+  const cookies = parseCookies(req);
+  const cookieProof = (cookies[ADMIN_GATE_COOKIE] || '').trim();
+  if (cookieProof && verifyAdminGateProof(cookieProof)) {
+    return next();
   }
 
-  next();
+  // Legacy header support (clients must not bake the secret into JS bundles)
+  const provided = String(req.headers['x-admin-gate'] || '').trim();
+  if (provided && secretsEqual(provided, secret)) {
+    return next();
+  }
+
+  return next(createError('Not found', 404));
+};
+
+/** POST body `{ secret }` → sets HttpOnly admin-gate cookie (no secret stored in browser JS). */
+export const unlockAdminGate = (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const expected = (process.env.ADMIN_GATE_SECRET || '').trim();
+    if (!expected) {
+      if (process.env.NODE_ENV === 'production') {
+        return next(createError('Not found', 404));
+      }
+      setAdminGateCookie(res);
+      return res.json({ success: true, data: { unlocked: true } });
+    }
+
+    const provided = String((req.body as any)?.secret || '').trim();
+    if (!provided || !secretsEqual(provided, expected) || !createAdminGateProof()) {
+      return next(createError('Not found', 404));
+    }
+
+    setAdminGateCookie(res);
+    return res.json({ success: true, data: { unlocked: true } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const lockAdminGate = (_req: AuthRequest, res: Response) => {
+  clearAdminGateCookie(res);
+  res.json({ success: true, data: { unlocked: false } });
+};
+
+export const adminGateStatus = (req: AuthRequest, res: Response) => {
+  const cookies = parseCookies(req);
+  const unlocked = verifyAdminGateProof((cookies[ADMIN_GATE_COOKIE] || '').trim());
+  res.json({ success: true, data: { unlocked } });
 };

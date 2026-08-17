@@ -1,7 +1,8 @@
 import express from 'express';
-import { register, login, getProfile, updateProfile, forgotPassword, resetPassword, googleAuth, googleCallback, deleteAccount, changePassword, completeProfile } from '../controllers/auth.controller.js';
+import { register, login, getProfile, updateProfile, forgotPassword, resetPassword, googleAuth, googleCallback, deleteAccount, changePassword, completeProfile, logout, establishSession } from '../controllers/auth.controller.js';
 import { authenticate } from '../middleware/auth.js';
 import { loginRateLimiter, registerRateLimiter, passwordResetRateLimiter } from '../middleware/rateLimiter.js';
+import { unlockAdminGate, lockAdminGate, adminGateStatus } from '../middleware/adminGate.js';
 
 const router = express.Router();
 
@@ -81,6 +82,13 @@ router.post('/register', registerRateLimiter, register);
  *         description: Invalid credentials
  */
 router.post('/login', loginRateLimiter, login);
+
+router.post('/logout', logout);
+router.post('/session', establishSession);
+
+router.post('/admin-gate', loginRateLimiter, unlockAdminGate);
+router.delete('/admin-gate', lockAdminGate);
+router.get('/admin-gate', adminGateStatus);
 
 /**
  * @swagger

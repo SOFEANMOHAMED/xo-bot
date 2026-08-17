@@ -43,6 +43,7 @@ import {
     type CustomerRequestSignals
 } from './customerRequest.js';
 import { formatColorOptionsForDisplay } from '../../catalog/color-options.js';
+import { isColorInProductCatalog } from './orderColorPolicy.js';
 
 /** Values the sales-response model may return in JSON `next_action` */
 const SALESGPT_MODEL_NEXT_ACTIONS = new Set([
@@ -213,6 +214,7 @@ export class SalesGPTAgent {
     private aiCallsCount: number = 0;
     private currentProductsHaveColors: boolean = false;
     private currentProductsHaveSizes: boolean = false;
+    private currentProductColors: string[] = [];
 
     constructor(config: SalesGPTConfig) {
         this.config = config;
@@ -345,6 +347,10 @@ export class SalesGPTAgent {
 
         this.currentProductsHaveColors = products.some(p => p.colors && p.colors.length > 0);
         this.currentProductsHaveSizes = products.some(p => p.sizes && p.sizes.length > 0);
+        this.currentProductColors =
+            products.find((p) => p.colors && p.colors.length > 0)?.colors ||
+            products[0]?.colors ||
+            [];
 
         // Snapshot completeness BEFORE this turn's AI extraction merges new fields.
         const fieldsWereCompleteBeforeTurn = this.getOrderFieldCompleteness().complete;
@@ -499,6 +505,14 @@ export class SalesGPTAgent {
         if (!phone) missing.push('phone');
         if (!address) missing.push('address');
         if (this.currentProductsHaveColors && !color) missing.push('color');
+        if (
+            this.currentProductsHaveColors &&
+            color &&
+            this.currentProductColors.length > 0 &&
+            !isColorInProductCatalog(color, this.currentProductColors)
+        ) {
+            missing.push('color');
+        }
         if (this.currentProductsHaveSizes && !size) missing.push('size');
         return { complete: missing.length === 0, missing };
     }
@@ -523,6 +537,11 @@ export class SalesGPTAgent {
                     (this.state.collectedInfo as any).quantity = n;
                 }
                 continue;
+            }
+            if (key === 'color' && this.currentProductColors.length > 0) {
+                if (!isColorInProductCatalog(String(value), this.currentProductColors)) {
+                    continue;
+                }
             }
             (this.state.collectedInfo as any)[key] = value;
         }

@@ -739,9 +739,15 @@ export const instagramWebhook = async (
       return next(createError('Invalid verify token', 403));
     }
 
-    // POST: verify signature
+    // POST: verify signature (fail closed in production when secret is missing)
     const appSecret = process.env.FACEBOOK_APP_SECRET;
-    if (appSecret && !verifyInstagramSignature(req, appSecret)) {
+    if (!appSecret) {
+      if (process.env.NODE_ENV === 'production') {
+        logger.warn('Instagram webhook rejected: FACEBOOK_APP_SECRET not configured');
+        return next(createError('Webhook not configured', 503));
+      }
+      logger.warn('Instagram webhook: FACEBOOK_APP_SECRET missing (dev allow)');
+    } else if (!verifyInstagramSignature(req, appSecret)) {
       logger.warn('Invalid Instagram webhook signature');
       return next(createError('Invalid signature', 403));
     }

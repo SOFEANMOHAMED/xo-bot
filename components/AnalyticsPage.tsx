@@ -15,6 +15,7 @@ import {
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, Legend } from 'recharts';
 import apiService from '../services/api';
 import { logger } from '../utils/logger';
+import { AR_SA_LATN, formatCurrency as formatCurrencyAmount } from '../utils/locale';
 
 type Period = '7days' | '30days' | '90days' | 'year';
 type Tab = 'overview' | 'sales' | 'conversations' | 'products';
@@ -119,13 +120,13 @@ const AnalyticsPage: React.FC<{ storeCurrency?: string }> = ({ storeCurrency = '
     }
   }, [activeTab, period]);
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('ar-SA-u-nu-latn', { 
-      style: 'currency', 
-      currency: storeCurrency || 'USD',
-      minimumFractionDigits: 2 
-    }).format(amount);
-  };
+  const formatCurrency = (amount: number) =>
+    formatCurrencyAmount(
+      amount,
+      storeCurrency || 'USD',
+      { minimumFractionDigits: 2 },
+      AR_SA_LATN
+    );
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);

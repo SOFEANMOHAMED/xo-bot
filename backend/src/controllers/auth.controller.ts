@@ -14,6 +14,7 @@ import {
   linkMerchantToAffiliateReferrer,
   referralCodeFromOAuthState
 } from '../utils/affiliateReferral.js';
+import { setAuthCookie, clearAuthCookie } from '../utils/authCookies.js';
 import '../config/passport.js'; // Initialize passport
 
 /** تطبيع البريد: المقارنة في قاعدة البيانات حساسة لحالة الأحرف بدون هذا. */
@@ -162,6 +163,7 @@ export const register = async (
 
     // Generate JWT
     const token = generateToken(merchant.id, merchant.id, role);
+    setAuthCookie(res, token);
 
     res.status(201).json({
       success: true,
@@ -176,6 +178,7 @@ export const register = async (
           createdAt: merchant.created_at,
           role: role
         },
+        // Token also returned for transitional clients; prefer HttpOnly cookie.
         token
       }
     });
@@ -225,6 +228,7 @@ export const login = async (
 
     // Generate JWT
     const token = generateToken(merchant.id, merchant.id, role);
+    setAuthCookie(res, token);
 
     res.json({
       success: true,
@@ -598,6 +602,7 @@ export const googleCallback = async (
         // Generate temporary token for profile completion
         const role = user.role || 'user';
         const token = generateToken(user.id, user.id, role);
+        setAuthCookie(res, token);
         
         const frontendUrl = process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'https://xo-bot.com';
         const refFromState = referralCodeFromOAuthState(req.query.state);
@@ -611,6 +616,7 @@ export const googleCallback = async (
       // Generate JWT token
       const role = user.role || 'user';
       const token = generateToken(user.id, user.id, role);
+      setAuthCookie(res, token);
 
       console.log('[Google OAuth] Token generated, redirecting to frontend:', {
         userId: user.id,
@@ -623,11 +629,14 @@ export const googleCallback = async (
         tokenLength: token.length
       });
 
-      // Redirect to frontend with token
+      // Cookie carries auth — do not put JWT in the URL
       const frontendUrl = process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'https://xo-bot.com';
       const refFromState = referralCodeFromOAuthState(req.query.state);
-      const refQuery = refFromState ? `&ref=${encodeURIComponent(refFromState)}` : '';
-      res.redirect(`${frontendUrl}/?token=${token}${refQuery}`);
+      res.redirect(
+        refFromState
+          ? `${frontendUrl}/?ref=${encodeURIComponent(refFromState)}`
+          : frontendUrl
+      );
     } catch (error: any) {
       console.error('[Google OAuth] Failed to generate token or redirect:', error);
       logger.error('Google OAuth: Failed to generate token or redirect', error instanceof Error ? error : new Error(String(error)), {
@@ -886,6 +895,40 @@ export const completeProfile = async (
     });
   } catch (error) {
     logger.error('Error completing profile', error as Error);
+    next(error);
+  }
+};
+
+/** Clear HttpOnly auth cookie (and respond OK even if already logged out). */
+export const logout = async (_req: Request, res: Response) => {
+  clearAuthCookie(res);
+  res.json({ success: true, message: 'Logged out' });
+};
+
+/**
+ * Exchange a one-time Bearer/body token for an HttpOnly cookie
+ * (used after OAuth complete-profile URL bootstrap).
+ */
+export const establishSession = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const bodyToken = typeof (req.body as any)?.token === 'string' ? (req.body as any).token.trim() : '';
+    const header = req.headers.authorization;
+    const bearer = header?.startsWith('Bearer ') ? header.substring(7).trim() : '';
+    const token = bodyToken || bearer;
+    if (!token) {
+      return next(createError('Token required', 400));
+    }
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      return next(createError('JWT secret not configured', 500));
+    }
+    jwt.verify(token, jwtSecret);
+    setAuthCookie(res, token);
+    res.json({ success: true, data: { established: true } });
+  } catch (error: any) {
+    if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
+      return next(createError('Invalid or expired token', 401));
+    }
     next(error);
   }
 };

@@ -6,13 +6,6 @@
 import { logger } from '../utils/logger';
 
 const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'https://xo-bot.com/api';
-const ADMIN_GATE_SECRET = String((import.meta as any).env?.VITE_ADMIN_GATE_SECRET || '').trim();
-
-/** Admin API paths need the obscure gate header (except public catalog endpoints). */
-function needsAdminGate(endpoint: string): boolean {
-  if (endpoint.includes('/subscriptions/public')) return false;
-  return /(^|\/)admin(\/|$|\?)/.test(endpoint);
-}
 
 logger.log('API Base URL:', API_BASE_URL);
 
@@ -38,23 +31,62 @@ export interface MarketingImageRecord {
 
 class ApiService {
   private baseURL: string;
+  /** In-memory only — JWT lives in HttpOnly cookie; Bearer is transitional fallback. */
   private token: string | null = null;
 
   constructor(baseURL: string) {
     this.baseURL = baseURL;
-    // Load token from localStorage
+    // Migrate away from localStorage JWT (XSS risk)
     if (typeof window !== 'undefined') {
-      this.token = localStorage.getItem('auth_token');
+      const legacy = localStorage.getItem('auth_token');
+      if (legacy) {
+        this.token = legacy;
+        localStorage.removeItem('auth_token');
+        void this.establishSession(legacy).catch(() => {
+          /* cookie may already be set from login */
+        });
+      }
     }
   }
 
   setToken(token: string | null) {
     this.token = token;
-    if (token && typeof window !== 'undefined') {
-      localStorage.setItem('auth_token', token);
-    } else if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined') {
       localStorage.removeItem('auth_token');
     }
+    if (token) {
+      void this.establishSession(token).catch(() => {
+        /* ignore — cookie auth may already work */
+      });
+    }
+  }
+
+  async establishSession(token: string): Promise<void> {
+    await fetch(`${this.baseURL}/auth/session`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+  }
+
+  async unlockAdminGate(secret: string): Promise<void> {
+    await this.request<{ unlocked: boolean }>(
+      '/auth/admin-gate',
+      { method: 'POST', body: JSON.stringify({ secret }) },
+      false
+    );
+  }
+
+  async getAdminGateStatus(): Promise<{ unlocked: boolean }> {
+    return this.request<{ unlocked: boolean }>('/auth/admin-gate', { method: 'GET' }, false);
+  }
+
+  async lockAdminGate(): Promise<void> {
+    await fetch(`${this.baseURL}/auth/admin-gate`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
   }
 
   private async request<T>(
@@ -62,11 +94,6 @@ class ApiService {
     options: RequestInit = {},
     requireAuth: boolean = true
   ): Promise<T> {
-    // Ensure token is loaded from localStorage if not already set
-    if (requireAuth && !this.token && typeof window !== 'undefined') {
-      this.token = localStorage.getItem('auth_token');
-    }
-
     const url = `${this.baseURL}${endpoint}`;
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -79,12 +106,9 @@ class ApiService {
       });
     }
 
+    // Prefer cookie; send Bearer only as transitional fallback
     if (requireAuth && this.token) {
       headers['Authorization'] = `Bearer ${this.token}`;
-    }
-
-    if (ADMIN_GATE_SECRET && needsAdminGate(endpoint)) {
-      headers['X-Admin-Gate'] = ADMIN_GATE_SECRET;
     }
 
     try {
@@ -98,6 +122,7 @@ class ApiService {
       const response = await fetch(url, {
         ...options,
         headers,
+        credentials: 'include',
       });
 
       logger.log('API Response:', { 
@@ -255,7 +280,7 @@ class ApiService {
     }>('/auth/register', {
       method: 'POST',
       body: JSON.stringify({ email, password, name, referralCode, phone }),
-    });
+    }, false);
     
     this.setToken(response.token);
     return response;
@@ -276,21 +301,22 @@ class ApiService {
     }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
-    });
+    }, false);
     
     this.setToken(response.token);
     return response;
   }
 
   async logout() {
-    // Try to call logout endpoint if it exists, but don't fail if it doesn't
-    // JWT tokens are stateless, so logout is mainly for server-side logging
+    this.token = null;
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('auth_token');
+    }
     try {
       return await this.request<{ success: boolean; message: string }>('/auth/logout', {
         method: 'POST'
-      }, false); // Don't require auth for logout
-    } catch (error) {
-      // If logout endpoint doesn't exist, that's OK - JWT tokens don't need server-side logout
+      }, false);
+    } catch {
       return { success: true, message: 'Logged out locally' };
     }
   }
@@ -1016,14 +1042,16 @@ class ApiService {
   }
 
   async getMarketingImageBlob(id: string, download: boolean = false): Promise<Blob> {
-    if (!this.token && typeof window !== 'undefined') {
-      this.token = localStorage.getItem('auth_token');
+    const headers: Record<string, string> = {};
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
     }
 
     const response = await fetch(
       `${this.baseURL}/ai/marketing-images/${encodeURIComponent(id)}/content${download ? '?download=1' : ''}`,
       {
-        headers: this.token ? { Authorization: `Bearer ${this.token}` } : {}
+        headers,
+        credentials: 'include',
       }
     );
 
@@ -1066,6 +1094,7 @@ class ApiService {
       method: 'POST',
       headers,
       body: formData,
+      credentials: 'include',
     });
 
     const text = await response.text();
@@ -1104,6 +1133,7 @@ class ApiService {
       method: 'POST',
       headers,
       body: formData,
+      credentials: 'include',
     });
 
     const text = await response.text();
@@ -2065,6 +2095,7 @@ class ApiService {
       method: 'POST',
       headers,
       body: formData,
+      credentials: 'include',
     });
 
     const text = await response.text();
@@ -2130,6 +2161,24 @@ class ApiService {
       method: 'PUT',
       body: JSON.stringify({ action, adminNote }),
     });
+  }
+
+  async openAdminPaymentProof(id: string): Promise<void> {
+    const endpoint = `/billing/admin/payment-requests/${id}/proof`;
+    const headers: Record<string, string> = {};
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+    const response = await fetch(`${this.baseURL}${endpoint}`, {
+      headers,
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      throw new Error('تعذر فتح إثبات الدفع');
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener,noreferrer');
   }
 
   async getAdminNotifications(unreadOnly?: boolean) {

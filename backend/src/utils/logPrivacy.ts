@@ -28,3 +28,18 @@ export function orderDataMeta(orderData: {
     productsCount: Array.isArray(orderData?.products) ? orderData!.products!.length : 0,
   };
 }
+
+/** Mask a secret for API responses (e.g. bot tokens). Empty → empty. */
+export function maskSecret(value: string | null | undefined): string {
+  const v = (value || '').trim();
+  if (!v) return '';
+  if (v.length <= 4) return '****';
+  return `****${v.slice(-4)}`;
+}
+
+/** True when client echoed a masked secret back (do not persist). */
+export function isMaskedSecret(value: string | null | undefined): boolean {
+  const v = (value || '').trim();
+  if (!v) return false;
+  return /^\*+[A-Za-z0-9_-]{0,8}$/.test(v) || v.startsWith('****');
+}

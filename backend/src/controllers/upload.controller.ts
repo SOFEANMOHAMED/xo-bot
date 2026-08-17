@@ -57,8 +57,28 @@ const upload = multer({
   fileFilter
 });
 
+const proofStorage = multer.diskStorage({
+  destination: (req, _file, cb) => {
+    const merchantId = (req as any).merchantId;
+    if (!merchantId) {
+      cb(new Error('Unauthorized'), '');
+      return;
+    }
+    const targetDir = path.join(uploadDir, merchantId, 'payment-proofs');
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+    cb(null, targetDir);
+  },
+  filename: (_req, file, cb) => {
+    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    const ext = (path.extname(file.originalname) || '.bin').toLowerCase();
+    cb(null, `proof-${uniqueSuffix}${ext}`);
+  }
+});
+
 const proofUpload = multer({
-  storage,
+  storage: proofStorage,
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: proofFileFilter
 });
@@ -165,7 +185,7 @@ export const uploadPaymentProof = async (
       size = converted.webpSize;
     }
 
-    const urlPath = `${merchantId}/${filename}`;
+    const urlPath = `${merchantId}/payment-proofs/${filename}`;
     const fileUrl = `${baseUrl}/uploads/${urlPath}`;
 
     res.json({

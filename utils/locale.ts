@@ -16,6 +16,36 @@ export function formatNumber(
   return new Intl.NumberFormat(locale, options).format(value);
 }
 
+export type FormatCurrencyOptions = Intl.NumberFormatOptions & {
+  /** Round before formatting (orders list uses whole units). */
+  round?: boolean;
+};
+
+/** Currency with Latin digits. Invalid ISO codes fall back to USD. */
+export function formatCurrency(
+  amount: number,
+  currency: string = 'USD',
+  options?: FormatCurrencyOptions,
+  locale: string = AR_EG_LATN
+): string {
+  const { round, ...intlOptions } = options || {};
+  const value = round ? Math.round(amount) : amount;
+  const code = (currency || 'USD').trim().toUpperCase() || 'USD';
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: code,
+      ...intlOptions
+    }).format(value);
+  } catch {
+    return new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: 'USD',
+      ...intlOptions
+    }).format(value);
+  }
+}
+
 export function formatDate(
   value: Date | string | number,
   options?: Intl.DateTimeFormatOptions,

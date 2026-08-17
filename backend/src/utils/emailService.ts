@@ -178,7 +178,8 @@ export const sendPasswordResetEmail = async (
     text: `إعادة تعيين كلمة المرور\n\nاستخدم الرابط التالي (صالح لمدة ساعة):\n${resetLink}`,
   };
 
-  return deliverOrLog(mailOptions, 'Password reset email', { to: email, resetLink });
+  // Never log resetLink / token — only recipient
+  return deliverOrLog(mailOptions, 'Password reset email', { to: email });
 };
 
 /**
