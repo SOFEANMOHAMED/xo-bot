@@ -1,17 +1,22 @@
 services:
   postgres:
-    image: postgres:latest
+    image: postgres:18
     container_name: xobot-postgres
     restart: unless-stopped
     ports:
       - "5432:5432"
     environment:
       POSTGRES_DB: xobot_db
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-sofeano333}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    env_file:
+      - .env.docker
     volumes:
-      - xobot_pgdata:/var/lib/postgresql/data
+      - xobot_pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d xobot_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
 volumes:
   xobot_pgdata:
-    external: true
-    name: e103b788bcdef3ddc5f19cae2562da58ad69682999f9fadf9776a1bf266a6556

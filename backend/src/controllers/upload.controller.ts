@@ -1,4 +1,4 @@
-import { Response, NextFunction } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -7,6 +7,34 @@ import { createError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
 
 const WEBP_QUALITY = 80;
+const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+const VIDEO_MAX_BYTES = 100 * 1024 * 1024;
+
+const IMAGE_MIMES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+const VIDEO_MIMES = ['video/mp4', 'video/quicktime', 'video/x-m4v'];
+const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.m4v']);
+
+function isVideoUpload(file: Express.Multer.File): boolean {
+  if (VIDEO_MIMES.includes(file.mimetype)) return true;
+  const ext = path.extname(file.originalname || file.filename || '').toLowerCase();
+  return VIDEO_EXTENSIONS.has(ext);
+}
+
+function publicUploadUrl(merchantId: string | undefined, filename: string): {
+  fileUrl: string;
+  urlPath: string;
+} {
+  const baseUrl = process.env.BACKEND_URL || process.env.BASE_URL || 'https://xo-bot.com';
+  const urlPath = merchantId ? `${merchantId}/${filename}` : filename;
+  const encodedPath = urlPath
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+  return {
+    urlPath,
+    fileUrl: `${baseUrl.replace(/\/$/, '')}/uploads/${encodedPath}`
+  };
+}
 
 // Multer stores to a temp directory first; we convert to WebP afterwards.
 const uploadDir = process.env.UPLOAD_DIR || 'uploads';
@@ -32,30 +60,50 @@ const storage = multer.diskStorage({
   }
 });
 
-const imageMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-const proofMimes = [...imageMimes, 'application/pdf'];
+const proofMimes = [...IMAGE_MIMES, 'application/pdf'];
 
 const fileFilter = (_req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-  if (imageMimes.includes(file.mimetype)) {
+  if (IMAGE_MIMES.includes(file.mimetype) || isVideoUpload(file)) {
     cb(null, true);
-  } else {
-    cb(new Error('Invalid file type. Only images are allowed.'));
+    return;
   }
+  cb(createError('صيغة غير مدعومة. الصور: JPEG/PNG/WebP/GIF — الفيديو: MP4 أو MOV', 400));
 };
 
 const proofFileFilter = (_req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
   if (proofMimes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error('Invalid file type. Only images and PDF are allowed.'));
+    cb(createError('صيغة غير مدعومة. يُسمح بالصور وملفات PDF فقط', 400));
   }
 };
 
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: VIDEO_MAX_BYTES },
   fileFilter
 });
+
+export const handleMulterError = (
+  err: unknown,
+  _req: Request,
+  _res: Response,
+  next: NextFunction
+) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      next(createError('حجم الملف يتجاوز الحد المسموح (100 ميجابايت للفيديو، 10 ميجابايت للصورة)', 400));
+      return;
+    }
+    next(createError(err.message || 'فشل رفع الملف', 400));
+    return;
+  }
+  if (err) {
+    next(err);
+    return;
+  }
+  next();
+};
 
 const proofStorage = multer.diskStorage({
   destination: (req, _file, cb) => {
@@ -123,16 +171,35 @@ export const uploadFile = async (
       return next(createError('No file uploaded', 400));
     }
 
-    const { webpFilename, webpSize } = await convertToWebP(req.file.path, req.file.filename);
-    const baseUrl = process.env.BACKEND_URL || process.env.BASE_URL || 'https://xo-bot.com';
-    // ✅ Security: Include merchantId in the URL path for tenant isolation
     const merchantId = req.merchantId;
-    const urlPath = merchantId ? `${merchantId}/${webpFilename}` : webpFilename;
-    const encodedPath = urlPath
-      .split('/')
-      .map((segment) => encodeURIComponent(segment))
-      .join('/');
-    const fileUrl = `${baseUrl.replace(/\/$/, '')}/uploads/${encodedPath}`;
+    const video = isVideoUpload(req.file);
+
+    if (video) {
+      const { fileUrl, urlPath } = publicUploadUrl(merchantId, req.file.filename);
+      res.json({
+        success: true,
+        data: {
+          file: {
+            filename: req.file.filename,
+            originalName: req.file.originalname,
+            mimetype: req.file.mimetype || 'video/mp4',
+            size: req.file.size,
+            url: fileUrl,
+            path: `/uploads/${urlPath}`,
+            mediaType: 'video'
+          }
+        }
+      });
+      return;
+    }
+
+    if (req.file.size > IMAGE_MAX_BYTES) {
+      try { fs.unlinkSync(req.file.path); } catch { /* ignore */ }
+      return next(createError('حجم الصورة يتجاوز 10 ميجابايت', 400));
+    }
+
+    const { webpFilename, webpSize } = await convertToWebP(req.file.path, req.file.filename);
+    const { fileUrl, urlPath } = publicUploadUrl(merchantId, webpFilename);
 
     res.json({
       success: true,
@@ -143,7 +210,8 @@ export const uploadFile = async (
           mimetype: 'image/webp',
           size: webpSize,
           url: fileUrl,
-          path: `/uploads/${urlPath}`
+          path: `/uploads/${urlPath}`,
+          mediaType: 'image'
         }
       }
     });
@@ -218,24 +286,37 @@ export const uploadFiles = async (
       return next(createError('No files uploaded', 400));
     }
 
-    const baseUrl = process.env.BACKEND_URL || process.env.BASE_URL || 'https://xo-bot.com';
-    // ✅ Security: Include merchantId in the URL path for tenant isolation
     const merchantId = req.merchantId;
     const files = await Promise.all(
       (req.files as Express.Multer.File[]).map(async (file) => {
+        if (isVideoUpload(file)) {
+          const { fileUrl, urlPath } = publicUploadUrl(merchantId, file.filename);
+          return {
+            filename: file.filename,
+            originalName: file.originalname,
+            mimetype: file.mimetype || 'video/mp4',
+            size: file.size,
+            url: fileUrl,
+            path: `/uploads/${urlPath}`,
+            mediaType: 'video' as const
+          };
+        }
+
+        if (file.size > IMAGE_MAX_BYTES) {
+          try { fs.unlinkSync(file.path); } catch { /* ignore */ }
+          throw createError('حجم الصورة يتجاوز 10 ميجابايت', 400);
+        }
+
         const { webpFilename, webpSize } = await convertToWebP(file.path, file.filename);
-        const urlPath = merchantId ? `${merchantId}/${webpFilename}` : webpFilename;
-        const encodedPath = urlPath
-          .split('/')
-          .map((segment) => encodeURIComponent(segment))
-          .join('/');
+        const { fileUrl, urlPath } = publicUploadUrl(merchantId, webpFilename);
         return {
           filename: webpFilename,
           originalName: file.originalname,
           mimetype: 'image/webp',
           size: webpSize,
-          url: `${baseUrl.replace(/\/$/, '')}/uploads/${encodedPath}`,
-          path: `/uploads/${urlPath}`
+          url: fileUrl,
+          path: `/uploads/${urlPath}`,
+          mediaType: 'image' as const
         };
       })
     );

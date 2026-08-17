@@ -156,6 +156,7 @@ export const connectFacebook = async (
       'pages_read_engagement',
       'pages_messaging',
       'pages_manage_posts',
+      'publish_video',
       'pages_manage_engagement',
       'business_management',
     ].join(',');

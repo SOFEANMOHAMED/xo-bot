@@ -29,7 +29,9 @@ async function waitForContainerReady(
     const code = (status.status_code || status.status || '').toUpperCase();
     if (code === 'FINISHED' || code === 'PUBLISHED') return;
     if (code === 'ERROR' || code === 'EXPIRED') {
-      throw new Error(`حاوية إنستغرام فشلت بالمعالجة (${code})`);
+      throw new Error(
+        `حاوية إنستغرام فشلت بالمعالجة (${code}${status.status ? `: ${status.status}` : ''})`
+      );
     }
     await sleep(IG_CONTAINER_POLL_INTERVAL_MS);
   }
@@ -74,8 +76,11 @@ async function createVideoContainer(params: {
   if (params.isCarouselItem) {
     body.is_carousel_item = true;
     body.media_type = 'VIDEO';
-  } else if (params.caption) {
-    body.caption = params.caption;
+  } else {
+    body.share_to_feed = true;
+    if (params.caption) {
+      body.caption = params.caption;
+    }
   }
   const created = await graphPost<ContainerCreateResponse>(
     `${params.igUserId}/media`,
@@ -171,6 +176,10 @@ export async function publishToInstagram(params: {
             })
           );
         }
+      }
+
+      for (const childId of children) {
+        await waitForContainerReady(childId, token);
       }
 
       const parent = await graphPost<ContainerCreateResponse>(`${igUserId}/media`, token, {

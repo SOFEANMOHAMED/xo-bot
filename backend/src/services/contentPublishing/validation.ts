@@ -81,6 +81,11 @@ export function validatePublicationPayload(input: {
     return 'أضف نصاً أو وسائط للمنشور';
   }
 
+  const videoCount = media.filter((m) => m.mediaType === 'video').length;
+  if (hasFb && media.length > 1 && videoCount > 0) {
+    return 'فيسبوك يدعم فيديو واحد لكل منشور، أو كاروسيل صور فقط — لا يمكن خلط فيديو مع صور';
+  }
+
   if (media.length > 1 && media.length < MIN_CAROUSEL_ITEMS) {
     return `الكاروسيل يحتاج ${MIN_CAROUSEL_ITEMS} عناصر على الأقل`;
   }

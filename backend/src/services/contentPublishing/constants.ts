@@ -19,9 +19,9 @@ export const IG_CAPTION_MAX = 2200;
 /** Facebook message practical limit */
 export const FB_CAPTION_MAX = 63206;
 
-/** Max wait for IG media container to finish processing */
-export const IG_CONTAINER_POLL_ATTEMPTS = 20;
-export const IG_CONTAINER_POLL_INTERVAL_MS = 2000;
+/** Max wait for IG media container to finish processing (videos need minutes) */
+export const IG_CONTAINER_POLL_ATTEMPTS = 60;
+export const IG_CONTAINER_POLL_INTERVAL_MS = 4000;
 
 export const EDITABLE_STATUSES = new Set(['draft', 'scheduled', 'failed', 'cancelled']);
 export const DELETABLE_STATUSES = new Set(['draft', 'scheduled', 'failed', 'cancelled', 'published', 'partial']);

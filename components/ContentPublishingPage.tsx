@@ -81,6 +81,38 @@ function accountKey(platform: ContentPlatform, accountRef: string): TargetKey {
   return `${platform}:${accountRef}`;
 }
 
+const IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp,image/gif';
+const VIDEO_ACCEPT = 'video/mp4,video/quicktime,.mp4,.mov,.m4v';
+const VIDEO_MAX_BYTES = 100 * 1024 * 1024;
+const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.m4v'];
+
+function isVideoFile(file: File): boolean {
+  if (file.type.startsWith('video/')) return true;
+  const name = file.name.toLowerCase();
+  return VIDEO_EXTENSIONS.some((ext) => name.endsWith(ext));
+}
+
+function validatePublishFile(file: File): string | null {
+  const video = isVideoFile(file);
+  if (video) {
+    const name = file.name.toLowerCase();
+    const okType =
+      file.type === 'video/mp4' ||
+      file.type === 'video/quicktime' ||
+      file.type === 'video/x-m4v' ||
+      VIDEO_EXTENSIONS.some((ext) => name.endsWith(ext));
+    if (!okType) return `"${file.name}" صيغة فيديو غير مدعومة. استخدم MP4 أو MOV.`;
+    if (file.size > VIDEO_MAX_BYTES) return `"${file.name}" يتجاوز 100 ميجابايت.`;
+    return null;
+  }
+  if (!file.type.startsWith('image/')) {
+    return `"${file.name}" ليس صورة أو فيديو مدعوماً.`;
+  }
+  if (file.size > IMAGE_MAX_BYTES) return `"${file.name}" يتجاوز 10 ميجابايت.`;
+  return null;
+}
+
 const ContentPublishingPage: React.FC<ContentPublishingPageProps> = ({
   showNotification,
   onGoToIntegrations
@@ -166,12 +198,21 @@ const ContentPublishingPage: React.FC<ContentPublishingPageProps> = ({
       const list = Array.from(files).slice(0, 10 - mediaUrls.length);
       const uploaded: Array<{ url: string; mediaType: 'image' | 'video' }> = [];
       for (const file of list) {
-        const isVideo = file.type.startsWith('video/');
+        const invalid = validatePublishFile(file);
+        if (invalid) {
+          notifyRef.current?.(invalid, 'error');
+          continue;
+        }
+        const isVideo = isVideoFile(file);
         const result = await apiService.uploadFile(file);
         uploaded.push({
           url: result.file.url,
           mediaType: isVideo ? 'video' : 'image'
         });
+      }
+      if (!uploaded.length) {
+        notifyRef.current?.('لم يتم رفع أي ملف صالح', 'warning');
+        return;
       }
       setMediaUrls((prev) => [...prev, ...uploaded].slice(0, 10));
       notifyRef.current?.('تم رفع الوسائط', 'success');
@@ -196,6 +237,18 @@ const ContentPublishingPage: React.FC<ContentPublishingPageProps> = ({
   const submitPublication = async () => {
     if (!selectedTargets.size) {
       notifyRef.current?.('اختر حساباً واحداً على الأقل', 'warning');
+      return;
+    }
+    const selectedAccounts = accounts.filter((a) =>
+      selectedTargets.has(accountKey(a.platform, a.accountRef))
+    );
+    const hasFacebook = selectedAccounts.some((a) => a.platform === 'facebook');
+    const videoCount = mediaUrls.filter((m) => m.mediaType === 'video').length;
+    if (hasFacebook && mediaUrls.length > 1 && videoCount > 0) {
+      notifyRef.current?.(
+        'فيسبوك يدعم فيديو واحد لكل منشور، أو كاروسيل صور فقط',
+        'warning'
+      );
       return;
     }
     setSaving(true);
@@ -435,13 +488,14 @@ const ContentPublishingPage: React.FC<ContentPublishingPageProps> = ({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*,video/*"
+              accept={`${IMAGE_ACCEPT},${VIDEO_ACCEPT}`}
               multiple
               className="hidden"
               onChange={(e) => handleUpload(e.target.files)}
             />
             <p className="mt-2 text-[11px] text-gray-400">
-              يجب أن تكون الروابط عامة عبر HTTPS — الرفع يتم إلى مساحة التاجر المعزولة.
+              صور JPEG/PNG/WebP حتى 10 ميجابايت، وفيديو MP4 أو MOV حتى 100 ميجابايت. فيسبوك:
+              فيديو واحد أو كاروسيل صور. إنستغرام: صورة، ريلز، أو كاروسيل.
             </p>
           </div>
 

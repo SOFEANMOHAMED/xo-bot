@@ -67,6 +67,13 @@ export async function publishToFacebookPage(params: {
       return { success: true, externalPostId: posted.id, permalink };
     }
 
+    if (media.some((m) => m.media_type === 'video')) {
+      return {
+        success: false,
+        errorMessage: 'فيسبوك يدعم فيديو واحد لكل منشور، أو كاروسيل صور فقط'
+      };
+    }
+
     // Multi-image / carousel-style: unpublished photos then feed attach
     const images = media.filter((m) => m.media_type === 'image');
     if (!images.length) {

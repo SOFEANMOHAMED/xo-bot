@@ -23,3 +23,7 @@ nginx_config_backup.conf
 باكب
 باكب.tar.gz
 *.tar.gz
+uploads/
+backend/uploads/
+Untitled
+*.save
