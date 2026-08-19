@@ -14,7 +14,7 @@ export interface Product {
   images?: string[];
   /** Color linked to each gallery image (parallel to images); null/'' = unassigned */
   imageColors?: (string | null)[];
-  source?: 'manual' | 'shopify' | 'excel';
+  source?: 'manual' | 'shopify' | 'storify' | 'excel';
   externalId?: string; // Shopify ID
 }
 
@@ -134,6 +134,7 @@ export interface PlanCapabilities {
   maxInstagramAccounts: number;
   maxWhatsAppAccounts: number;
   maxShopifyStores: number;
+  maxStorifyStores: number;
   maxMonthlyMarketingImages: number;
   billingPeriod: 'monthly' | 'yearly';
 }
@@ -148,6 +149,7 @@ export const DEFAULT_PLAN_CAPABILITIES: PlanCapabilities = {
   maxInstagramAccounts: 1,
   maxWhatsAppAccounts: 0,
   maxShopifyStores: 0,
+  maxStorifyStores: 1,
   maxMonthlyMarketingImages: -1,
   billingPeriod: 'monthly'
 };
@@ -246,6 +248,7 @@ export interface AdminUser {
   id: string;
   name: string;
   email: string;
+  phone?: string | null;
   registrationDate: Date;
   plan: 'Trial' | 'Starter' | 'Pro' | 'Business';
   status: 'active' | 'suspended' | 'expired';

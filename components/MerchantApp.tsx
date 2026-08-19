@@ -148,6 +148,7 @@ const MerchantApp: React.FC = () => {
   const [fbLinkingSessionId, setFbLinkingSessionId] = useState<string>('');
   const [fbStatus, setFbStatus] = useState<IntegrationStatus>({ isConnected: false });
   const [shopifyStatus, setShopifyStatus] = useState<IntegrationStatus>({ isConnected: false });
+  const [storifyStatus, setStorifyStatus] = useState<IntegrationStatus>({ isConnected: false });
   const [telegramStatus, setTelegramStatus] = useState<IntegrationStatus>({ isConnected: false });
   const [whatsappStatus, setWhatsappStatus] = useState<IntegrationStatus>({ isConnected: false });
 
@@ -410,6 +411,14 @@ const MerchantApp: React.FC = () => {
           lastSync: integrations.shopify.lastSync ? new Date(integrations.shopify.lastSync) : undefined
         });
       }
+
+      if ((integrations as any).storify) {
+        setStorifyStatus({
+          isConnected: (integrations as any).storify.isConnected || false,
+          accountName: (integrations as any).storify.accountName || '',
+          lastSync: (integrations as any).storify.lastSync ? new Date((integrations as any).storify.lastSync) : undefined
+        });
+      }
       
       if ((integrations as any).telegram) {
         setTelegramStatus({
@@ -454,6 +463,7 @@ const MerchantApp: React.FC = () => {
     setFbLinkingSessionId('');
     setFbStatus({ isConnected: false });
     setShopifyStatus({ isConnected: false });
+    setStorifyStatus({ isConnected: false });
     setTelegramStatus({ isConnected: false });
     setWhatsappStatus({ isConnected: false });
     setIsDarkMode(false);
@@ -1028,6 +1038,8 @@ const MerchantApp: React.FC = () => {
              setFbLinkingSessionId={setFbLinkingSessionId}
              shopifyStatus={shopifyStatus}
              setShopifyStatus={setShopifyStatus}
+            storifyStatus={storifyStatus}
+            setStorifyStatus={setStorifyStatus}
              telegramStatus={telegramStatus}
              setTelegramStatus={setTelegramStatus}
              whatsappStatus={whatsappStatus}

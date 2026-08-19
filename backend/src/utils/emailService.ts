@@ -361,7 +361,7 @@ export const sendTrialEndedEmail = async (
     </p>
     ${renderInfoBox(
       `<p style="margin:0 0 8px;font-weight:700;color:${BRAND.text};">باقات تناسب مرحلتك</p>
-       <p style="margin:0;color:${BRAND.muted};font-size:14px;">من رد التعليقات فقط إلى بوت مبيعات على فيسبوك وإنستغرام وتيليجرام.</p>`
+       <p style="margin:0;color:${BRAND.muted};font-size:14px;">من رد التعليقات فقط إلى بوت مبيعات على واتساب وفيسبوك وإنستغرام وتيليجرام.</p>`
     )}
     <p style="margin:16px 0 0;color:${BRAND.muted};">
       بيانات متجرك محفوظة — الاشتراك يعيد تفعيل الخدمة فوراً.

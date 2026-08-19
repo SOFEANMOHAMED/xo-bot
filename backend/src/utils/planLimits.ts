@@ -218,6 +218,19 @@ export async function getShopifyStoresCount(merchantId: string): Promise<number>
   }
 }
 
+export async function getStorifyStoresCount(merchantId: string): Promise<number> {
+  try {
+    const result = await pool.query(
+      `SELECT COUNT(*)::int as count FROM storify_stores WHERE merchant_id = $1`,
+      [merchantId]
+    );
+    return result.rows[0]?.count || 0;
+  } catch (error) {
+    logger.error('Error getting Storify stores count', error as Error, { merchantId });
+    return 0;
+  }
+}
+
 export async function getCustomersCount(merchantId: string): Promise<number> {
   try {
     const result = await pool.query(

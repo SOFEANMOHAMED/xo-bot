@@ -503,6 +503,7 @@ export const updateAdminPlanLimits = async (
       'maxInstagramAccounts',
       'maxWhatsAppAccounts',
       'maxShopifyStores',
+      'maxStorifyStores',
       'maxTelegramBots',
       'maxTotalChannels',
       'maxCustomers',
@@ -700,6 +701,7 @@ export const getAdminUsers = async (
         id,
         email,
         name,
+        phone,
         subscription_plan,
         subscription_status,
         trial_ends_at,
@@ -713,6 +715,7 @@ export const getAdminUsers = async (
       id: row.id,
       email: row.email,
       name: row.name || 'غير محدد',
+      phone: row.phone || null,
       registrationDate: row.created_at.toISOString(),
       plan: row.subscription_plan === 'trial' ? 'Trial' :
             row.subscription_plan === 'comments' ? 'التعليقات' :
@@ -752,6 +755,7 @@ export const getAdminUser = async (
         id,
         email,
         name,
+        phone,
         subscription_plan,
         subscription_status,
         trial_ends_at,
@@ -771,6 +775,7 @@ export const getAdminUser = async (
       id: row.id,
       email: row.email,
       name: row.name || 'غير محدد',
+      phone: row.phone || null,
       registrationDate: row.created_at.toISOString(),
       plan: row.subscription_plan === 'trial' ? 'Trial' :
             row.subscription_plan === 'comments' ? 'التعليقات' :

@@ -142,4 +142,5 @@ export const RESERVED_ROOT_SEGMENTS = new Set([
   adminRootSegment,
   'api',
   'webhooks',
+  'storify',
 ]);

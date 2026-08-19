@@ -70,7 +70,7 @@ const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ onClose }) => {
       },
       social: {
         icon: Briefcase,
-        description: 'فيسبوك وإنستغرام معاً لبوت المبيعات.'
+        description: 'فيسبوك وإنستغرام وواتساب لبوت المبيعات.'
       },
       yearly: {
         icon: Star,

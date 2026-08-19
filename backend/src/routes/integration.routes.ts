@@ -8,7 +8,9 @@ import {
   getAvailableFacebookPages,
   linkFacebookPages,
   connectShopify,
-  disconnectShopify
+  disconnectShopify,
+  connectStorify,
+  disconnectStorify
 } from '../controllers/integration.controller.js';
 import {
   syncSocialPosts,
@@ -32,6 +34,10 @@ import {
   getProductDetails,
   pushProductToShopify
 } from '../controllers/shopify.controller.js';
+import {
+  syncStorifyProducts,
+  storifyHealth
+} from '../controllers/storify.controller.js';
 import { facebookCallback } from '../controllers/facebook.controller.js';
 import {
   connectInstagram,
@@ -52,7 +58,7 @@ import {
 } from '../controllers/telegram.controller.js';
 import { authenticate } from '../middleware/auth.js';
 import { checkSubscriptionStatus } from '../middleware/subscriptionCheck.js';
-import { checkFacebookPagesLimit, checkInstagramAccountsLimit, checkShopifyStoresLimit, checkTelegramBotsLimit } from '../middleware/planLimits.js';
+import { checkFacebookPagesLimit, checkInstagramAccountsLimit, checkShopifyStoresLimit, checkStorifyStoresLimit, checkTelegramBotsLimit } from '../middleware/planLimits.js';
 
 const router = express.Router();
 
@@ -98,6 +104,10 @@ router.get('/shopify/sync/jobs/:jobId', getSyncJobStatus);
 router.get('/shopify/sync/history', getSyncHistory);
 router.get('/shopify/products/:productId', getProductDetails);
 router.post('/shopify/products/:productId/push', pushProductToShopify);
+router.post('/storify/connect', checkStorifyStoresLimit, connectStorify);
+router.delete('/storify/disconnect', disconnectStorify);
+router.post('/storify/sync/products', syncStorifyProducts);
+router.get('/storify/health', storifyHealth);
 router.post('/telegram/connect', connectTelegram);
 router.delete('/telegram/disconnect', disconnectTelegram);
 router.get('/telegram/webhook/info', getTelegramWebhookInfo);

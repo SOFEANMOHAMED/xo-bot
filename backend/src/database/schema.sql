@@ -301,6 +301,24 @@ CREATE TABLE IF NOT EXISTS shopify_stores (
     UNIQUE(merchant_id, shop_domain)
 );
 
+-- Storify Stores Integration
+CREATE TABLE IF NOT EXISTS storify_stores (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+    store_domain VARCHAR(255) NOT NULL,
+    api_base_url TEXT NOT NULL,
+    access_token TEXT NOT NULL,
+    products_endpoint TEXT NOT NULL DEFAULT '/api/storefront/products',
+    auto_sync BOOLEAN DEFAULT false,
+    sync_interval INTEGER DEFAULT 24,
+    last_sync TIMESTAMP,
+    last_products_sync TIMESTAMP,
+    products_count INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(merchant_id, store_domain)
+);
+
 -- WhatsApp Business Integration (Cloud API — optional / non-Syria)
 CREATE TABLE IF NOT EXISTS whatsapp_accounts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

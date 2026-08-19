@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
-import { Facebook, ShoppingBag, CheckCircle, XCircle, RefreshCw, Activity, MessageCircle, Clock, Link as LinkIcon, AlertCircle, Trash2, Send, AlertTriangle, ShoppingCart, MessageSquare, Plus, Edit2, Settings } from 'lucide-react';
+import { Facebook, ShoppingBag, CheckCircle, XCircle, RefreshCw, Activity, MessageCircle, Clock, Link as LinkIcon, AlertCircle, Trash2, Send, AlertTriangle, ShoppingCart, MessageSquare, Plus, Edit2, Settings, Store } from 'lucide-react';
 import { IntegrationStatus, IntegrationLog, MerchantSettings, DEFAULT_PLAN_CAPABILITIES } from '../types';
 import { generateLog } from '../services/mockBackend';
 import { apiService } from '../services/api';
@@ -28,6 +28,8 @@ interface IntegrationsPanelProps {
   setFbLinkingSessionId: (id: string) => void;
   shopifyStatus: IntegrationStatus;
   setShopifyStatus: (status: IntegrationStatus) => void;
+  storifyStatus: IntegrationStatus;
+  setStorifyStatus: (status: IntegrationStatus) => void;
   telegramStatus: IntegrationStatus;
   setTelegramStatus: (status: IntegrationStatus) => void;
   whatsappStatus: IntegrationStatus;
@@ -46,6 +48,8 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
   setFbLinkingSessionId,
   shopifyStatus,
   setShopifyStatus,
+  storifyStatus,
+  setStorifyStatus,
   telegramStatus,
   setTelegramStatus,
   whatsappStatus,
@@ -54,6 +58,12 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
 }) => {
   
   const [shopifyUrl, setShopifyUrl] = useState('');
+  const [storifyForm, setStorifyForm] = useState({
+    storeDomain: '',
+    apiBaseUrl: '',
+    accessToken: '',
+    productsEndpoint: '/api/storefront/products'
+  });
   const [telegramToken, setTelegramToken] = useState(settings.telegramBotToken || '');
   
   // Multiple Telegram Bots State
@@ -86,6 +96,7 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
 
   const [isLoadingFb, setIsLoadingFb] = useState(false);
   const [isLoadingShopify, setIsLoadingShopify] = useState(false);
+  const [isLoadingStorify, setIsLoadingStorify] = useState(false);
   const [isLoadingTelegram, setIsLoadingTelegram] = useState(false);
   const [isLoadingWhatsApp, setIsLoadingWhatsApp] = useState(false);
   
@@ -135,7 +146,7 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
   const [isLoadingIg, setIsLoadingIg] = useState(false);
 
   const [showDisconnectModal, setShowDisconnectModal] = useState(false);
-  const [disconnectTarget, setDisconnectTarget] = useState<'facebook' | 'shopify' | 'telegram' | 'whatsapp' | 'instagram' | null>(null);
+  const [disconnectTarget, setDisconnectTarget] = useState<'facebook' | 'shopify' | 'storify' | 'telegram' | 'whatsapp' | 'instagram' | null>(null);
   const [disconnectBotId, setDisconnectBotId] = useState<string | null>(null);
 
   const addLog = (log: IntegrationLog) => {
@@ -458,7 +469,7 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
   };
 
   const initiateDisconnect = (
-    target: 'facebook' | 'shopify' | 'telegram' | 'whatsapp' | 'instagram',
+    target: 'facebook' | 'shopify' | 'storify' | 'telegram' | 'whatsapp' | 'instagram',
     botId?: string
   ) => {
     setDisconnectTarget(target);
@@ -484,6 +495,23 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
       } catch (error: any) {
         logger.error('Failed to disconnect Shopify:', error);
         addLog(generateLog('Shopify', `فشل إلغاء الربط: ${error.message}`, 'error'));
+      }
+    } else if (disconnectTarget === 'storify') {
+      try {
+        await apiService.disconnectStorify();
+        setStorifyStatus({ isConnected: false });
+        setStorifyForm({
+          storeDomain: '',
+          apiBaseUrl: '',
+          accessToken: '',
+          productsEndpoint: '/api/storefront/products'
+        });
+        addLog(generateLog('Storify', 'إلغاء الربط', 'info'));
+        if (showNotification) showNotification('تم إلغاء ربط متجر Storify', 'success');
+      } catch (error: any) {
+        logger.error('Failed to disconnect Storify:', error);
+        addLog(generateLog('Storify', `فشل إلغاء الربط: ${error.message}`, 'error'));
+        if (showNotification) showNotification(error?.message || 'فشل إلغاء ربط Storify', 'error');
       }
     } else if (disconnectTarget === 'telegram') {
       if (disconnectBotId) {
@@ -578,6 +606,43 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
       addLog(generateLog('Shopify', `فشل الربط: ${error.message}`, 'error'));
     } finally {
       setIsLoadingShopify(false);
+    }
+  };
+
+  const handleConnectStorify = async () => {
+    if (!storifyForm.storeDomain.trim() || !storifyForm.accessToken.trim()) {
+      const errorMsg = 'أدخل رابط متجر Storify وAccess Token أولاً.';
+      addLog(generateLog('Storify', errorMsg, 'error'));
+      if (showNotification) showNotification(errorMsg, 'error');
+      return;
+    }
+
+    setIsLoadingStorify(true);
+    try {
+      const response = await apiService.connectStorify({
+        storeDomain: storifyForm.storeDomain.trim(),
+        apiBaseUrl: storifyForm.apiBaseUrl.trim() || undefined,
+        accessToken: storifyForm.accessToken.trim(),
+        productsEndpoint: storifyForm.productsEndpoint.trim() || undefined
+      });
+
+      setStorifyStatus({
+        isConnected: true,
+        accountName: response.accountName || storifyForm.storeDomain.trim(),
+        lastSync: storifyStatus.lastSync
+      });
+      addLog(generateLog('Storify', 'تم ربط المتجر بنجاح', 'success'));
+      if (showNotification) {
+        showNotification('تم ربط متجر Storify بنجاح', 'success');
+      }
+    } catch (error: any) {
+      logger.error('Failed to connect Storify:', error);
+      addLog(generateLog('Storify', `فشل الربط: ${error.message}`, 'error'));
+      if (showNotification) {
+        showNotification(error?.message || 'فشل ربط Storify', 'error', 8000);
+      }
+    } finally {
+      setIsLoadingStorify(false);
     }
   };
 
@@ -736,6 +801,73 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
       setIsSyncing(false);
     }
   };
+
+  const handleSyncStorify = async () => {
+    if (!storifyStatus.isConnected) return;
+    setIsSyncing(true);
+    setSyncProgress({
+      isVisible: true,
+      status: 'running',
+      message: 'جاري استيراد المنتجات من Storify...',
+      totalItems: 0,
+      processedItems: 0,
+      createdItems: 0,
+      updatedItems: 0,
+      failedItems: 0
+    });
+
+    try {
+      const response = await apiService.syncStorifyProducts();
+      setSyncProgress({
+        isVisible: true,
+        status: 'completed',
+        message: response.message || `تم استيراد ${response.imported || 0} منتج بنجاح`,
+        totalItems: response.imported || 0,
+        processedItems: response.imported || 0,
+        createdItems: response.created || 0,
+        updatedItems: response.updated || 0,
+        failedItems: response.failed || 0
+      });
+
+      if (response.products && response.products.length > 0) {
+        const transformedProducts = response.products.map((p: any) => ({
+          id: p.id || `storify_${p.externalId}`,
+          externalId: p.externalId || p.id,
+          name: p.name,
+          description: p.description || '',
+          price: parseFloat(p.price) || 0,
+          currency: p.currency || 'USD',
+          category: p.category || '',
+          stock: p.stock || 0,
+          imageUrl: p.imageUrl || '',
+          source: 'storify',
+        }));
+        onSyncProducts(transformedProducts);
+        setStorifyStatus({ ...storifyStatus, lastSync: new Date() });
+        addLog(generateLog('Storify', `تم استيراد ${transformedProducts.length} منتج (${response.created} جديد، ${response.updated} محدث)`, 'success'));
+      } else {
+        addLog(generateLog('Storify', 'لا توجد منتجات للمزامنة', 'info'));
+      }
+    } catch (error: any) {
+      logger.error('Failed to sync Storify products:', error);
+      setSyncProgress({
+        isVisible: true,
+        status: 'failed',
+        message: `فشل المزامنة: ${error.message}`,
+        totalItems: 0,
+        processedItems: 0,
+        createdItems: 0,
+        updatedItems: 0,
+        failedItems: 0
+      });
+      addLog(generateLog('Storify', `فشل المزامنة: ${error.message}`, 'error'));
+      if (showNotification) {
+        showNotification(error?.message || 'فشل مزامنة منتجات Storify', 'error', 8000);
+      }
+    } finally {
+      setIsSyncing(false);
+    }
+  };
   
   // Handle updating Shopify settings
   const handleUpdateShopifySettings = async () => {
@@ -771,6 +903,27 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
     loadShopifyHealth();
   }, [shopifyStatus.isConnected]);
 
+  useEffect(() => {
+    const loadStorifyHealth = async () => {
+      if (!storifyStatus.isConnected) return;
+      try {
+        const health = await apiService.getStorifyHealth();
+        if (health.storify?.connected) {
+          setStorifyForm((prev) => ({
+            ...prev,
+            storeDomain: health.storify.storeDomain || prev.storeDomain,
+            apiBaseUrl: health.storify.apiBaseUrl || prev.apiBaseUrl,
+            productsEndpoint: health.storify.productsEndpoint || prev.productsEndpoint,
+            accessToken: prev.accessToken
+          }));
+        }
+      } catch (error) {
+        logger.error('Failed to load Storify health:', error);
+      }
+    };
+    loadStorifyHealth();
+  }, [storifyStatus.isConnected]);
+
   const handleSyncOrders = async () => {
     if (!shopifyStatus.isConnected) return;
     setIsSyncingOrders(true);
@@ -799,6 +952,7 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
   const singleChannelPlan = caps.maxTotalChannels === 1;
   const showTelegramCard = caps.maxTelegramBots > 0 || telegramBots.length > 0;
   const showShopifyCard = caps.maxShopifyStores > 0 || shopifyStatus.isConnected;
+  const showStorifyCard = caps.maxStorifyStores > 0 || storifyStatus.isConnected;
   const showWhatsAppCard = caps.maxWhatsAppAccounts > 0 || whatsappStatus.isConnected;
 
   return (
@@ -1012,6 +1166,114 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
             )}
           </div>
         </div>
+
+        {/* Storify Card */}
+        {showStorifyCard && (
+        <div className={`bg-white dark:bg-gray-800 rounded-2xl shadow-sm border transition-all duration-300 overflow-hidden ${storifyStatus.isConnected ? 'border-lime-200 dark:border-lime-900 ring-1 ring-lime-100 dark:ring-lime-900/50' : 'border-gray-100 dark:border-gray-700'}`}>
+          <div className="p-6 border-b border-gray-100 dark:border-gray-700 bg-gradient-to-l from-white to-lime-50/50 dark:from-gray-800 dark:to-lime-900/20 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className={`p-2 rounded-xl transition-colors ${storifyStatus.isConnected ? 'bg-lime-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}`}>
+                <Store size={24} />
+              </div>
+              <div>
+                <h3 className="font-bold text-gray-800 dark:text-white text-lg">Storify</h3>
+                <p className="text-xs text-lime-600 dark:text-lime-400 font-medium">مزامنة المنتجات عبر Storefront API</p>
+              </div>
+            </div>
+            {storifyStatus.isConnected ? (
+              <span className="flex items-center gap-1.5 text-lime-700 dark:text-lime-400 text-xs font-bold bg-lime-50 dark:bg-lime-900/30 border border-lime-100 dark:border-lime-800 px-3 py-1.5 rounded-full shadow-sm">
+                <span className="w-2 h-2 rounded-full bg-lime-500 animate-pulse"></span>
+                متصل
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400 text-xs font-medium bg-gray-100 dark:bg-gray-700 px-3 py-1.5 rounded-full">
+                <span className="w-2 h-2 rounded-full bg-gray-400"></span>
+                غير متصل
+              </span>
+            )}
+          </div>
+
+          <div className="p-6">
+            {!storifyStatus.isConnected ? (
+              <div className="space-y-4">
+                <p className="text-sm text-gray-600 dark:text-gray-400 text-center">
+                  اربط متجر Storify عبر رابط المتجر وAccess Token وواجهة المنتجات.
+                </p>
+                <input
+                  type="text"
+                  placeholder="store.example.com"
+                  value={storifyForm.storeDomain}
+                  onChange={(e) => setStorifyForm({ ...storifyForm, storeDomain: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-lime-500 outline-none dir-ltr text-left"
+                />
+                <input
+                  type="text"
+                  placeholder="https://store.example.com"
+                  value={storifyForm.apiBaseUrl}
+                  onChange={(e) => setStorifyForm({ ...storifyForm, apiBaseUrl: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-lime-500 outline-none dir-ltr text-left"
+                />
+                <input
+                  type="text"
+                  placeholder="/api/storefront/products"
+                  value={storifyForm.productsEndpoint}
+                  onChange={(e) => setStorifyForm({ ...storifyForm, productsEndpoint: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-lime-500 outline-none dir-ltr text-left"
+                />
+                <input
+                  type="password"
+                  placeholder="Access Token"
+                  value={storifyForm.accessToken}
+                  onChange={(e) => setStorifyForm({ ...storifyForm, accessToken: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-lime-500 outline-none dir-ltr text-left"
+                />
+                <button
+                  onClick={handleConnectStorify}
+                  disabled={isLoadingStorify}
+                  className="w-full bg-lime-600 hover:bg-lime-700 text-white px-6 py-2.5 rounded-xl transition-all font-bold shadow-md shadow-lime-100 dark:shadow-none flex items-center justify-center gap-2 disabled:opacity-70"
+                >
+                  {isLoadingStorify ? 'جاري الربط...' : 'ربط Storify الآن'}
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                <div className="p-4 bg-lime-50/50 dark:bg-lime-900/10 border border-lime-100 dark:border-lime-800 rounded-xl flex flex-col gap-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-semibold text-gray-600 dark:text-gray-300">المتجر:</span>
+                    <span className="text-lime-700 dark:text-lime-400 font-bold text-lg">{storifyStatus.accountName}</span>
+                  </div>
+                  <div className="h-px bg-lime-100 dark:bg-lime-800 w-full"></div>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                      <Clock size={12} />
+                      آخر تزامن:
+                    </span>
+                    <span className="text-gray-700 dark:text-gray-300 font-medium" dir="ltr">{formatDate(storifyStatus.lastSync)}</span>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleSyncStorify}
+                    disabled={isSyncing}
+                    className="flex-1 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 px-4 py-2.5 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors flex items-center justify-center gap-2 text-sm font-bold"
+                  >
+                    <RefreshCw size={16} className={isSyncing ? "animate-spin" : ""} />
+                    {isSyncing ? 'جاري المزامنة...' : 'مزامنة المنتجات'}
+                  </button>
+                  <button
+                    onClick={() => initiateDisconnect('storify')}
+                    className="flex-1 flex items-center gap-2 text-red-500 hover:text-red-700 text-sm font-medium justify-center p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors border border-red-100 dark:border-red-900/30"
+                  >
+                    <Trash2 size={16} />
+                    إلغاء الربط
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+        )}
 
         {/* Shopify Card */}
         {showShopifyCard && (
@@ -1419,6 +1681,8 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
                   ? 'صفحة فيسبوك'
                   : disconnectTarget === 'instagram'
                     ? 'حساب إنستغرام'
+                    : disconnectTarget === 'storify'
+                      ? 'متجر Storify'
                     : disconnectTarget === 'shopify'
                       ? 'متجر Shopify'
                       : disconnectTarget === 'whatsapp'

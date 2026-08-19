@@ -25,6 +25,7 @@ export interface PlanLimits {
   maxInstagramAccounts: number;
   maxWhatsAppAccounts: number;
   maxShopifyStores: number;
+  maxStorifyStores: number;
   maxTelegramBots: number;
   /** Cap across FB + IG + Telegram combined. -1 = no combined cap (use per-channel limits). */
   maxTotalChannels: number;
@@ -46,6 +47,7 @@ export interface PlanCapabilities {
   maxInstagramAccounts: number;
   maxWhatsAppAccounts: number;
   maxShopifyStores: number;
+  maxStorifyStores: number;
   maxMonthlyMarketingImages: number;
   billingPeriod: 'monthly' | 'yearly';
 }
@@ -60,6 +62,7 @@ export function toPlanCapabilities(limits: PlanLimits): PlanCapabilities {
     maxInstagramAccounts: limits.maxInstagramAccounts,
     maxWhatsAppAccounts: limits.maxWhatsAppAccounts,
     maxShopifyStores: limits.maxShopifyStores,
+    maxStorifyStores: limits.maxStorifyStores,
     maxMonthlyMarketingImages: limits.maxMonthlyMarketingImages,
     billingPeriod: limits.billingPeriod
   };
@@ -107,11 +110,12 @@ export const DEFAULT_PLAN_CONFIGS: Record<PaidPlanKey, PlanConfig> = {
     name: 'السوشيال',
     price: 35,
     billingPeriod: 'monthly',
-    description: 'فيسبوك وإنستغرام معاً لبوت المبيعات.',
+    description: 'فيسبوك وإنستغرام وواتساب لبوت المبيعات.',
     features: [
       'بوت مبيعات ذكي',
       'ربط صفحة فيسبوك واحدة',
       'ربط حساب إنستغرام واحد',
+      'ربط واتساب واحد',
       'استخدام AI غير محدود',
       '40 صورة تسويقية بالذكاء الاصطناعي شهرياً',
       'إدارة منتجات وطلبات',
@@ -149,6 +153,7 @@ export const DEFAULT_PLAN_LIMITS: Record<string, PlanLimits> = {
     maxInstagramAccounts: 1,
     maxWhatsAppAccounts: 0,
     maxShopifyStores: 0,
+    maxStorifyStores: 1,
     maxTelegramBots: 0,
     maxTotalChannels: -1,
     maxCustomers: -1,
@@ -165,6 +170,7 @@ export const DEFAULT_PLAN_LIMITS: Record<string, PlanLimits> = {
     maxInstagramAccounts: 1,
     maxWhatsAppAccounts: 1,
     maxShopifyStores: 0,
+    maxStorifyStores: 1,
     maxTelegramBots: 1,
     maxTotalChannels: 1, // FB OR IG OR Telegram OR WhatsApp
     maxCustomers: -1,
@@ -181,6 +187,7 @@ export const DEFAULT_PLAN_LIMITS: Record<string, PlanLimits> = {
     maxInstagramAccounts: 1,
     maxWhatsAppAccounts: 1,
     maxShopifyStores: 0,
+    maxStorifyStores: 1,
     maxTelegramBots: 0,
     maxTotalChannels: -1,
     maxCustomers: -1,
@@ -197,6 +204,7 @@ export const DEFAULT_PLAN_LIMITS: Record<string, PlanLimits> = {
     maxInstagramAccounts: 1,
     maxWhatsAppAccounts: 1,
     maxShopifyStores: 0,
+    maxStorifyStores: 1,
     maxTelegramBots: 1,
     maxTotalChannels: -1,
     maxCustomers: -1,
@@ -213,6 +221,7 @@ export const DEFAULT_PLAN_LIMITS: Record<string, PlanLimits> = {
     maxInstagramAccounts: 1,
     maxWhatsAppAccounts: 1,
     maxShopifyStores: 0,
+    maxStorifyStores: 1,
     maxTelegramBots: 1,
     maxTotalChannels: -1,
     maxCustomers: -1,
@@ -230,6 +239,7 @@ export const DEFAULT_PLAN_LIMITS: Record<string, PlanLimits> = {
     maxInstagramAccounts: 1,
     maxWhatsAppAccounts: 0,
     maxShopifyStores: 0,
+    maxStorifyStores: 1,
     maxTelegramBots: 0,
     maxTotalChannels: -1,
     maxCustomers: -1,
@@ -246,6 +256,7 @@ export const DEFAULT_PLAN_LIMITS: Record<string, PlanLimits> = {
     maxInstagramAccounts: 1,
     maxWhatsAppAccounts: 1,
     maxShopifyStores: 0,
+    maxStorifyStores: 1,
     maxTelegramBots: 1,
     maxTotalChannels: 1,
     maxCustomers: -1,
@@ -262,6 +273,7 @@ export const DEFAULT_PLAN_LIMITS: Record<string, PlanLimits> = {
     maxInstagramAccounts: 1,
     maxWhatsAppAccounts: 1,
     maxShopifyStores: 0,
+    maxStorifyStores: 1,
     maxTelegramBots: 0,
     maxTotalChannels: -1,
     maxCustomers: -1,
@@ -280,6 +292,7 @@ export const ZERO_PLAN_LIMITS: PlanLimits = {
   maxInstagramAccounts: 0,
   maxWhatsAppAccounts: 0,
   maxShopifyStores: 0,
+  maxStorifyStores: 0,
   maxTelegramBots: 0,
   maxTotalChannels: 0,
   maxCustomers: 0,

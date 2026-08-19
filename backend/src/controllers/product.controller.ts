@@ -34,7 +34,7 @@ const productSchema = z.object({
   images: z.array(imageUrlSchema).max(MAX_PRODUCT_IMAGES).optional(),
   /** Per-image color link (parallel to images); empty string = unassigned */
   imageColors: z.array(z.string().max(100).nullable()).max(MAX_PRODUCT_IMAGES).optional(),
-  source: z.enum(['manual', 'shopify', 'excel']).default('manual'),
+  source: z.enum(['manual', 'shopify', 'storify', 'excel']).default('manual'),
   externalId: z.string().optional()
 });
 

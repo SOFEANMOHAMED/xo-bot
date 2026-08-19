@@ -7,6 +7,10 @@ import { getMerchantPlanLimits, getFacebookPagesCount } from '../utils/planLimit
 import { getFbLinkingSession, deleteFbLinkingSession } from './facebook.controller.js';
 import { clearMerchantSocialPosts } from '../services/socialPostsSync.js';
 import {
+  normalizeStorifyStoreDomain,
+  validateStorifyCatalogAccess
+} from './storify.controller.js';
+import {
   FACEBOOK_PAGE_SUBSCRIBED_FIELDS,
   subscribeFacebookPageWebhooks
 } from '../services/facebookPageWebhooks.js';
@@ -20,7 +24,7 @@ export const getIntegrations = async (
   next: NextFunction
 ) => {
   try {
-    const [fbResult, shopifyResult, telegramResult, whatsappResult, igResult, whatsappWebResult] = await Promise.all([
+    const [fbResult, shopifyResult, storifyResult, telegramResult, whatsappResult, igResult, whatsappWebResult] = await Promise.all([
       pool.query(
         `SELECT page_id, page_name, auto_reply_messenger, auto_reply_comments, last_sync,
                 comment_reply_template, comment_dm_template, send_dm_on_comment,
@@ -32,6 +36,10 @@ export const getIntegrations = async (
         'SELECT shop_domain, last_sync FROM shopify_stores WHERE merchant_id = $1',
         [req.merchantId]
       ),
+      pool.query(
+        'SELECT store_domain, last_sync FROM storify_stores WHERE merchant_id = $1',
+        [req.merchantId]
+      ).catch(() => ({ rows: [] })),
       pool.query(
         'SELECT telegram_bot_token FROM merchant_settings WHERE merchant_id = $1',
         [req.merchantId]
@@ -106,6 +114,11 @@ export const getIntegrations = async (
           isConnected: true,
           accountName: shopifyResult.rows[0].shop_domain,
           lastSync: shopifyResult.rows[0].last_sync
+        } : { isConnected: false },
+        storify: storifyResult.rows.length > 0 ? {
+          isConnected: true,
+          accountName: storifyResult.rows[0].store_domain,
+          lastSync: storifyResult.rows[0].last_sync
         } : { isConnected: false },
         telegram: telegramInfo,
         whatsapp: whatsappWebResult.rows.length > 0 ? {
@@ -586,6 +599,105 @@ export const disconnectShopify = async (
     res.json({
       success: true,
       message: 'Shopify disconnected successfully'
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const connectStorify = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const {
+      storeDomain,
+      apiBaseUrl,
+      accessToken,
+      productsEndpoint
+    } = req.body as {
+      storeDomain?: string;
+      apiBaseUrl?: string;
+      accessToken?: string;
+      productsEndpoint?: string;
+    };
+
+    if (!storeDomain || !accessToken) {
+      return next(createError('رابط المتجر وAccess Token مطلوبان', 400));
+    }
+
+    const normalizedDomain = normalizeStorifyStoreDomain(storeDomain);
+    if (!normalizedDomain) {
+      return next(createError('رابط متجر Storify غير صالح', 400));
+    }
+
+    const normalizedBaseUrl = (() => {
+      const trimmed = (apiBaseUrl || '').trim();
+      if (!trimmed) return `https://${normalizedDomain}`;
+      const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+      return withProtocol.replace(/\/+$/, '');
+    })();
+
+    const normalizedProductsEndpoint = (() => {
+      const trimmed = (productsEndpoint || '').trim();
+      if (!trimmed) return '/api/storefront/products';
+      if (/^https?:\/\//i.test(trimmed)) return trimmed;
+      return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+    })();
+
+    await validateStorifyCatalogAccess({
+      storeDomain: normalizedDomain,
+      apiBaseUrl: normalizedBaseUrl,
+      accessToken: accessToken.trim(),
+      productsEndpoint: normalizedProductsEndpoint
+    });
+
+    await pool.query(
+      `INSERT INTO storify_stores (
+         merchant_id, store_domain, api_base_url, access_token, products_endpoint
+       ) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (merchant_id, store_domain)
+       DO UPDATE SET
+         api_base_url = EXCLUDED.api_base_url,
+         access_token = EXCLUDED.access_token,
+         products_endpoint = EXCLUDED.products_endpoint,
+         updated_at = CURRENT_TIMESTAMP`,
+      [
+        req.merchantId,
+        normalizedDomain,
+        normalizedBaseUrl,
+        accessToken.trim(),
+        normalizedProductsEndpoint
+      ]
+    );
+
+    res.json({
+      success: true,
+      data: {
+        accountName: normalizedDomain,
+        message: 'تم ربط متجر Storify بنجاح'
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const disconnectStorify = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    await pool.query(
+      'DELETE FROM storify_stores WHERE merchant_id = $1',
+      [req.merchantId]
+    );
+
+    res.json({
+      success: true,
+      message: 'Storify disconnected successfully'
     });
   } catch (error) {
     next(error);

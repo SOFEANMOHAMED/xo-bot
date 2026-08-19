@@ -108,7 +108,8 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
     return users.filter(user => {
       // Search filter
       const matchesSearch = user.name.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) || 
-                            user.email.toLowerCase().includes(debouncedSearchTerm.toLowerCase());
+                            user.email.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+                            (user.phone?.includes(debouncedSearchTerm) ?? false);
       
       if (!matchesSearch) return false;
       
@@ -466,6 +467,7 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
         'المعرف': user.id,
         'الاسم': user.name,
         'البريد الإلكتروني': user.email,
+        'رقم الهاتف': user.phone || '-',
         'الباقة': user.plan || 'غير محدد',
         'الحالة': user.status === 'active' ? 'نشط' : user.status === 'suspended' ? 'معلق' : 'منتهي',
         'تجربة مجانية': user.isTrial ? 'نعم' : 'لا',
@@ -698,6 +700,7 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
                 <thead className="bg-slate-900/50 text-slate-400 text-xs font-bold uppercase">
                    <tr>
                       <th className="px-6 py-4">المستخدم</th>
+                      <th className="px-6 py-4">رقم الهاتف</th>
                       <th className="px-6 py-4">الباقة الحالية</th>
                       <th className="px-6 py-4">تاريخ التسجيل</th>
                       <th className="px-6 py-4">الحالة</th>
@@ -713,6 +716,9 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
                                <p className="font-bold text-white">{user.name}</p>
                                <p className="text-xs text-slate-400">{user.email}</p>
                             </div>
+                         </td>
+                         <td className="px-6 py-4 text-sm text-slate-300" dir="ltr">
+                            {user.phone || <span className="text-slate-500">—</span>}
                          </td>
                          <td className="px-6 py-4">
                             <span className={`px-2 py-0.5 rounded text-xs font-medium border ${
@@ -1166,6 +1172,10 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
                        <div>
                            <label className="text-sm text-slate-400">البريد الإلكتروني</label>
                            <p className="text-white font-medium">{selectedUser.email}</p>
+                       </div>
+                       <div>
+                           <label className="text-sm text-slate-400">رقم الهاتف</label>
+                           <p className="text-white font-medium" dir="ltr">{selectedUser.phone || '—'}</p>
                        </div>
                        <div>
                            <label className="text-sm text-slate-400">تاريخ التسجيل</label>

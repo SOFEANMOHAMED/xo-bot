@@ -10,6 +10,7 @@ import {
   getInstagramAccountsCount,
   getWhatsAppAccountsCount,
   getShopifyStoresCount,
+  getStorifyStoresCount,
   getTelegramBotsCount,
   getCustomersCount,
   getTotalChannelsCount,
@@ -252,6 +253,34 @@ export const checkShopifyStoresLimit = async (
       const limitText = limits.maxShopifyStores === -1 ? 'غير محدود' : limits.maxShopifyStores.toString();
       return next(createError(
         `لقد وصلت إلى الحد الأقصى لمتاجر Shopify (${limitText}). يرجى ترقية خطتك لإضافة المزيد من المتاجر.`,
+        403
+      ));
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const checkStorifyStoresLimit = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const merchantId = req.merchantId || req.userId;
+    if (!merchantId) {
+      return next(createError('Unauthorized', 401));
+    }
+
+    const limits = await getMerchantPlanLimits(merchantId);
+    const currentCount = await getStorifyStoresCount(merchantId);
+
+    if (!isWithinLimit(currentCount, limits.maxStorifyStores)) {
+      const limitText = limits.maxStorifyStores === -1 ? 'غير محدود' : limits.maxStorifyStores.toString();
+      return next(createError(
+        `لقد وصلت إلى الحد الأقصى لمتاجر Storify (${limitText}). يرجى ترقية خطتك لإضافة المزيد من المتاجر.`,
         403
       ));
     }

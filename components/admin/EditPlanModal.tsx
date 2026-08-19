@@ -10,6 +10,7 @@ interface PlanLimits {
   maxInstagramAccounts: number;
   maxWhatsAppAccounts: number;
   maxShopifyStores: number;
+  maxStorifyStores: number;
   maxTelegramBots: number;
   maxTotalChannels: number;
   maxCustomers: number;
@@ -45,6 +46,7 @@ const defaultLimits = (): PlanLimits => ({
   maxInstagramAccounts: 1,
   maxWhatsAppAccounts: 0,
   maxShopifyStores: 0,
+  maxStorifyStores: 1,
   maxTelegramBots: 0,
   maxTotalChannels: -1,
   maxCustomers: -1,
@@ -319,6 +321,7 @@ const EditPlanModal: React.FC<EditPlanModalProps> = ({ isOpen, plan, onClose, on
                       {numberField('إجمالي القنوات (للقناة الواحدة=1)', 'maxTotalChannels', limits.maxTotalChannels ?? -1)}
                       {numberField('واتساب', 'maxWhatsAppAccounts', limits.maxWhatsAppAccounts)}
                       {numberField('شوبيفاي', 'maxShopifyStores', limits.maxShopifyStores)}
+                      {numberField('ستوريفاي', 'maxStorifyStores', limits.maxStorifyStores)}
                       {numberField('العملاء', 'maxCustomers', limits.maxCustomers)}
                     </div>
 

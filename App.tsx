@@ -27,6 +27,7 @@ import ForgotPasswordPage from './components/ForgotPasswordPage';
 import ResetPasswordPage from './components/ResetPasswordPage';
 import CompleteProfilePage from './components/CompleteProfilePage';
 import PageView from './components/PageView';
+import StorifyPartnerPage from './components/StorifyPartnerPage';
 
 function postLoginPath(role: UserRole | string | undefined): string {
   if (role === 'owner' || role === 'admin') {
@@ -245,6 +246,18 @@ function PublicPageRoute() {
   );
 }
 
+function StorifyPartnerRoute() {
+  const navigate = useNavigate();
+  return (
+    <StorifyPartnerPage
+      onNavigateToLogin={() => navigate(PATHS.LOGIN)}
+      onNavigateToSignup={() => navigate(PATHS.SIGNUP)}
+      onNavigateToPage={(slug) => navigate(`/${slug}`)}
+      onBack={() => navigate(PATHS.HOME)}
+    />
+  );
+}
+
 function AdminLogoutRoute() {
   const navigate = useNavigate();
   const { logout } = useAuth();
@@ -310,6 +323,12 @@ const App: React.FC = () => {
         <Route path={PATHS.ADMIN_LEGACY} element={<Navigate to={PATHS.HOME} replace />} />
         <Route path={`${PATHS.ADMIN_LEGACY}/*`} element={<Navigate to={PATHS.HOME} replace />} />
 
+        <Route
+          path="/storify"
+          element={
+            <StorifyPartnerRoute />
+          }
+        />
         <Route path="/:slug" element={<PublicPageRoute />} />
         <Route path="*" element={<Navigate to={PATHS.HOME} replace />} />
       </Routes>

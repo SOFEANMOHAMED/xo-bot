@@ -3,7 +3,7 @@ import {
   Bot, Zap, MessageCircle, CheckCircle, Mail, ArrowRight, Shield,
   Plus, Minus, Loader2, TrendingUp, Clock, UserCircle, BarChart2,
   MessageSquare, Database, Cpu, Sparkles, Inbox, Image, Package,
-  Send, Instagram, Facebook, ShoppingCart, PlayCircle
+  Send, Instagram, Facebook, ShoppingCart, Store
 } from 'lucide-react';
 import LandingChatBot from './LandingChatBot';
 import AntigravityHero from './AntigravityHero';
@@ -69,7 +69,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
             description: 'بوت مبيعات على قناة واحدة من اختيارك.',
             features: [
               'بوت مبيعات ذكي',
-              'ربط قناة واحدة: فيسبوك أو إنستغرام أو تيليجرام',
+              'ربط قناة واحدة: فيسبوك أو إنستغرام أو تيليجرام أو واتساب',
               'استخدام AI غير محدود',
               '20 صورة تسويقية بالذكاء الاصطناعي شهرياً',
               'إدارة منتجات وطلبات',
@@ -81,11 +81,12 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
             planKey: 'social',
             price: 35,
             billingPeriod: 'monthly',
-            description: 'فيسبوك وإنستغرام معاً لبوت المبيعات.',
+            description: 'فيسبوك وإنستغرام وواتساب لبوت المبيعات.',
             features: [
               'بوت مبيعات ذكي',
               'ربط صفحة فيسبوك واحدة',
               'ربط حساب إنستغرام واحد',
+              'ربط واتساب واحد',
               'استخدام AI غير محدود',
               '40 صورة تسويقية بالذكاء الاصطناعي شهرياً',
               'إدارة منتجات وطلبات',
@@ -104,6 +105,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
               'ربط صفحة فيسبوك واحدة',
               'ربط حساب إنستغرام واحد',
               'ربط بوت تيليجرام واحد',
+              'ربط واتساب واحد',
               'استخدام AI غير محدود',
               '200 صورة تسويقية بالذكاء الاصطناعي سنوياً',
               'إدارة منتجات وطلبات',
@@ -185,8 +187,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
             <button onClick={() => scrollToSection('features')} className="hover:text-brand transition-colors">المميزات</button>
             <button onClick={() => scrollToSection('case-studies')} className="hover:text-brand transition-colors">قصص النجاح</button>
             <button onClick={() => scrollToSection('pricing')} className="hover:text-brand transition-colors">الأسعار</button>
-            <button onClick={() => scrollToSection('contact')} className="hover:text-brand transition-colors">اتصل بنا</button>
-            <button onClick={() => scrollToSection('faq')} className="hover:text-brand transition-colors">الأسئلة الشائعة</button>
+            <a href="/storify" className="text-[#8fa82b] hover:text-[#718520] transition-colors flex items-center gap-1 font-bold"><Store size={14} /> شراكة ستوريفاي</a>
           </div>
 
           <div className="flex items-center gap-3">
@@ -219,7 +220,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
             </h1>
 
             <p className="text-lg text-slate-500 max-w-2xl mx-auto leading-relaxed mb-9 animate-fade-in-up" style={{ animationDelay: '0.16s' }}>
-              بوت مبيعات يفهم اللهجات العربية — على ماسنجر فيسبوك، إنستغرام، وتيليجرام — ويرد على التعليقات ويحوّلها لمحادثات بيع.
+              بوت مبيعات يفهم اللهجات العربية — على واتساب، ماسنجر فيسبوك، إنستغرام، وتيليجرام — ويرد على التعليقات ويحوّلها لمحادثات بيع.
             </p>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3 animate-fade-in-up" style={{ animationDelay: '0.24s' }}>
@@ -236,6 +237,17 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
               >
                 كيف يعمل؟
               </button>
+            </div>
+
+            <div className="mt-5 flex justify-center animate-fade-in-up" style={{ animationDelay: '0.28s' }}>
+              <a href="/storify" className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-gradient-to-r from-[#f6f9ef] to-white border border-[#d4e3aa] shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all group">
+                <span className="flex h-6 w-6 rounded-full bg-[#a2c037] items-center justify-center text-white">
+                  <Store size={12} />
+                </span>
+                <span className="text-sm font-bold text-slate-800">
+                  هل تحتاج متجراً إلكترونياً؟ <span className="text-[#8fa82b] group-hover:text-[#718520] transition-colors underline underline-offset-4 decoration-2 decoration-[#d4e3aa]">اكتشف عرض الشراكة مع ستوريفاي</span>
+                </span>
+              </a>
             </div>
 
             <div className="flex flex-wrap items-center justify-center gap-5 mt-8 text-sm text-slate-500 animate-fade-in-up" style={{ animationDelay: '0.32s' }}>
@@ -273,7 +285,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
                   <p className="text-sm font-medium text-slate-700">كم السعر؟</p>
                 </div>
                 <div className="absolute top-28 left-4 md:left-10 max-w-[200px] bg-brand text-white rounded-2xl rounded-br-sm px-3.5 py-2.5 shadow-lg shadow-brand/25 animate-float-delayed z-20">
-                  <p className="text-sm font-medium">السعر 149 ر.س مع التوصيل</p>
+                  <p className="text-sm font-medium">السعر 149 $ مع التوصيل</p>
                 </div>
                 <div className="absolute bottom-16 right-6 md:right-16 max-w-[190px] bg-white/90 backdrop-blur border border-brand-100 rounded-2xl rounded-bl-sm px-3.5 py-2.5 shadow-lg animate-float z-20" style={{ animationDelay: '0.8s' }}>
                   <p className="text-sm font-medium text-slate-700">هل متوفر مقاس L؟</p>
@@ -325,7 +337,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
           <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
             {[
               { step: '1', icon: <Package size={24} />, title: 'أضف منتجاتك', desc: 'أدخلها يدوياً أو ارفعها من Excel، واستخدم الذكاء الاصطناعي لكتابة وصف تسويقي.' },
-              { step: '2', icon: <Send size={24} />, title: 'اربط قناتك', desc: 'فيسبوك و/أو إنستغرام و/أو تيليجرام — بضغطة من لوحة الربط.' },
+              { step: '2', icon: <Send size={24} />, title: 'اربط قناتك', desc: 'واتساب و/أو فيسبوك و/أو إنستغرام و/أو تيليجرام — بضغطة من لوحة الربط.' },
               { step: '3', icon: <ShoppingCart size={24} />, title: 'البوت يبيع', desc: 'يرد، يعرض المنتج، ويبني الطلب — وأنت تتدخل من صندوق الوارد عند الحاجة.' },
             ].map((item) => (
               <div key={item.step} className="relative p-7 rounded-2xl bg-white border border-slate-100 hover:border-brand-200 transition-all hover:shadow-xl hover:shadow-brand/10">
@@ -354,7 +366,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
           </div>
 
           <div className="grid md:grid-cols-3 gap-6">
-            <FeatureCard icon={<MessageCircle size={28} />} title="بوت مبيعات متعدد القنوات" description="ماسنجر فيسبوك، رسائل إنستغرام، وتيليجرام — بلهجة عربية طبيعية كأن موظفاً حقيقياً يرد." />
+            <FeatureCard icon={<MessageCircle size={28} />} title="بوت مبيعات متعدد القنوات" description="واتساب، ماسنجر فيسبوك، رسائل إنستغرام، وتيليجرام — بلهجة عربية طبيعية كأن موظفاً حقيقياً يرد." />
             <FeatureCard icon={<MessageSquare size={28} />} title="من التعليق إلى البيع" description="رد آلي على تعليقات فيسبوك وإنستغرام مع رسالة خاصة تلقائية للمهتمين." />
             <FeatureCard icon={<Inbox size={28} />} title="صندوق وارد موحّد" description="كل المحادثات في مكان واحد — رد بشري أو إيقاف البوت لمحادثة معينة متى شئت." />
             <FeatureCard icon={<Database size={28} />} title="كتالوج وطلبات" description="إدارة منتجات بألوان ومقاسات وصور، استيراد Excel، وطلبات من البوت أو يدوياً." />
@@ -375,7 +387,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
               القنوات الجاهزة الآن
             </h2>
             <p className="text-slate-500 max-w-2xl mx-auto">
-              اربط قنواتك الاجتماعية وابدأ البيع — إدارة المنتجات والطلبات من داخل Xo Bot (يدوي أو Excel).
+              اربط واتساب وفيسبوك وإنستغرام وتيليجرام وابدأ البيع — ويمكنك تجربة البوت داخل اللوحة قبل الربط.
             </p>
           </div>
 
@@ -383,8 +395,8 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
             {[
               { icon: <Facebook size={22} />, title: 'فيسبوك', desc: 'ماسنجر + رد على التعليقات وتحويل المهتمين لرسائل خاصة', note: 'جاهز للربط' },
               { icon: <Instagram size={22} />, title: 'إنستغرام', desc: 'رسائل مباشرة وتعليقات مع أتمتة ذكية للمنشورات', note: 'جاهز للربط' },
+              { icon: <WhatsAppMark />, title: 'واتساب', desc: 'امسح رمز QR من هاتف المتجر لربط الرقم والرد تلقائياً على الزبائن', note: 'جاهز للربط' },
               { icon: <Send size={22} />, title: 'تيليجرام', desc: 'بوت مبيعات على تيليجرام مع كتالوجك وسياسات متجرك', note: 'جاهز للربط' },
-              { icon: <PlayCircle size={22} />, title: 'تجربة البوت', desc: 'اختبر الردود داخل اللوحة قبل ربط أي قناة', note: 'متاح فوراً' },
             ].map((item) => (
               <div
                 key={item.title}
@@ -414,7 +426,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
           </div>
           <div className="grid md:grid-cols-3 gap-6 max-w-6xl mx-auto">
             <CaseStudyCard storeName="متجر الأزياء الراقية" industry="أزياء" metric="+40%" metricLabel="زيادة في المبيعات" description="الرد الفوري على تعليقات المنشورات وتحويلها لرسائل ماسنجر رفع معدل إتمام الطلب." improvement="من ساعات انتظار إلى رد خلال ثوانٍ" />
-            <CaseStudyCard storeName="متجر الإلكترونيات" industry="إلكترونيات" metric="+65%" metricLabel="استفسارات مُجابة آلياً" description="البوت أجاب عن الأسعار والتوفر عبر إنستغرام وفيسبوك، والصندوق الوارد للتدخل عند الحاجة." improvement="توفير نحو 20 ساعة عمل أسبوعياً" />
+            <CaseStudyCard storeName="متجر الإلكترونيات" industry="إلكترونيات" metric="+65%" metricLabel="استفسارات مُجابة آلياً" description="البوت أجاب عن الأسعار والتوفر عبر واتساب وإنستغرام وفيسبوك، والصندوق الوارد للتدخل عند الحاجة." improvement="توفير نحو 20 ساعة عمل أسبوعياً" />
             <CaseStudyCard storeName="متجر العطور" industry="عطور ومستحضرات" metric="+85%" metricLabel="رضا العملاء" description="ردود دقيقة من الكتالوج على تيليجرام والرسائل الخاصة رفعت تقييم التجربة بشكل ملحوظ." improvement="رد فوري على أغلب الاستفسارات" />
           </div>
         </div>
@@ -425,7 +437,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
         <div className="container mx-auto px-6">
           <div className="text-center mb-14">
             <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900 mb-3">باقات تناسب مرحلتك</h2>
-            <p className="text-slate-500">من رد التعليقات فقط إلى بوت مبيعات على فيسبوك وإنستغرام وتيليجرام — مع تجربة 7 أيام.</p>
+            <p className="text-slate-500">من رد التعليقات فقط إلى بوت مبيعات على واتساب وفيسبوك وإنستغرام وتيليجرام — مع تجربة 7 أيام.</p>
           </div>
 
           {isLoadingPlans ? (
@@ -585,9 +597,10 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
           </div>
           <div className="max-w-3xl mx-auto space-y-3">
             <FaqItem question="هل يدعم البوت اللهجات العربية العامية؟" answer="نعم — يفهم ويرد باللهجات المصرية والخليجية والشامية وغيرها بدقة عالية، فيبدو كموظف مبيعات حقيقي." />
-            <FaqItem question="هل أحتاج إلى خبرة برمجية لاستخدام المنصة؟" answer="إطلاقاً. الربط مع فيسبوك وإنستغرام وتيليجرام يتم من لوحة التحكم بخطوات بسيطة ودون كتابة أي كود." />
+            <FaqItem question="هل أحتاج إلى خبرة برمجية لاستخدام المنصة؟" answer="إطلاقاً. الربط مع واتساب وفيسبوك وإنستغرام وتيليجرام يتم من لوحة التحكم بخطوات بسيطة ودون كتابة أي كود." />
             <FaqItem question="كيف يتم تحديث معلومات المنتجات والأسعار؟" answer="أضف المنتجات يدوياً أو ارفعها من ملف Excel. أي تعديل على الكتالوج ينعكس فوراً على إجابات البوت." />
-            <FaqItem question="ما الفرق بين باقة التعليقات وباقات المبيعات؟" answer="باقة التعليقات للرد الآلي على تعليقات فيسبوك وإنستغرام فقط. باقات المبيعات تضيف بوت الرسائل الخاصة (ماسنجر / إنستغرام / تيليجرام حسب الباقة) مع إدارة منتجات وطلبات." />
+            <FaqItem question="ما الفرق بين باقة التعليقات وباقات المبيعات؟" answer="باقة التعليقات للرد الآلي على تعليقات فيسبوك وإنستغرام فقط. باقات المبيعات تضيف بوت الرسائل الخاصة (واتساب / ماسنجر / إنستغرام / تيليجرام حسب الباقة) مع إدارة منتجات وطلبات." />
+            <FaqItem question="كيف أربط واتساب؟" answer="من لوحة الربط اضغط ربط واتساب، ثم امسح رمز QR من واتساب على جوال المتجر (الأجهزة المرتبطة). الرقم يبقى على هاتفك، والمنصة تظهر كجهاز مرتبط للرد على الزبائن." />
             <FaqItem question="هل هناك فترة تجربة مجانية؟" answer="نعم — تجربة مجانية لمدة 7 أيام لاختبار المنصة قبل الاشتراك." />
             <FaqItem question="ماذا يحدث إذا لم يعرف البوت الإجابة؟" answer="لا يخترع أسعاراً أو معلومات. يعتذر بلطف ويحوّل الحوار للدعم البشري من صندوق الوارد عند الحاجة." />
           </div>
@@ -606,7 +619,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
                 <span className="text-lg font-bold">Xo Bot</span>
               </div>
               <p className="text-slate-400 text-sm leading-relaxed">
-                بوت مبيعات عربي لمتاجر السوشيال ميديا — فيسبوك، إنستغرام، وتيليجرام في لوحة واحدة.
+                بوت مبيعات عربي لمتاجر السوشيال ميديا — واتساب، فيسبوك، إنستغرام، وتيليجرام في لوحة واحدة.
               </p>
             </div>
 
@@ -677,6 +690,12 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
     </div>
   );
 };
+
+const WhatsAppMark = () => (
+  <svg className="w-[22px] h-[22px]" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.435 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413" />
+  </svg>
+);
 
 const FeatureCard = ({ icon, title, description }: { icon: React.ReactNode; title: string; description: string }) => (
   <div className="p-7 rounded-2xl bg-white border border-slate-100 hover:border-brand-200 transition-all duration-300 hover:-translate-y-1 group hover:shadow-xl hover:shadow-brand/10 relative overflow-hidden">

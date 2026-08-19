@@ -443,7 +443,7 @@ class ApiService {
     imageUrl?: string;
     images?: string[];
     imageColors?: (string | null)[];
-    source?: 'manual' | 'shopify' | 'excel';
+    source?: 'manual' | 'shopify' | 'storify' | 'excel';
     externalId?: string;
   }) {
     return this.request<{
@@ -483,7 +483,7 @@ class ApiService {
     imageUrl: string;
     images: string[];
     imageColors: (string | null)[];
-    source: 'manual' | 'shopify' | 'excel';
+    source: 'manual' | 'shopify' | 'storify' | 'excel';
   }>) {
     return this.request<{
       product: {
@@ -587,7 +587,7 @@ class ApiService {
     total: number;
     currency?: string;
     status?: 'pending' | 'paid' | 'fulfilled' | 'cancelled';
-    source?: 'shopify' | 'manual';
+    source?: 'shopify' | 'storify' | 'manual';
     items: Array<{
       productId?: string;
       productName: string;
@@ -736,6 +736,7 @@ class ApiService {
         maxInstagramAccounts: number;
         maxWhatsAppAccounts: number;
         maxShopifyStores: number;
+        maxStorifyStores: number;
         maxMonthlyMarketingImages: number;
         billingPeriod: 'monthly' | 'yearly';
       };
@@ -1190,6 +1191,11 @@ class ApiService {
         accountName?: string;
         lastSync?: string;
       };
+      storify?: {
+        isConnected: boolean;
+        accountName?: string;
+        lastSync?: string;
+      };
       instagram?: {
         isConnected: boolean;
         accountName?: string;
@@ -1488,6 +1494,27 @@ class ApiService {
     });
   }
 
+  async connectStorify(payload: {
+    storeDomain: string;
+    apiBaseUrl?: string;
+    accessToken: string;
+    productsEndpoint?: string;
+  }) {
+    return this.request<{
+      accountName: string;
+      message?: string;
+    }>('/integrations/storify/connect', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async disconnectStorify() {
+    return this.request<{ message: string }>('/integrations/storify/disconnect', {
+      method: 'DELETE',
+    });
+  }
+
   async connectTelegram(botToken: string) {
     return this.request<{
       botInfo: {
@@ -1609,6 +1636,34 @@ class ApiService {
     });
   }
 
+  async syncStorifyProducts() {
+    return this.request<{
+      jobId: string;
+      imported: number;
+      created: number;
+      updated: number;
+      failed: number;
+      pages: number;
+      completed: boolean;
+      synced: number;
+      message: string;
+      products: Array<{
+        id: string;
+        externalId?: string;
+        name: string;
+        description?: string;
+        price: number;
+        currency: string;
+        category?: string;
+        stock: number;
+        imageUrl?: string;
+        source: 'storify';
+      }>;
+    }>('/integrations/storify/sync/products', {
+      method: 'POST',
+    });
+  }
+
   async getSyncJobStatus(jobId: string) {
     return this.request<{
       id: string;
@@ -1682,6 +1737,22 @@ class ApiService {
         webhooksRegistered: boolean;
       };
     }>('/integrations/shopify/health', {
+      method: 'GET',
+    });
+  }
+
+  async getStorifyHealth() {
+    return this.request<{
+      storify: {
+        connected: boolean;
+        storeDomain: string | null;
+        apiBaseUrl: string | null;
+        productsEndpoint: string | null;
+        lastSync: string | null;
+        lastProductsSync: string | null;
+        productsCount: number;
+      };
+    }>('/integrations/storify/health', {
       method: 'GET',
     });
   }
@@ -1918,6 +1989,7 @@ class ApiService {
       id: string;
       email: string;
       name: string;
+      phone?: string | null;
       registrationDate: Date;
       plan: 'Trial' | 'Starter' | 'Pro' | 'Business';
       status: 'active' | 'suspended' | 'expired';
@@ -1958,6 +2030,7 @@ class ApiService {
       id: string;
       email: string;
       name: string;
+      phone?: string | null;
       registrationDate: Date;
       plan: 'Trial' | 'Starter' | 'Pro' | 'Business';
       status: 'active' | 'suspended' | 'expired';
