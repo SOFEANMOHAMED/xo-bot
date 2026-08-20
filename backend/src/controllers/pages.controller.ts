@@ -3,6 +3,37 @@ import pool from '../database/connection.js';
 import { createError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
 
+const SITE_ORIGIN = (process.env.FRONTEND_URL || 'https://xo-bot.com').replace(/\/+$/, '');
+
+/** Marketing routes always included in sitemap (path → optional fixed lastmod ISO date). */
+const STATIC_SITEMAP_PATHS: Array<{ path: string; changefreq: string; priority: string }> = [
+  { path: '/', changefreq: 'weekly', priority: '1.0' },
+  { path: '/about', changefreq: 'monthly', priority: '0.9' },
+  { path: '/whatsapp-bot', changefreq: 'monthly', priority: '0.85' },
+  { path: '/storify', changefreq: 'monthly', priority: '0.8' },
+];
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function formatSitemapDate(value: Date | string | null | undefined): string {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 10);
+  return date.toISOString().slice(0, 10);
+}
+
+const STATIC_SITEMAP_SLUGS = new Set([
+  ...STATIC_SITEMAP_PATHS.map((entry) => entry.path.replace(/^\//, '')).filter(Boolean),
+  'about',
+  'whatsapp-bot',
+]);
+
 /** Slugs not listed in dynamic footer: static legal links + removed / optional topics. */
 const FOOTER_EXCLUDED_SLUGS = new Set([
   'privacy-policy',
@@ -12,6 +43,54 @@ const FOOTER_EXCLUDED_SLUGS = new Set([
   'returns-policy',
   'exchange-policy'
 ]);
+
+// Public: XML sitemap for search engines
+export const getSitemap = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const result = await pool.query<{ slug: string; updated_at: Date }>(
+      `SELECT slug, updated_at FROM pages
+       WHERE is_published = TRUE
+       ORDER BY updated_at DESC`
+    );
+
+    const urlEntries: string[] = [];
+
+    for (const entry of STATIC_SITEMAP_PATHS) {
+      urlEntries.push(`
+  <url>
+    <loc>${escapeXml(`${SITE_ORIGIN}${entry.path}`)}</loc>
+    <changefreq>${entry.changefreq}</changefreq>
+    <priority>${entry.priority}</priority>
+  </url>`);
+    }
+
+    for (const row of result.rows) {
+      if (STATIC_SITEMAP_SLUGS.has(row.slug)) continue;
+      urlEntries.push(`
+  <url>
+    <loc>${escapeXml(`${SITE_ORIGIN}/${row.slug}`)}</loc>
+    <lastmod>${formatSitemapDate(row.updated_at)}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>`);
+    }
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urlEntries.join('')}
+</urlset>`;
+
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(xml);
+  } catch (error: any) {
+    console.error('Error generating sitemap:', error);
+    next(error);
+  }
+};
 
 // Public: published pages for site footer (slug + title only)
 export const listPublishedPagesForFooter = async (

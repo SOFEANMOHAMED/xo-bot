@@ -8,12 +8,14 @@ import {
   createPage,
   updatePage,
   deletePage,
-  listPublishedPagesForFooter
+  listPublishedPagesForFooter,
+  getSitemap
 } from '../controllers/pages.controller.js';
 
 const router = Router();
 
 // Public routes
+router.get('/sitemap.xml', getSitemap);
 router.get('/published', listPublishedPagesForFooter);
 router.get('/public/:slug', getPageBySlug);
 

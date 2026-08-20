@@ -28,6 +28,10 @@ import ResetPasswordPage from './components/ResetPasswordPage';
 import CompleteProfilePage from './components/CompleteProfilePage';
 import PageView from './components/PageView';
 import StorifyPartnerPage from './components/StorifyPartnerPage';
+import AboutPage from './components/AboutPage';
+import WhatsAppBotPage from './components/WhatsAppBotPage';
+import NotFoundPage from './components/NotFoundPage';
+import SeoHead from './components/SeoHead';
 
 function postLoginPath(role: UserRole | string | undefined): string {
   if (role === 'owner' || role === 'admin') {
@@ -60,6 +64,7 @@ function LoginRoute() {
 
   return (
     <GuestOnlyRoute>
+      <SeoHead title="تسجيل الدخول" noindex canonicalPath={PATHS.LOGIN} />
       <LoginPage
         onLoginSuccess={(role) => {
           if (role === 'owner' || role === 'admin') {
@@ -84,6 +89,7 @@ function AdminLoginRoute() {
 
   return (
     <GuestOnlyRoute>
+      <SeoHead title="تسجيل الدخول" noindex />
       <LoginPage
         variant="admin"
         onLoginSuccess={(role) => {
@@ -105,6 +111,7 @@ function SignupRoute() {
   const navigate = useNavigate();
   return (
     <GuestOnlyRoute>
+      <SeoHead title="إنشاء حساب" noindex canonicalPath={PATHS.SIGNUP} />
       <SignupPage
         onSignupSuccess={() => navigate(appPath(AppView.DASHBOARD), { replace: true })}
         onNavigateToLogin={() => navigate(PATHS.LOGIN)}
@@ -119,6 +126,7 @@ function ForgotPasswordRoute() {
   const navigate = useNavigate();
   return (
     <GuestOnlyRoute>
+      <SeoHead title="نسيت كلمة المرور" noindex canonicalPath={PATHS.FORGOT_PASSWORD} />
       <ForgotPasswordPage
         onBack={() => navigate(PATHS.HOME)}
         onNavigateToLogin={() => navigate(PATHS.LOGIN)}
@@ -133,11 +141,14 @@ function ResetPasswordRoute() {
   const token = searchParams.get('token') || undefined;
   // Do not wrap in GuestOnlyRoute — users may open the email link while still logged in
   return (
-    <ResetPasswordPage
-      token={token}
-      onBack={() => navigate(PATHS.HOME)}
-      onNavigateToLogin={() => navigate(PATHS.LOGIN)}
-    />
+    <>
+      <SeoHead title="إعادة تعيين كلمة المرور" noindex canonicalPath={PATHS.RESET_PASSWORD} />
+      <ResetPasswordPage
+        token={token}
+        onBack={() => navigate(PATHS.HOME)}
+        onNavigateToLogin={() => navigate(PATHS.LOGIN)}
+      />
+    </>
   );
 }
 
@@ -182,11 +193,14 @@ function CompleteProfileRoute() {
   }
 
   return (
-    <CompleteProfilePage
-      onComplete={() => {
-        navigate(postLoginPath(user?.role), { replace: true });
-      }}
-    />
+    <>
+      <SeoHead title="إكمال الملف الشخصي" noindex canonicalPath={PATHS.COMPLETE_PROFILE} />
+      <CompleteProfilePage
+        onComplete={() => {
+          navigate(postLoginPath(user?.role), { replace: true });
+        }}
+      />
+    </>
   );
 }
 
@@ -258,6 +272,30 @@ function StorifyPartnerRoute() {
   );
 }
 
+function AboutRoute() {
+  const navigate = useNavigate();
+  return (
+    <AboutPage
+      onNavigateToLogin={() => navigate(PATHS.LOGIN)}
+      onNavigateToSignup={() => navigate(PATHS.SIGNUP)}
+      onNavigateToPage={(slug) => navigate(`/${slug}`)}
+      onBack={() => navigate(PATHS.HOME)}
+    />
+  );
+}
+
+function WhatsAppBotRoute() {
+  const navigate = useNavigate();
+  return (
+    <WhatsAppBotPage
+      onNavigateToLogin={() => navigate(PATHS.LOGIN)}
+      onNavigateToSignup={() => navigate(PATHS.SIGNUP)}
+      onNavigateToPage={(slug) => navigate(`/${slug}`)}
+      onBack={() => navigate(PATHS.HOME)}
+    />
+  );
+}
+
 function AdminLogoutRoute() {
   const navigate = useNavigate();
   const { logout } = useAuth();
@@ -289,6 +327,11 @@ function HomeRoute() {
     return <Navigate to={postLoginPath(user.role)} replace />;
   }
   return <LandingRoute />;
+}
+
+function NotFoundRoute() {
+  const navigate = useNavigate();
+  return <NotFoundPage onBack={() => navigate(PATHS.HOME)} />;
 }
 
 const App: React.FC = () => {
@@ -323,14 +366,11 @@ const App: React.FC = () => {
         <Route path={PATHS.ADMIN_LEGACY} element={<Navigate to={PATHS.HOME} replace />} />
         <Route path={`${PATHS.ADMIN_LEGACY}/*`} element={<Navigate to={PATHS.HOME} replace />} />
 
-        <Route
-          path="/storify"
-          element={
-            <StorifyPartnerRoute />
-          }
-        />
+        <Route path="/storify" element={<StorifyPartnerRoute />} />
+        <Route path={PATHS.ABOUT} element={<AboutRoute />} />
+        <Route path={PATHS.WHATSAPP_BOT} element={<WhatsAppBotRoute />} />
         <Route path="/:slug" element={<PublicPageRoute />} />
-        <Route path="*" element={<Navigate to={PATHS.HOME} replace />} />
+        <Route path="*" element={<NotFoundRoute />} />
       </Routes>
     </OAuthTokenHandler>
   );

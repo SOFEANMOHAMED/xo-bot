@@ -25,7 +25,8 @@ import {
   Megaphone,
   HelpCircle,
   Bot,
-  Inbox
+  Inbox,
+  ExternalLink
 } from 'lucide-react';
 import TrialBanner from './TrialBanner';
 import SubscriptionModal from './SubscriptionModal';
@@ -264,6 +265,19 @@ const Layout: React.FC<LayoutProps> = ({
         </nav>
 
         <div className="p-4 border-t border-gray-100 dark:border-gray-700 space-y-2">
+          <a
+            href="https://app.storify.it.com/login?ref=Z8DVTTF5"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full flex items-center justify-between gap-3 px-4 py-3 bg-[#f6f9ef] dark:bg-[#a2c037]/10 text-[#718520] dark:text-[#a2c037] hover:bg-[#ebf2da] dark:hover:bg-[#a2c037]/20 rounded-xl transition-colors border border-[#d4e3aa] dark:border-[#a2c037]/30 font-bold shadow-sm focus:outline-none focus:ring-2 focus:ring-[#a2c037]"
+          >
+            <div className="flex items-center gap-3">
+              <Store size={20} aria-hidden="true" />
+              <span>أحصل على متجر ألكتروني</span>
+            </div>
+            <ExternalLink size={16} className="opacity-70" aria-hidden="true" />
+          </a>
+
           <button 
             onClick={toggleDarkMode}
             aria-label={isDarkMode ? 'التبديل إلى الوضع النهاري' : 'التبديل إلى الوضع الليلي'}

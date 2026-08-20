@@ -33,6 +33,8 @@ export const PATHS = {
   FORGOT_PASSWORD: '/forgot-password',
   RESET_PASSWORD: '/reset-password',
   COMPLETE_PROFILE: '/complete-profile',
+  ABOUT: '/about',
+  WHATSAPP_BOT: '/whatsapp-bot',
   /** Legacy OAuth callback alias → redirects to APP_INTEGRATIONS */
   INTEGRATIONS_LEGACY: '/integrations',
   APP: '/app',
@@ -143,4 +145,10 @@ export const RESERVED_ROOT_SEGMENTS = new Set([
   'api',
   'webhooks',
   'storify',
+  'about',
+  'whatsapp-bot',
+  'sitemap.xml',
+  'robots.txt',
+  'llms.txt',
+  'llms-full.txt',
 ]);

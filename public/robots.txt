@@ -1,0 +1,60 @@
+User-agent: *
+Allow: /
+Disallow: /app/
+Disallow: /login
+Disallow: /signup
+Disallow: /forgot-password
+Disallow: /reset-password
+Disallow: /complete-profile
+Disallow: /integrations
+Disallow: /api/
+
+# AI crawlers — public marketing pages only
+User-agent: GPTBot
+Allow: /
+Allow: /about
+Allow: /whatsapp-bot
+Allow: /storify
+Allow: /llms.txt
+Allow: /llms-full.txt
+Disallow: /app/
+Disallow: /login
+Disallow: /signup
+
+User-agent: ChatGPT-User
+Allow: /
+Allow: /about
+Allow: /whatsapp-bot
+Allow: /storify
+Allow: /llms.txt
+Allow: /llms-full.txt
+Disallow: /app/
+
+User-agent: Google-Extended
+Allow: /
+Allow: /about
+Allow: /whatsapp-bot
+Allow: /storify
+Allow: /llms.txt
+Allow: /llms-full.txt
+Disallow: /app/
+
+User-agent: anthropic-ai
+Allow: /
+Allow: /about
+Allow: /whatsapp-bot
+Allow: /storify
+Allow: /llms.txt
+Allow: /llms-full.txt
+Disallow: /app/
+
+User-agent: ClaudeBot
+Allow: /
+Allow: /about
+Allow: /whatsapp-bot
+Allow: /storify
+Allow: /llms.txt
+Allow: /llms-full.txt
+Disallow: /app/
+
+Sitemap: https://xo-bot.com/sitemap.xml

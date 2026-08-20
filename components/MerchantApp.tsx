@@ -28,6 +28,7 @@ import apiService from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { logger } from '../utils/logger';
 import { PATHS, appPath, appViewFromSlug, isKnownAppSlug } from '../routes/paths';
+import SeoHead from './SeoHead';
 
 const FACEBOOK_OAUTH_ERROR_MESSAGES: Record<string, string> = {
   no_pages:
@@ -1186,6 +1187,7 @@ const MerchantApp: React.FC = () => {
 
   return (
     <>
+      <SeoHead title="لوحة التحكم" noindex />
       <div className={isDarkMode ? 'dark' : ''}>
         <Layout 
           currentView={currentView} 

@@ -18,6 +18,7 @@ import NotificationContainer from './Notification';
 import { AdminNotificationProvider, useAdminNotifications } from './admin/AdminNotificationContext';
 import apiService from '../services/api';
 import { Lock, Loader2 } from 'lucide-react';
+import SeoHead from './SeoHead';
 
 interface AdminAppProps {
   onLogout: () => void;
@@ -167,6 +168,7 @@ const AdminAppContent: React.FC<AdminAppProps & { currentView: AdminView }> = ({
 
   return (
     <>
+      <SeoHead title="لوحة الإدارة" noindex />
       <AdminLayout currentView={currentView} onLogout={onLogout}>
         {renderContent()}
       </AdminLayout>

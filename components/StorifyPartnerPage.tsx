@@ -6,6 +6,7 @@ import {
   Star, ArrowRight,
 } from 'lucide-react';
 import { usePublishedFooterPages } from '../hooks/usePublishedFooterPages';
+import SeoHead from './SeoHead';
 
 interface StorifyPartnerPageProps {
   onNavigateToLogin: () => void;
@@ -166,6 +167,11 @@ const StorifyPartnerPage: React.FC<StorifyPartnerPageProps> = ({
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans" dir="rtl">
+      <SeoHead
+        title="شراكة xoBot × ستوريفاي — متجرك الذكي يبيع وأنت نايم"
+        description="أنشئ متجرك الإلكتروني مع ستوريفاي وفعّل بوت المبيعات الذكي من xoBot. ثنائي يجعل مشروعك يعمل على مدار الساعة بدون مبرمج."
+        canonicalPath="/storify"
+      />
       {/* ── Injected storify colors ─────────────────────────────────── */}
       <style>{`
         :root {

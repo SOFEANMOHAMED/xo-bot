@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Bot, Zap, MessageCircle, CheckCircle, Mail, ArrowRight, Shield,
   Plus, Minus, Loader2, TrendingUp, Clock, UserCircle, BarChart2,
@@ -7,10 +7,18 @@ import {
 } from 'lucide-react';
 import LandingChatBot from './LandingChatBot';
 import AntigravityHero from './AntigravityHero';
+import SeoHead from './SeoHead';
 import { apiService } from '../services/api';
 import { logger } from '../utils/logger';
 import { usePublishedFooterPages } from '../hooks/usePublishedFooterPages';
 import { validateEmail, validateLength } from '../utils/validation';
+import {
+  LANDING_FAQ,
+  SEO_DEFAULTS,
+  buildFaqJsonLd,
+  buildOrganizationJsonLd,
+  buildSoftwareApplicationJsonLd,
+} from '../utils/seo';
 
 interface LandingPageProps {
   onNavigateToLogin: () => void;
@@ -31,6 +39,10 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
   const [plans, setPlans] = useState<Plan[]>([]);
   const [isLoadingPlans, setIsLoadingPlans] = useState(true);
   const cmsFooterPages = usePublishedFooterPages();
+  const landingJsonLd = useMemo(
+    () => [buildOrganizationJsonLd(), buildSoftwareApplicationJsonLd(), buildFaqJsonLd()],
+    []
+  );
 
   useEffect(() => {
     const fetchPlans = async () => {
@@ -161,6 +173,12 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
 
   return (
     <div className="min-h-screen bg-white font-sans text-slate-900 dir-rtl selection:bg-brand-200 selection:text-slate-900 overflow-x-hidden relative">
+      <SeoHead
+        title={SEO_DEFAULTS.title}
+        description={SEO_DEFAULTS.description}
+        canonicalPath="/"
+        jsonLd={landingJsonLd}
+      />
       {/* Soft warm atmosphere */}
       <div className="fixed inset-0 pointer-events-none z-0">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_#FFF8EB_0%,_#ffffff_55%,_#ffffff_100%)]" />
@@ -596,13 +614,9 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
             <p className="text-slate-500">إجابات سريعة على التساؤلات الأكثر شيوعاً</p>
           </div>
           <div className="max-w-3xl mx-auto space-y-3">
-            <FaqItem question="هل يدعم البوت اللهجات العربية العامية؟" answer="نعم — يفهم ويرد باللهجات المصرية والخليجية والشامية وغيرها بدقة عالية، فيبدو كموظف مبيعات حقيقي." />
-            <FaqItem question="هل أحتاج إلى خبرة برمجية لاستخدام المنصة؟" answer="إطلاقاً. الربط مع واتساب وفيسبوك وإنستغرام وتيليجرام يتم من لوحة التحكم بخطوات بسيطة ودون كتابة أي كود." />
-            <FaqItem question="كيف يتم تحديث معلومات المنتجات والأسعار؟" answer="أضف المنتجات يدوياً أو ارفعها من ملف Excel. أي تعديل على الكتالوج ينعكس فوراً على إجابات البوت." />
-            <FaqItem question="ما الفرق بين باقة التعليقات وباقات المبيعات؟" answer="باقة التعليقات للرد الآلي على تعليقات فيسبوك وإنستغرام فقط. باقات المبيعات تضيف بوت الرسائل الخاصة (واتساب / ماسنجر / إنستغرام / تيليجرام حسب الباقة) مع إدارة منتجات وطلبات." />
-            <FaqItem question="كيف أربط واتساب؟" answer="من لوحة الربط اضغط ربط واتساب، ثم امسح رمز QR من واتساب على جوال المتجر (الأجهزة المرتبطة). الرقم يبقى على هاتفك، والمنصة تظهر كجهاز مرتبط للرد على الزبائن." />
-            <FaqItem question="هل هناك فترة تجربة مجانية؟" answer="نعم — تجربة مجانية لمدة 7 أيام لاختبار المنصة قبل الاشتراك." />
-            <FaqItem question="ماذا يحدث إذا لم يعرف البوت الإجابة؟" answer="لا يخترع أسعاراً أو معلومات. يعتذر بلطف ويحوّل الحوار للدعم البشري من صندوق الوارد عند الحاجة." />
+            {LANDING_FAQ.map((item) => (
+              <FaqItem key={item.question} question={item.question} answer={item.answer} />
+            ))}
           </div>
         </div>
       </section>
@@ -630,23 +644,24 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
                   <li><button onClick={() => scrollToSection('home')} className="hover:text-brand transition-colors">الرئيسية</button></li>
                   <li><button onClick={() => scrollToSection('features')} className="hover:text-brand transition-colors">المميزات</button></li>
                   <li><button onClick={() => scrollToSection('pricing')} className="hover:text-brand transition-colors">الأسعار</button></li>
-                  <li><button onClick={() => scrollToSection('faq')} className="hover:text-brand transition-colors">الأسئلة الشائعة</button></li>
+                  <li><a href="/about" className="hover:text-brand transition-colors">عن Xo Bot</a></li>
+                  <li><a href="/whatsapp-bot" className="hover:text-brand transition-colors">بوت واتساب</a></li>
+                  <li><a href="/storify" className="hover:text-brand transition-colors">شراكة ستوريفاي</a></li>
                 </ul>
               </div>
               <div>
                 <h4 className="font-bold mb-5">قانوني</h4>
                 <ul className="space-y-3 text-sm text-slate-400">
-                  {onNavigateToPage ? (
-                    <>
-                      <li><button onClick={() => onNavigateToPage('privacy-policy')} className="hover:text-brand transition-colors">سياسة الخصوصية</button></li>
-                      <li><button onClick={() => onNavigateToPage('terms-of-service')} className="hover:text-brand transition-colors">الشروط والأحكام</button></li>
-                    </>
-                  ) : (
-                    <>
-                      <li><a href="#" className="hover:text-brand transition-colors">سياسة الخصوصية</a></li>
-                      <li><a href="#" className="hover:text-brand transition-colors">الشروط والأحكام</a></li>
-                    </>
-                  )}
+                  <li>
+                    <a href="/privacy-policy" className="hover:text-brand transition-colors">
+                      سياسة الخصوصية
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/terms-of-service" className="hover:text-brand transition-colors">
+                      الشروط والأحكام
+                    </a>
+                  </li>
                 </ul>
               </div>
               {cmsFooterPages.length > 0 && (

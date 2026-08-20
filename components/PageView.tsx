@@ -4,6 +4,8 @@ import { Bot, Loader2 } from 'lucide-react';
 import apiService from '../services/api';
 import { logger } from '../utils/logger';
 import { usePublishedFooterPages } from '../hooks/usePublishedFooterPages';
+import SeoHead from './SeoHead';
+import { SEO_DEFAULTS } from '../utils/seo';
 
 interface PageViewProps {
   slug: string;
@@ -23,6 +25,7 @@ const PageView: React.FC<PageViewProps> = ({
   const [page, setPage] = useState<{
     title: string;
     content: string;
+    meta_description?: string;
     updated_at: string;
   } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -131,6 +134,7 @@ const PageView: React.FC<PageViewProps> = ({
   if (isLoading) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
+        <SeoHead title="جاري التحميل..." noindex canonicalPath={`/${slug}`} />
         <Loader2 className="animate-spin text-brand" size={40} />
       </div>
     );
@@ -139,6 +143,12 @@ const PageView: React.FC<PageViewProps> = ({
   if (error || !page) {
     return (
       <div className="min-h-screen bg-white flex flex-col">
+        <SeoHead
+          title="الصفحة غير موجودة"
+          description="الصفحة التي تبحث عنها غير موجودة."
+          canonicalPath={`/${slug}`}
+          noindex
+        />
         <Navbar />
         <div className="flex-1 flex items-center justify-center pt-20">
           <div className="text-center max-w-md px-4">
@@ -154,6 +164,12 @@ const PageView: React.FC<PageViewProps> = ({
 
   return (
     <div className="min-h-screen bg-white text-slate-900 flex flex-col font-sans" dir="rtl">
+      <SeoHead
+        title={page.title}
+        description={page.meta_description || SEO_DEFAULTS.description}
+        canonicalPath={`/${slug}`}
+        ogType="article"
+      />
       <div className="fixed inset-0 pointer-events-none z-0">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_#FFF8EB_0%,_#ffffff_60%,_#ffffff_100%)]" />
       </div>
