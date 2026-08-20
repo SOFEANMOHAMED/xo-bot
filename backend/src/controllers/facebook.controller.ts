@@ -56,7 +56,13 @@ import {
 // ==================== FACEBOOK LINKING SESSIONS ====================
 
 interface FacebookLinkingSession {
-  merchantId: string;
+  purpose: 'merchant' | 'official_page';
+  /** Merchant integrations only */
+  merchantId?: string;
+  /** Super-admin who started official-page OAuth */
+  adminId?: string;
+  /** Obscured admin UI base path for OAuth return */
+  adminBasePath?: string;
   userAccessToken: string;
   pages: Array<{
     id: string;
@@ -511,6 +517,23 @@ const processFacebookComment = async (pageId: string, value: any) => {
 // Process Facebook message event
 const processFacebookMessage = async (event: any) => {
   try {
+    // ==================== OFFICIAL PAGE BOT (platform, not merchant) ====================
+    // Intercept before merchant SalesGPT so the official page never touches tenant data.
+    const inboundPageId = event?.recipient?.id ? String(event.recipient.id) : '';
+    if (inboundPageId) {
+      const { getPlatformFacebookPageByPageId } = await import('../services/platformFacebookPage.js');
+      const platformPage = await getPlatformFacebookPageByPageId(inboundPageId);
+      if (platformPage) {
+        const { processOfficialPageMessage } = await import('../services/officialPageBot.js');
+        await processOfficialPageMessage(event, platformPage);
+        return;
+      }
+    } else {
+      logger.warn('Facebook inbound message missing recipient page id', {
+        senderId: event?.sender?.id || null,
+      });
+    }
+
     // ==================== STEP 1: Parse incoming event ====================
     const parsedEvent = await facebookAdapter.parseIncomingEvent(event);
     
@@ -1546,14 +1569,34 @@ export const facebookCallback = async (
     const authCode = String(code);
 
     const redirectUrl = await withOAuthCodeDedup('facebook', authCode, async () => {
-      let merchantId: string;
+      let purpose: 'merchant' | 'official_page' = 'merchant';
+      let merchantId: string | undefined;
+      let adminId: string | undefined;
+      let adminBasePath: string | undefined;
       try {
         const stateData = JSON.parse(Buffer.from(String(state), 'base64').toString());
-        merchantId = stateData.merchantId;
-        if (!merchantId) throw new Error('no merchantId');
+        if (stateData.purpose === 'official_page') {
+          purpose = 'official_page';
+          adminId = stateData.adminId || undefined;
+          adminBasePath = stateData.adminBasePath || undefined;
+          if (!adminId) throw new Error('no adminId');
+        } else {
+          merchantId = stateData.merchantId;
+          if (!merchantId) throw new Error('no merchantId');
+        }
       } catch {
         return buildFacebookIntegrationRedirect({ facebook: 'error', reason: 'invalid_state' });
       }
+
+      const {
+        buildOfficialFacebookSelectRedirect,
+        buildOfficialFacebookErrorRedirect,
+      } = await import('./adminOfficialFacebook.controller.js');
+
+      const errorRedirect = (reason: string) =>
+        purpose === 'official_page'
+          ? buildOfficialFacebookErrorRedirect(reason, adminBasePath)
+          : buildFacebookIntegrationRedirect({ facebook: 'error', reason });
 
       const fbAppId = process.env.FACEBOOK_APP_ID;
       const fbAppSecret = process.env.FACEBOOK_APP_SECRET;
@@ -1574,7 +1617,7 @@ export const facebookCallback = async (
 
       if (!tokenResponse.ok || !tokenData.access_token) {
         logger.error('Facebook OAuth token exchange failed', new Error(JSON.stringify(tokenData)));
-        return buildFacebookIntegrationRedirect({ facebook: 'error', reason: 'oauth_failed' });
+        return errorRedirect('oauth_failed');
       }
 
       const userAccessToken = tokenData.access_token;
@@ -1593,17 +1636,19 @@ export const facebookCallback = async (
               hasPagePerms,
               hasBusinessMgmt,
               resolveSource: source,
+              purpose,
             })
           )
         );
-        return buildFacebookIntegrationRedirect({
-          facebook: 'error',
-          reason: hasPagePerms && !hasBusinessMgmt ? 'business_pages' : 'no_pages',
-        });
+        return errorRedirect(
+          hasPagePerms && !hasBusinessMgmt ? 'business_pages' : 'no_pages'
+        );
       }
 
       logger.info('Facebook pages resolved for OAuth linking', {
-        merchantId,
+        purpose,
+        merchantId: merchantId || null,
+        adminId: adminId || null,
         pagesCount: pages.length,
         source,
       });
@@ -1611,7 +1656,10 @@ export const facebookCallback = async (
       const corsOrigin = process.env.CORS_ORIGIN || 'https://xo-bot.com';
       const sessionId = crypto.randomUUID();
       fbLinkingSessions.set(sessionId, {
+        purpose,
         merchantId,
+        adminId,
+        adminBasePath,
         userAccessToken,
         pages: pages.map((p) => ({
           id: p.id,
@@ -1624,10 +1672,16 @@ export const facebookCallback = async (
       });
 
       logger.info('Facebook OAuth: linking session created', {
-        merchantId,
+        purpose,
+        merchantId: merchantId || null,
+        adminId: adminId || null,
         sessionId,
         pagesCount: pages.length,
       });
+
+      if (purpose === 'official_page') {
+        return buildOfficialFacebookSelectRedirect(sessionId, adminBasePath);
+      }
 
       return `${corsOrigin}/app/integrations?facebook=select_pages&fb_session=${sessionId}`;
     });
@@ -1709,6 +1763,26 @@ export const facebookWebhook = async (
               }
 
               try {
+                // Official XO Bot page: pause platform bot on human Inbox reply
+                const { getPlatformFacebookPageByPageId } = await import(
+                  '../services/platformFacebookPage.js'
+                );
+                const platformPage = await getPlatformFacebookPageByPageId(pageId);
+                if (platformPage) {
+                  const { handleOfficialPageHumanEcho } = await import(
+                    '../services/officialPageBot.js'
+                  );
+                  await handleOfficialPageHumanEcho({
+                    pageId,
+                    userPsid,
+                    messageText,
+                    messageId,
+                    hasAttachments,
+                    attachmentType: attachments[0]?.type,
+                  });
+                  continue;
+                }
+
                 const merchantResult = await pool.query(
                   'SELECT merchant_id FROM facebook_pages WHERE page_id = $1',
                   [pageId]
@@ -1966,7 +2040,21 @@ export const facebookWebhook = async (
                   comment_text: payload?.message,
                   received_at: new Date().toISOString()
                 });
-                processFacebookComment(pageId, payload).catch(err =>
+                // Official XO Bot page: isolated comment automation (never merchant tables)
+                (async () => {
+                  const { getPlatformFacebookPageByPageId } = await import(
+                    '../services/platformFacebookPage.js'
+                  );
+                  const platformPage = await getPlatformFacebookPageByPageId(String(pageId));
+                  if (platformPage) {
+                    const { processOfficialPageComment } = await import(
+                      '../services/platformCommentAutomation.js'
+                    );
+                    await processOfficialPageComment(platformPage, payload);
+                    return;
+                  }
+                  await processFacebookComment(pageId, payload);
+                })().catch((err) =>
                   logger.error('Error processing Facebook comment', err as Error)
                 );
               }

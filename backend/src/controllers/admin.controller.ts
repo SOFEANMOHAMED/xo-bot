@@ -8,6 +8,7 @@ import {
   createMerchantNotification,
   type MerchantNotificationType,
 } from '../services/merchantNotifications.js';
+import { OFFICIAL_PAGE_BOT_DEFAULT_SYSTEM_MESSAGE } from '../services/officialPageBot.js';
 // Note: PRODUCT_BOT_SYSTEM_PROMPT and SERVICE_BOT_SYSTEM_PROMPT are now in utils/prompts
 // Legacy prompt helpers removed; orchestrator is the single source of truth.
 const PRODUCT_BOT_SYSTEM_PROMPT = 'You are a helpful product assistant.';
@@ -1340,7 +1341,8 @@ export const getGlobalSettings = async (
         landingBotEnabled: true,
         dashboardBotEnabled: true,
         productsBotEnabled: true,
-        servicesBotEnabled: true
+        servicesBotEnabled: true,
+        officialPageBotEnabled: false
       },
       bots: {
         productsBot: {
@@ -1350,6 +1352,10 @@ export const getGlobalSettings = async (
         servicesBot: {
           enabled: true,
           systemMessage: SERVICE_BOT_SYSTEM_PROMPT
+        },
+        officialPageBot: {
+          enabled: false,
+          systemMessage: OFFICIAL_PAGE_BOT_DEFAULT_SYSTEM_MESSAGE
         }
       },
       paymentMethods: {
@@ -1385,6 +1391,10 @@ export const getGlobalSettings = async (
         servicesBot: {
           ...defaultSettings.bots.servicesBot,
           ...(settings.bots?.servicesBot || {})
+        },
+        officialPageBot: {
+          ...defaultSettings.bots.officialPageBot,
+          ...(settings.bots?.officialPageBot || {})
         }
       },
       paymentMethods: {

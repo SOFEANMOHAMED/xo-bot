@@ -35,6 +35,7 @@ import SupportTicketModal from './SupportTicketModal';
 import DashboardAssistant from './DashboardAssistant';
 import ConfirmDialog from './admin/ConfirmDialog';
 import InstallAppButton from './InstallAppButton';
+import BrandLogo from './BrandLogo';
 import { useAuth } from '../contexts/AuthContext';
 import { useSubscriptionCheck } from '../hooks/useSubscriptionCheck';
 import apiService from '../services/api';
@@ -187,16 +188,11 @@ const Layout: React.FC<LayoutProps> = ({
         aria-label="القائمة الجانبية"
       >
         <div className="p-6 flex items-center justify-between gap-3 border-b border-brand-100 dark:border-gray-700">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-brand rounded-xl text-white shadow-lg shadow-brand/25 dark:shadow-none">
-              <Store size={24} />
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="rounded-xl bg-white px-2 py-1.5 border border-brand-100/80 shadow-sm dark:border-gray-600">
+              <BrandLogo className="h-9 w-auto max-w-[150px] object-contain select-none" />
             </div>
-            <div>
-              <h1 className="font-bold text-lg text-gray-900 dark:text-white">
-                Xo <span className="text-brand">Bot</span>
-              </h1>
-              <p className="text-xs text-gray-500 dark:text-gray-400">إدارة المتجر</p>
-            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 shrink-0 hidden sm:block">إدارة المتجر</p>
           </div>
           {/* Close button for mobile */}
           <button
@@ -310,8 +306,8 @@ const Layout: React.FC<LayoutProps> = ({
            >
              <Menu size={24} />
            </button>
-           <div className="font-bold text-lg">
-             Xo <span className="text-brand">Bot</span>
+           <div className="rounded-lg bg-white px-1.5 py-1 border border-brand-100/80 dark:border-gray-600">
+             <BrandLogo className="h-7 w-auto max-w-[120px] object-contain select-none" />
            </div>
          </div>
          <div className="flex items-center gap-1">

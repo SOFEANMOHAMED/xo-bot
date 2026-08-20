@@ -20,7 +20,8 @@ import {
   AlertTriangle,
   FileText as FileTextIcon,
   Headphones,
-  Wallet
+  Wallet,
+  MessageSquareText
 } from 'lucide-react';
 import ConfirmDialog from './admin/ConfirmDialog';
 
@@ -54,6 +55,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ currentView, onLogout, childr
     { id: AdminView.TRIALS, label: 'التجارب المجانية', icon: Clock },
     { id: AdminView.ALERTS, label: 'التنبيهات', icon: AlertTriangle },
     { id: AdminView.PAGES, label: 'إدارة الصفحات', icon: FileTextIcon },
+    { id: AdminView.OFFICIAL_PAGE_COMMENTS, label: 'تعليقات صفحة XO Bot', icon: MessageSquareText },
     { id: AdminView.SUPPORT_TICKETS, label: 'رسائل الدعم', icon: Headphones },
     { id: AdminView.NOTIFICATIONS, label: 'الإشعارات', icon: Bell },
     { id: AdminView.EMAIL_BROADCAST, label: 'إرسال بريد إلكتروني', icon: Mail },

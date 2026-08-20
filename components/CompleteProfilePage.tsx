@@ -1,11 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
-import { Bot, Lock, Phone, Tag, Eye, EyeOff, ArrowRight } from 'lucide-react';
+import { Lock, Phone, Tag, Eye, EyeOff, ArrowRight } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { handleApiError } from '../utils/errorHandler';
 import CountryCodeSelector from './CountryCodeSelector';
 import apiService from '../services/api';
 import AuthLayout from './AuthLayout';
+import BrandLogo from './BrandLogo';
 
 interface CompleteProfilePageProps {
   onComplete: () => void;
@@ -69,8 +70,8 @@ const CompleteProfilePage: React.FC<CompleteProfilePageProps> = ({ onComplete })
   return (
     <AuthLayout showNavLinks={false}>
       <div className="text-center mb-8 animate-fade-in-up">
-        <div className="inline-flex items-center justify-center w-16 h-16 bg-brand rounded-2xl mb-4 shadow-lg shadow-brand/30">
-          <Bot size={32} className="text-white" />
+        <div className="inline-flex items-center justify-center mb-4">
+          <BrandLogo className="h-14 w-auto select-none" />
         </div>
         <h2 className="text-3xl font-extrabold text-slate-900 mb-2">إكمال الملف الشخصي</h2>
         <p className="text-slate-500">يرجى إكمال معلوماتك لإتمام عملية التسجيل</p>

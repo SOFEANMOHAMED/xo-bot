@@ -241,7 +241,8 @@ export enum AdminView {
   EMAIL_BROADCAST = 'EMAIL_BROADCAST',
   USER_NOTIFICATIONS = 'USER_NOTIFICATIONS',
   SUPPORT_TICKETS = 'SUPPORT_TICKETS',
-  PAYMENT_REQUESTS = 'PAYMENT_REQUESTS'
+  PAYMENT_REQUESTS = 'PAYMENT_REQUESTS',
+  OFFICIAL_PAGE_COMMENTS = 'OFFICIAL_PAGE_COMMENTS'
 }
 
 export interface AdminUser {
@@ -283,6 +284,7 @@ export interface AdminGlobalSettings {
     dashboardBotEnabled: boolean;
     productsBotEnabled: boolean;
     servicesBotEnabled: boolean;
+    officialPageBotEnabled: boolean;
   };
   bots: {
     productsBot: {
@@ -290,6 +292,10 @@ export interface AdminGlobalSettings {
       systemMessage: string;
     };
     servicesBot: {
+      enabled: boolean;
+      systemMessage: string;
+    };
+    officialPageBot: {
       enabled: boolean;
       systemMessage: string;
     };

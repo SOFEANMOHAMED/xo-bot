@@ -27,6 +27,8 @@ export const getFromAddress = (): string => {
   return process.env.SMTP_FROM || `"${appName}" <noreply@xo-bot.com>`;
 };
 
+export const getBrandLogoUrl = (): string => `${getFrontendUrl()}/xo-bot-logo.png`;
+
 export const escapeHtml = (value: string): string =>
   value
     .replace(/&/g, '&amp;')
@@ -50,6 +52,7 @@ export type BrandedEmailOptions = {
 export function renderBrandedEmail(options: BrandedEmailOptions): string {
   const appName = getAppName();
   const year = new Date().getFullYear();
+  const logoUrl = getBrandLogoUrl();
   const preheader = options.preheader
     ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escapeHtml(options.preheader)}</div>`
     : '';
@@ -79,11 +82,11 @@ export function renderBrandedEmail(options: BrandedEmailOptions): string {
   ${preheader}
   <div style="max-width:600px;margin:24px auto;padding:0 12px;">
     <div style="background:${BRAND.white};border-radius:16px;overflow:hidden;border:1px solid ${BRAND.softBorder};box-shadow:0 8px 24px rgba(255,154,0,0.08);">
-      <div style="background:linear-gradient(135deg,${BRAND.primary} 0%,${BRAND.primaryDark} 100%);padding:22px 28px;">
-        <div style="font-size:22px;font-weight:800;color:${BRAND.white};letter-spacing:-0.02em;">
-          Xo <span style="opacity:0.95;">Bot</span>
-        </div>
-        <div style="margin-top:4px;font-size:13px;color:rgba(255,255,255,0.9);">${escapeHtml(options.title)}</div>
+      <div style="background:linear-gradient(180deg,${BRAND.soft} 0%,${BRAND.white} 100%);padding:20px 28px 16px;border-bottom:1px solid ${BRAND.softBorder};text-align:center;">
+        <a href="${escapeHtml(getFrontendUrl())}" style="text-decoration:none;display:inline-block;">
+          <img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(appName)}" width="200" style="display:block;margin:0 auto;max-width:200px;height:auto;border:0;" />
+        </a>
+        <div style="margin-top:12px;font-size:14px;font-weight:700;color:${BRAND.text};">${escapeHtml(options.title)}</div>
       </div>
       <div style="padding:28px;color:${BRAND.text};font-size:15px;line-height:1.75;">
         ${options.bodyHtml}

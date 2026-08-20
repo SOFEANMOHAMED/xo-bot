@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { AdminGlobalSettings, SystemLog } from '../../types';
 import apiService from '../../services/api';
-import { Save, ToggleLeft, ToggleRight, AlertCircle, Info, AlertTriangle, Loader2, Upload, Copy } from 'lucide-react';
+import { Save, ToggleLeft, ToggleRight, AlertCircle, Info, AlertTriangle, Loader2, Upload, Copy, Link2, Unlink, Facebook } from 'lucide-react';
 import { useAdminNotifications } from './AdminNotificationContext';
 import { logger } from '../../utils/logger';
+import { PATHS } from '../../routes/paths';
 
 interface AdminSystemProps {
   view: 'SETTINGS' | 'LOGS';
@@ -13,6 +15,33 @@ const SettingsView: React.FC = () => {
     const [settings, setSettings] = useState<AdminGlobalSettings | null>(null);
     const [uploadingQr, setUploadingQr] = useState<'shamCash' | 'usdt' | null>(null);
     const { showSuccess, showError } = useAdminNotifications();
+    const [searchParams, setSearchParams] = useSearchParams();
+
+    const [officialPage, setOfficialPage] = useState<{
+      pageId: string;
+      pageName: string | null;
+      linkedAt: string;
+    } | null>(null);
+    const [fbConnecting, setFbConnecting] = useState(false);
+    const [fbLinkingSessionId, setFbLinkingSessionId] = useState('');
+    const [fbAvailablePages, setFbAvailablePages] = useState<Array<{
+      id: string;
+      name: string;
+      category: string | null;
+      pictureUrl: string | null;
+    }>>([]);
+    const [fbLoadingPages, setFbLoadingPages] = useState(false);
+    const [fbLinking, setFbLinking] = useState(false);
+    const [selectedOfficialPageId, setSelectedOfficialPageId] = useState<string>('');
+
+    const refreshOfficialStatus = useCallback(async () => {
+      try {
+        const status = await apiService.getOfficialFacebookStatus();
+        setOfficialPage(status.page);
+      } catch (err: any) {
+        logger.error('Failed to fetch official Facebook status:', err);
+      }
+    }, []);
 
     useEffect(() => {
         const fetchSettings = async () => {
@@ -20,6 +49,28 @@ const SettingsView: React.FC = () => {
                 const response = await apiService.getGlobalSettings();
                 setSettings({
                     ...response,
+                    features: {
+                        affiliateEnabled: response.features?.affiliateEnabled ?? true,
+                        landingBotEnabled: response.features?.landingBotEnabled ?? true,
+                        dashboardBotEnabled: response.features?.dashboardBotEnabled ?? true,
+                        productsBotEnabled: response.features?.productsBotEnabled ?? true,
+                        servicesBotEnabled: response.features?.servicesBotEnabled ?? true,
+                        officialPageBotEnabled: response.features?.officialPageBotEnabled ?? false,
+                    },
+                    bots: {
+                        productsBot: {
+                            enabled: response.bots?.productsBot?.enabled ?? true,
+                            systemMessage: response.bots?.productsBot?.systemMessage || '',
+                        },
+                        servicesBot: {
+                            enabled: response.bots?.servicesBot?.enabled ?? true,
+                            systemMessage: response.bots?.servicesBot?.systemMessage || '',
+                        },
+                        officialPageBot: {
+                            enabled: response.bots?.officialPageBot?.enabled ?? false,
+                            systemMessage: response.bots?.officialPageBot?.systemMessage || '',
+                        },
+                    },
                     paymentMethods: {
                         shamCash: {
                             enabled: response.paymentMethods?.shamCash?.enabled ?? true,
@@ -43,7 +94,62 @@ const SettingsView: React.FC = () => {
             }
         };
         fetchSettings();
-    }, []);
+        refreshOfficialStatus();
+    }, [refreshOfficialStatus]);
+
+    useEffect(() => {
+        const facebook = searchParams.get('facebook');
+        const session = searchParams.get('fb_session');
+        const reason = searchParams.get('reason');
+
+        if (facebook === 'error') {
+            showError(
+                reason === 'no_pages'
+                    ? 'لم يتم العثور على صفحات فيسبوك. تأكد من صلاحيات الصفحة.'
+                    : reason === 'business_pages'
+                      ? 'قد تحتاج صلاحية Business Management لرؤية صفحات Business Suite.'
+                      : 'فشل ربط فيسبوك. حاول مرة أخرى.'
+            );
+            setSearchParams({}, { replace: true });
+            return;
+        }
+
+        if (facebook === 'select_pages' && session) {
+            setFbLinkingSessionId(session);
+            setFbLoadingPages(true);
+            apiService
+                .getOfficialAvailableFacebookPages(session)
+                .then(async (data) => {
+                    const pages = data.pages || [];
+                    setFbAvailablePages(pages);
+                    if (pages.length === 1) {
+                        setSelectedOfficialPageId(pages[0].id);
+                        // Auto-confirm when Meta returns a single page — avoids unfinished OAuth.
+                        try {
+                            setFbLinking(true);
+                            const result = await apiService.linkOfficialFacebookPage(session, pages[0].id);
+                            setOfficialPage(result.page);
+                            setFbLinkingSessionId('');
+                            setFbAvailablePages([]);
+                            setSelectedOfficialPageId('');
+                            showSuccess(result.message || 'تم ربط الصفحة الرسمية تلقائياً');
+                        } catch (err: any) {
+                            showError(err?.message || 'فشل الربط التلقائي — اختر الصفحة يدوياً');
+                        } finally {
+                            setFbLinking(false);
+                        }
+                    }
+                })
+                .catch((err: any) => {
+                    showError(err?.message || 'تعذر تحميل صفحات فيسبوك');
+                    setFbLinkingSessionId('');
+                })
+                .finally(() => {
+                    setFbLoadingPages(false);
+                    setSearchParams({}, { replace: true });
+                });
+        }
+    }, [searchParams, setSearchParams, showError]);
 
     const handleToggle = (feature: keyof AdminGlobalSettings['features']) => {
         if (settings) {
@@ -126,11 +232,68 @@ const SettingsView: React.FC = () => {
         }
     };
 
+    const handleConnectOfficialFacebook = async () => {
+        try {
+            setFbConnecting(true);
+            const result = await apiService.connectOfficialFacebook(PATHS.ADMIN);
+            if ((result as any).requiresSetup || !result.authUrl) {
+                showError((result as any).message || 'Facebook OAuth غير مضبوط على الخادم');
+                return;
+            }
+            window.location.href = result.authUrl;
+        } catch (err: any) {
+            showError(err?.message || 'فشل بدء ربط فيسبوك');
+        } finally {
+            setFbConnecting(false);
+        }
+    };
+
+    const handleLinkOfficialPage = async () => {
+        if (!fbLinkingSessionId || !selectedOfficialPageId) {
+            showError('اختر صفحة للربط');
+            return;
+        }
+        try {
+            setFbLinking(true);
+            const result = await apiService.linkOfficialFacebookPage(
+                fbLinkingSessionId,
+                selectedOfficialPageId
+            );
+            setOfficialPage(result.page);
+            setFbLinkingSessionId('');
+            setFbAvailablePages([]);
+            setSelectedOfficialPageId('');
+            showSuccess(result.message || 'تم ربط الصفحة الرسمية');
+        } catch (err: any) {
+            showError(err?.message || 'فشل ربط الصفحة');
+        } finally {
+            setFbLinking(false);
+        }
+    };
+
+    const handleDisconnectOfficialFacebook = async () => {
+        if (!confirm('هل تريد فصل الصفحة الرسمية؟ سيتوقف البوت عن الرد على رسائلها.')) return;
+        try {
+            await apiService.disconnectOfficialFacebook();
+            setOfficialPage(null);
+            showSuccess('تم فصل الصفحة الرسمية');
+        } catch (err: any) {
+            showError(err?.message || 'فشل فصل الصفحة');
+        }
+    };
+
     const handleSave = async () => {
         if (!settings) return;
         
         try {
-            await apiService.updateGlobalSettings(settings);
+            const payload: AdminGlobalSettings = {
+                ...settings,
+                features: {
+                    ...settings.features,
+                    officialPageBotEnabled: settings.bots.officialPageBot.enabled,
+                },
+            };
+            await apiService.updateGlobalSettings(payload);
             showSuccess("تم حفظ الإعدادات بنجاح!");
         } catch (err: any) {
             logger.error('Failed to save global settings:', err);
@@ -140,16 +303,7 @@ const SettingsView: React.FC = () => {
 
     if (!settings) return <Loader2 className="animate-spin text-white" />;
 
-    const bots = settings.bots || {
-        productsBot: {
-            enabled: settings.features?.productsBotEnabled ?? true,
-            systemMessage: ''
-        },
-        servicesBot: {
-            enabled: settings.features?.servicesBotEnabled ?? true,
-            systemMessage: ''
-        }
-    };
+    const bots = settings.bots;
 
     const shamCash = settings.paymentMethods?.shamCash;
     const usdt = settings.paymentMethods?.usdt;
@@ -483,6 +637,161 @@ const SettingsView: React.FC = () => {
                                 placeholder="أدخل System Message لبوت الخدمات..."
                             />
                         </div>
+                    </div>
+                </div>
+
+                <div className="bg-slate-900/50 rounded-xl p-6 border border-slate-700 space-y-5">
+                    <div className="flex items-center justify-between gap-4">
+                        <div>
+                            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                                <Facebook size={20} className="text-blue-400" />
+                                بوت صفحة XO Bot الرسمية
+                            </h3>
+                            <p className="text-xs text-slate-400 mt-1">
+                                بوت مستقل عن بوتات التجار — يُربط ويُدار من السوبر أدمن فقط
+                            </p>
+                        </div>
+                        <ToggleItem
+                            label=""
+                            enabled={bots.officialPageBot?.enabled ?? false}
+                            onToggle={() => {
+                                if (!settings) return;
+                                const newEnabled = !(bots.officialPageBot?.enabled ?? false);
+                                setSettings({
+                                    ...settings,
+                                    bots: {
+                                        ...bots,
+                                        officialPageBot: {
+                                            ...(bots.officialPageBot || { systemMessage: '' }),
+                                            enabled: newEnabled,
+                                            systemMessage: bots.officialPageBot?.systemMessage || '',
+                                        },
+                                    },
+                                    features: {
+                                        ...settings.features,
+                                        officialPageBotEnabled: newEnabled,
+                                    },
+                                });
+                            }}
+                        />
+                    </div>
+
+                    <div className="rounded-xl border border-slate-700 bg-slate-800/60 p-4 space-y-3">
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                            <div>
+                                <p className="text-sm font-medium text-slate-200">ربط صفحة فيسبوك الرسمية</p>
+                                {officialPage ? (
+                                    <p className="text-xs text-emerald-400 mt-1">
+                                        مربوطة: {officialPage.pageName || officialPage.pageId}
+                                        <span className="text-slate-500 mr-2" dir="ltr"> ({officialPage.pageId})</span>
+                                    </p>
+                                ) : (
+                                    <p className="text-xs text-amber-400 mt-1">لا توجد صفحة مربوطة حالياً</p>
+                                )}
+                            </div>
+                            <div className="flex gap-2">
+                                {officialPage ? (
+                                    <button
+                                        type="button"
+                                        onClick={handleDisconnectOfficialFacebook}
+                                        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-700 hover:bg-red-900/40 text-slate-200 text-sm"
+                                    >
+                                        <Unlink size={16} /> فصل
+                                    </button>
+                                ) : null}
+                                <button
+                                    type="button"
+                                    onClick={handleConnectOfficialFacebook}
+                                    disabled={fbConnecting}
+                                    className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium disabled:opacity-60"
+                                >
+                                    {fbConnecting ? <Loader2 size={16} className="animate-spin" /> : <Link2 size={16} />}
+                                    {officialPage ? 'إعادة الربط' : 'ربط عبر فيسبوك'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {(fbLoadingPages || fbLinkingSessionId) && (
+                            <div className="border-t border-slate-700 pt-3 space-y-3">
+                                <p className="text-sm text-slate-300 font-medium">اختر الصفحة الرسمية</p>
+                                {fbLoadingPages ? (
+                                    <div className="flex items-center gap-2 text-slate-400 text-sm">
+                                        <Loader2 size={16} className="animate-spin" /> جاري تحميل الصفحات...
+                                    </div>
+                                ) : fbAvailablePages.length === 0 ? (
+                                    <p className="text-xs text-amber-400">لا توجد صفحات متاحة في هذه الجلسة</p>
+                                ) : (
+                                    <div className="space-y-2 max-h-56 overflow-y-auto">
+                                        {fbAvailablePages.map((p) => (
+                                            <label
+                                                key={p.id}
+                                                className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                                                    selectedOfficialPageId === p.id
+                                                        ? 'border-indigo-500 bg-indigo-950/40'
+                                                        : 'border-slate-700 hover:border-slate-500'
+                                                }`}
+                                            >
+                                                <input
+                                                    type="radio"
+                                                    name="officialPage"
+                                                    checked={selectedOfficialPageId === p.id}
+                                                    onChange={() => setSelectedOfficialPageId(p.id)}
+                                                    className="accent-indigo-500"
+                                                />
+                                                {p.pictureUrl ? (
+                                                    <img src={p.pictureUrl} alt="" className="w-8 h-8 rounded-full" />
+                                                ) : (
+                                                    <div className="w-8 h-8 rounded-full bg-slate-700" />
+                                                )}
+                                                <div className="min-w-0">
+                                                    <p className="text-sm text-white truncate">{p.name}</p>
+                                                    <p className="text-xs text-slate-500" dir="ltr">{p.id}</p>
+                                                </div>
+                                            </label>
+                                        ))}
+                                    </div>
+                                )}
+                                {fbLinkingSessionId && !fbLoadingPages && fbAvailablePages.length > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={handleLinkOfficialPage}
+                                        disabled={fbLinking || !selectedOfficialPageId}
+                                        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold disabled:opacity-60"
+                                    >
+                                        {fbLinking ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                                        تأكيد ربط الصفحة
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                            System Prompt (رسالة النظام لبوت الصفحة الرسمية)
+                        </label>
+                        <textarea
+                            value={bots.officialPageBot?.systemMessage || ''}
+                            onChange={(e) => {
+                                if (!settings) return;
+                                setSettings({
+                                    ...settings,
+                                    bots: {
+                                        ...bots,
+                                        officialPageBot: {
+                                            enabled: bots.officialPageBot?.enabled ?? false,
+                                            systemMessage: e.target.value,
+                                        },
+                                    },
+                                });
+                            }}
+                            rows={10}
+                            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none font-mono text-sm"
+                            placeholder="اكتب تعليمات شخصية البوت وسيناريو الرد (مثلاً مقابلة العمل التفاعلية)..."
+                        />
+                        <p className="text-xs text-slate-500 mt-2">
+                            عند الإيقاف يتوقف الرد فوراً على الصفحة الرسمية دون التأثير على صفحات التجار.
+                        </p>
                     </div>
                 </div>
 

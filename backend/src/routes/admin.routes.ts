@@ -26,6 +26,22 @@ import {
   getAdminPlanLimits,
   updateAdminPlanLimits
 } from '../controllers/admin.controller.js';
+import {
+  connectOfficialFacebook,
+  getOfficialFacebookStatus,
+  getOfficialAvailableFacebookPages,
+  linkOfficialFacebookPage,
+  disconnectOfficialFacebook,
+} from '../controllers/adminOfficialFacebook.controller.js';
+import {
+  syncOfficialPagePosts,
+  getOfficialPagePosts,
+  updateOfficialPagePostCommentSettings,
+  listOfficialPageKeywordRules,
+  createOfficialPageKeywordRule,
+  updateOfficialPageKeywordRule,
+  deleteOfficialPageKeywordRule,
+} from '../controllers/adminOfficialPageComments.controller.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { requireAdminGate } from '../middleware/adminGate.js';
 import { enableFullAIMode, disableFullAIMode } from './admin/enable-full-ai.js';
@@ -62,6 +78,22 @@ router.get('/logs', getSystemLogs);
 router.get('/settings', getGlobalSettings);
 router.put('/settings', updateGlobalSettings);
 
+// Official XO Bot Facebook page (platform bot — not merchant-scoped)
+router.get('/facebook/official/status', getOfficialFacebookStatus);
+router.post('/facebook/official/connect', connectOfficialFacebook);
+router.get('/facebook/official/available-pages', getOfficialAvailableFacebookPages);
+router.post('/facebook/official/link-page', linkOfficialFacebookPage);
+router.delete('/facebook/official/disconnect', disconnectOfficialFacebook);
+
+// Official page comment automation (per-post — platform-scoped)
+router.post('/facebook/official/posts/sync', syncOfficialPagePosts);
+router.get('/facebook/official/posts', getOfficialPagePosts);
+router.put('/facebook/official/posts/comment-settings', updateOfficialPagePostCommentSettings);
+router.get('/facebook/official/keyword-rules', listOfficialPageKeywordRules);
+router.post('/facebook/official/keyword-rules', createOfficialPageKeywordRule);
+router.put('/facebook/official/keyword-rules/:ruleId', updateOfficialPageKeywordRule);
+router.delete('/facebook/official/keyword-rules/:ruleId', deleteOfficialPageKeywordRule);
+
 // Notifications
 router.get('/notifications', getAdminNotifications);
 router.put('/notifications/:id/read', markNotificationAsRead);
@@ -81,4 +113,3 @@ router.post('/full-ai/enable', enableFullAIMode);
 router.post('/full-ai/disable', disableFullAIMode);
 
 export default router;
-

@@ -178,7 +178,9 @@ export const connectFacebook = async (
 
     // Generate OAuth URL
     // pages_show_list is required for GET /me/accounts (especially on mobile Meta dialogs).
-    const state = Buffer.from(JSON.stringify({ merchantId: req.merchantId })).toString('base64');
+    const state = Buffer.from(
+      JSON.stringify({ purpose: 'merchant', merchantId: req.merchantId })
+    ).toString('base64');
     const scopes = [
       'pages_show_list',
       'pages_manage_metadata',
@@ -278,6 +280,10 @@ export const getAvailableFacebookPages = async (
       return next(createError('انتهت صلاحية جلسة الربط. أعد ربط فيسبوك من صفحة التكاملات.', 410));
     }
 
+    if (session.purpose && session.purpose !== 'merchant') {
+      return next(createError('جلسة الربط غير مخصصة لحساب التاجر', 403));
+    }
+
     if (session.merchantId !== req.merchantId) {
       return next(createError('غير مصرح', 403));
     }
@@ -342,6 +348,10 @@ export const linkFacebookPages = async (
       return next(createError('انتهت صلاحية جلسة الربط. أعد ربط فيسبوك من صفحة التكاملات.', 410));
     }
 
+    if (session.purpose && session.purpose !== 'merchant') {
+      return next(createError('جلسة الربط غير مخصصة لحساب التاجر', 403));
+    }
+
     if (session.merchantId !== req.merchantId) {
       return next(createError('غير مصرح', 403));
     }
@@ -374,6 +384,8 @@ export const linkFacebookPages = async (
 
     const sessionPagesMap = new Map(session.pages.map(p => [String(p.id), p]));
 
+    const { isPlatformFacebookPageId } = await import('../services/platformFacebookPage.js');
+
     const merchantSettingsResult = await pool.query(
       'SELECT auto_reply_messenger, auto_reply_comments FROM merchant_settings WHERE merchant_id = $1',
       [req.merchantId]
@@ -386,6 +398,14 @@ export const linkFacebookPages = async (
     let newlyLinked = 0;
 
     for (const pageId of pageIds) {
+      if (await isPlatformFacebookPageId(String(pageId))) {
+        logger.warn('linkFacebookPages: refused — page is official platform page', {
+          pageId,
+          merchantId: req.merchantId,
+        });
+        continue;
+      }
+
       const pageData = sessionPagesMap.get(String(pageId));
       if (!pageData) {
         logger.warn('linkFacebookPages: page not found in session', { pageId, merchantId: req.merchantId });

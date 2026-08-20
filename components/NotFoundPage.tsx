@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot } from 'lucide-react';
+import BrandLogo from './BrandLogo';
 import SeoHead from './SeoHead';
 
 interface NotFoundPageProps {
@@ -18,13 +18,8 @@ const NotFoundPage: React.FC<NotFoundPageProps> = ({ onBack }) => {
 
       <header className="border-b border-slate-100">
         <div className="container mx-auto px-6 py-4">
-          <button onClick={onBack} type="button" className="flex items-center gap-2.5">
-            <div className="bg-brand p-2 rounded-xl shadow-md shadow-brand/25">
-              <Bot size={22} className="text-white" />
-            </div>
-            <span className="text-xl font-extrabold tracking-tight text-slate-900">
-              Xo <span className="text-brand">Bot</span>
-            </span>
+          <button onClick={onBack} type="button" className="inline-block">
+            <BrandLogo className="h-9 w-auto select-none" />
           </button>
         </div>
       </header>

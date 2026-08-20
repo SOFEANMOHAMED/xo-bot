@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Bot, Mail, Lock, ArrowRight, Eye, EyeOff } from 'lucide-react';
+import { Mail, Lock, ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { UserRole } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import AuthLayout from './AuthLayout';
+import BrandLogo from './BrandLogo';
 
 interface LoginPageProps {
   onLoginSuccess: (role?: UserRole) => void;
@@ -77,11 +78,11 @@ const LoginPage: React.FC<LoginPageProps> = ({
       <div className="text-center mb-8 animate-fade-in-up">
         <div
           onClick={isAdminVariant ? undefined : onBack}
-          className={`inline-flex items-center justify-center w-16 h-16 bg-brand rounded-2xl mb-4 shadow-lg shadow-brand/30 ${
-            isAdminVariant ? '' : 'cursor-pointer hover:bg-brand-600 transition-colors'
+          className={`inline-flex items-center justify-center mb-4 ${
+            isAdminVariant ? '' : 'cursor-pointer'
           }`}
         >
-          <Bot size={32} className="text-white" />
+          <BrandLogo className="h-14 w-auto select-none" />
         </div>
         <h2 className="text-3xl font-extrabold text-slate-900 mb-2">
           {isAdminVariant ? 'دخول لوحة الإدارة' : 'مرحباً بك مجدداً'}

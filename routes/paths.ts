@@ -88,6 +88,7 @@ export const ADMIN_VIEW_SLUG: Record<AdminView, string> = {
   [AdminView.USER_NOTIFICATIONS]: 'user-notifications',
   [AdminView.SUPPORT_TICKETS]: 'support',
   [AdminView.PAYMENT_REQUESTS]: 'payment-requests',
+  [AdminView.OFFICIAL_PAGE_COMMENTS]: 'xo-page-comments',
 };
 
 const slugToAppView = Object.fromEntries(

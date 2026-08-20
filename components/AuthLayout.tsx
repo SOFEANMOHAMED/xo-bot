@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot } from 'lucide-react';
+import BrandLogo from './BrandLogo';
 
 interface AuthLayoutProps {
   children: React.ReactNode;
@@ -37,12 +37,7 @@ const AuthLayout: React.FC<AuthLayoutProps> = ({
               className="flex items-center gap-2.5"
               aria-label="العودة للرئيسية"
             >
-              <div className="bg-brand p-2 rounded-xl shadow-md shadow-brand/25">
-                <Bot size={22} className="text-white" />
-              </div>
-              <span className="text-xl font-extrabold tracking-tight text-slate-900">
-                Xo <span className="text-brand">Bot</span>
-              </span>
+              <BrandLogo className="h-9 w-auto select-none" />
             </button>
 
             {showNavLinks && (

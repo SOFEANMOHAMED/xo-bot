@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Bot, Lock, ArrowRight, CheckCircle, Eye, EyeOff } from 'lucide-react';
+import { Lock, ArrowRight, CheckCircle, Eye, EyeOff } from 'lucide-react';
 import apiService from '../services/api';
 import { validatePassword } from '../utils/validation';
 import { handleApiError } from '../utils/errorHandler';
 import AuthLayout from './AuthLayout';
+import BrandLogo from './BrandLogo';
 
 interface ResetPasswordPageProps {
   onBack: () => void;
@@ -104,9 +105,9 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onBack, onNavigat
       <div className="text-center mb-8 animate-fade-in-up">
         <div
           onClick={onBack}
-          className="inline-flex items-center justify-center w-16 h-16 bg-brand rounded-2xl mb-4 cursor-pointer hover:bg-brand-600 transition-colors shadow-lg shadow-brand/30"
+          className="inline-flex items-center justify-center mb-4 cursor-pointer"
         >
-          <Bot size={32} className="text-white" />
+          <BrandLogo className="h-14 w-auto select-none" />
         </div>
         <h2 className="text-3xl font-extrabold text-slate-900 mb-2">إعادة تعيين كلمة المرور</h2>
         <p className="text-slate-500">أدخل كلمة المرور الجديدة</p>

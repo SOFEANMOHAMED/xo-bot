@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import DOMPurify from 'dompurify';
-import { Bot, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import apiService from '../services/api';
 import { logger } from '../utils/logger';
 import { usePublishedFooterPages } from '../hooks/usePublishedFooterPages';
 import SeoHead from './SeoHead';
+import BrandLogo from './BrandLogo';
 import { SEO_DEFAULTS } from '../utils/seo';
 
 interface PageViewProps {
@@ -97,13 +98,8 @@ const PageView: React.FC<PageViewProps> = ({
   const Navbar = () => (
     <nav className="fixed top-0 w-full z-50 bg-white/80 backdrop-blur-xl border-b border-brand-100/80">
       <div className="container mx-auto px-6 py-4 flex justify-between items-center">
-        <button onClick={onBack} className="flex items-center gap-2.5">
-          <div className="bg-brand p-2 rounded-xl shadow-md shadow-brand/25">
-            <Bot size={22} className="text-white" />
-          </div>
-          <span className="text-xl font-extrabold tracking-tight text-slate-900">
-            Xo <span className="text-brand">Bot</span>
-          </span>
+        <button onClick={onBack} className="inline-block">
+          <BrandLogo className="h-9 w-auto select-none" />
         </button>
 
         <div className="hidden md:flex items-center gap-6 text-sm font-semibold text-slate-600">
@@ -333,10 +329,10 @@ const PageView: React.FC<PageViewProps> = ({
           <div className="grid md:grid-cols-4 gap-12 mb-12 border-b border-slate-800 pb-12">
             <div>
               <button onClick={onBack} className="flex items-center gap-2 text-white mb-4">
-                <div className="bg-brand p-1.5 rounded-lg">
-                  <Bot size={18} className="text-white" />
-                </div>
-                <span className="text-lg font-bold">Xo Bot</span>
+                <BrandLogo variant="mark" className="h-9 w-9 object-contain" decorative />
+                <span className="text-lg font-bold">
+                  Xo <span className="text-brand">Bot</span>
+                </span>
               </button>
               <p className="text-slate-400 text-sm leading-relaxed">
                 الحل الأمثل للمتاجر الإلكترونية العربية. خدمة عملاء ذكية، آلية، وسريعة.

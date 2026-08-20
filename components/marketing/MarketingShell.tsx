@@ -1,6 +1,7 @@
 import React from 'react';
-import { Bot, Store } from 'lucide-react';
+import { Store } from 'lucide-react';
 import { usePublishedFooterPages } from '../../hooks/usePublishedFooterPages';
+import BrandLogo from '../BrandLogo';
 
 export interface MarketingShellProps {
   children: React.ReactNode;
@@ -23,13 +24,8 @@ const MarketingShell: React.FC<MarketingShellProps> = ({
     <div className="min-h-screen bg-white text-slate-900 font-sans" dir="rtl">
       <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-xl border-b border-brand-100/80">
         <div className="container mx-auto px-6 py-4 flex justify-between items-center gap-4">
-          <button type="button" onClick={onBack} className="flex items-center gap-2.5 shrink-0">
-            <div className="bg-brand p-2 rounded-xl shadow-md shadow-brand/25">
-              <Bot size={22} className="text-white" />
-            </div>
-            <span className="text-xl font-extrabold tracking-tight text-slate-900">
-              Xo <span className="text-brand">Bot</span>
-            </span>
+          <button type="button" onClick={onBack} className="shrink-0">
+            <BrandLogo className="h-9 w-auto select-none" />
           </button>
 
           <nav className="hidden md:flex items-center gap-6 text-sm font-semibold text-slate-600">
@@ -67,10 +63,10 @@ const MarketingShell: React.FC<MarketingShellProps> = ({
           <div className="grid md:grid-cols-4 gap-10 mb-10 border-b border-slate-800 pb-10">
             <div>
               <div className="flex items-center gap-2 mb-4">
-                <div className="bg-brand p-1.5 rounded-lg">
-                  <Bot size={18} className="text-white" />
-                </div>
-                <span className="text-lg font-bold">Xo Bot</span>
+                <BrandLogo variant="mark" className="h-9 w-9 object-contain" decorative />
+                <span className="text-lg font-bold">
+                  Xo <span className="text-brand">Bot</span>
+                </span>
               </div>
               <p className="text-slate-400 text-sm leading-relaxed">
                 بوت مبيعات عربي للمتاجر الإلكترونية — واتساب، فيسبوك، إنستغرام، وتيليجرام.

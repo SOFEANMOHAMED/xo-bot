@@ -56,8 +56,16 @@ export const getGlobalSettings = (): Promise<AdminGlobalSettings> => {
         features: {
           affiliateEnabled: true,
           landingBotEnabled: true,
-          dashboardBotEnabled: true
-        }
+          dashboardBotEnabled: true,
+          productsBotEnabled: true,
+          servicesBotEnabled: true,
+          officialPageBotEnabled: false,
+        },
+        bots: {
+          productsBot: { enabled: true, systemMessage: '' },
+          servicesBot: { enabled: true, systemMessage: '' },
+          officialPageBot: { enabled: false, systemMessage: '' },
+        },
       });
     }, 500);
   });

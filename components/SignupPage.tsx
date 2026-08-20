@@ -1,11 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
-import { Bot, Mail, Lock, User, Store, ArrowRight, Tag, Eye, EyeOff, Phone } from 'lucide-react';
+import { Mail, Lock, User, Store, ArrowRight, Tag, Eye, EyeOff, Phone } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { validateUserRegistration } from '../utils/validation';
 import { handleApiError } from '../utils/errorHandler';
 import CountryCodeSelector from './CountryCodeSelector';
 import AuthLayout from './AuthLayout';
+import BrandLogo from './BrandLogo';
 
 interface SignupPageProps {
   onSignupSuccess: () => void;
@@ -116,8 +117,8 @@ const SignupPage: React.FC<SignupPageProps> = ({ onSignupSuccess, onNavigateToLo
       }
     >
       <div className="text-center mb-8 animate-fade-in-up">
-        <div className="inline-flex items-center justify-center w-16 h-16 bg-brand rounded-2xl mb-4 shadow-lg shadow-brand/30">
-          <Bot size={32} className="text-white" />
+        <div className="inline-flex items-center justify-center mb-4">
+          <BrandLogo className="h-14 w-auto select-none" />
         </div>
         <h2 className="text-3xl font-extrabold text-slate-900 mb-2">إنشاء حساب جديد</h2>
         <p className="text-slate-500">ابدأ رحلتك مع Xo Bot وجرب الخدمة مجاناً لمدة 7 أيام</p>

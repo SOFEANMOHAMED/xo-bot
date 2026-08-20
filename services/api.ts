@@ -2087,6 +2087,7 @@ class ApiService {
         dashboardBotEnabled: boolean;
         productsBotEnabled: boolean;
         servicesBotEnabled: boolean;
+        officialPageBotEnabled: boolean;
       };
       bots: {
         productsBot: {
@@ -2094,6 +2095,10 @@ class ApiService {
           systemMessage: string;
         };
         servicesBot: {
+          enabled: boolean;
+          systemMessage: string;
+        };
+        officialPageBot: {
           enabled: boolean;
           systemMessage: string;
         };
@@ -2126,6 +2131,7 @@ class ApiService {
       dashboardBotEnabled?: boolean;
       productsBotEnabled?: boolean;
       servicesBotEnabled?: boolean;
+      officialPageBotEnabled?: boolean;
     };
     bots?: {
       productsBot?: {
@@ -2133,6 +2139,10 @@ class ApiService {
         systemMessage?: string;
       };
       servicesBot?: {
+        enabled?: boolean;
+        systemMessage?: string;
+      };
+      officialPageBot?: {
         enabled?: boolean;
         systemMessage?: string;
       };
@@ -2157,6 +2167,143 @@ class ApiService {
       method: 'PUT',
       body: JSON.stringify(settings),
     });
+  }
+
+  async getOfficialFacebookStatus() {
+    return this.request<{
+      linked: boolean;
+      page: { pageId: string; pageName: string | null; linkedAt: string } | null;
+      bot: { enabled: boolean; systemMessage: string };
+    }>('/admin/facebook/official/status');
+  }
+
+  async connectOfficialFacebook(adminBasePath?: string) {
+    return this.request<{
+      authUrl?: string;
+      message?: string;
+      requiresSetup?: boolean;
+    }>('/admin/facebook/official/connect', {
+      method: 'POST',
+      body: JSON.stringify({ adminBasePath: adminBasePath || undefined }),
+    });
+  }
+
+  async getOfficialAvailableFacebookPages(sessionId: string) {
+    return this.request<{
+      pages: Array<{
+        id: string;
+        name: string;
+        category: string | null;
+        pictureUrl: string | null;
+      }>;
+    }>(`/admin/facebook/official/available-pages?session=${encodeURIComponent(sessionId)}`);
+  }
+
+  async linkOfficialFacebookPage(sessionId: string, pageId: string) {
+    return this.request<{
+      message: string;
+      page: { pageId: string; pageName: string | null; linkedAt: string } | null;
+    }>('/admin/facebook/official/link-page', {
+      method: 'POST',
+      body: JSON.stringify({ session: sessionId, pageId }),
+    });
+  }
+
+  async disconnectOfficialFacebook() {
+    return this.request<{ message: string; disconnected: boolean }>(
+      '/admin/facebook/official/disconnect',
+      { method: 'DELETE' }
+    );
+  }
+
+  async syncOfficialPagePosts() {
+    return this.request<{
+      message: string;
+      results: Array<{
+        synced: number;
+        platform: string;
+        accountRef: string;
+        pageName?: string | null;
+      }>;
+    }>('/admin/facebook/official/posts/sync', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  }
+
+  async getOfficialPagePosts(params?: { limit?: number; offset?: number }) {
+    const q = new URLSearchParams();
+    if (params?.limit) q.set('limit', String(params.limit));
+    if (params?.offset) q.set('offset', String(params.offset));
+    const qs = q.toString();
+    return this.request<{ posts: any[] }>(
+      `/admin/facebook/official/posts${qs ? `?${qs}` : ''}`
+    );
+  }
+
+  async updateOfficialPagePostCommentSettings(payload: {
+    socialPostId: string;
+    commentReplyEnabled?: boolean;
+    publicReplyText?: string | null;
+    sendDmOnComment?: boolean;
+    privateReplyText?: string | null;
+  }) {
+    return this.request<{ message: string; post: any }>(
+      '/admin/facebook/official/posts/comment-settings',
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }
+    );
+  }
+
+  async getOfficialPageKeywordRules(socialPostId?: string) {
+    const q = new URLSearchParams();
+    if (socialPostId) q.set('socialPostId', socialPostId);
+    const qs = q.toString();
+    return this.request<{ rules: any[] }>(
+      `/admin/facebook/official/keyword-rules${qs ? `?${qs}` : ''}`
+    );
+  }
+
+  async createOfficialPageKeywordRule(payload: {
+    socialPostId: string;
+    keywords: string | string[];
+    publicReplyText?: string;
+    privateReplyText?: string;
+    privateReplyEnabled?: boolean;
+    priority?: number;
+    matchType?: string;
+  }) {
+    return this.request<{ rule: any }>('/admin/facebook/official/keyword-rules', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateOfficialPageKeywordRule(
+    ruleId: string,
+    payload: {
+      keywords?: string | string[];
+      publicReplyText?: string;
+      privateReplyText?: string;
+      privateReplyEnabled?: boolean;
+      priority?: number;
+      matchType?: string;
+      isActive?: boolean;
+    }
+  ) {
+    return this.request<{ rule: any }>(`/admin/facebook/official/keyword-rules/${ruleId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteOfficialPageKeywordRule(ruleId: string) {
+    return this.request<{ message: string }>(
+      `/admin/facebook/official/keyword-rules/${ruleId}`,
+      { method: 'DELETE' }
+    );
   }
 
   async uploadPaymentProof(file: File): Promise<{

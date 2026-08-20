@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { usePublishedFooterPages } from '../hooks/usePublishedFooterPages';
 import SeoHead from './SeoHead';
+import BrandLogo from './BrandLogo';
 
 interface StorifyPartnerPageProps {
   onNavigateToLogin: () => void;
@@ -231,15 +232,10 @@ const StorifyPartnerPage: React.FC<StorifyPartnerPageProps> = ({
           {/* Logo xoBot */}
           <button
             onClick={onBack}
-            className="flex items-center gap-2 group"
+            className="group"
             aria-label="الرئيسية"
           >
-            <div className="w-8 h-8 rounded-xl bg-brand flex items-center justify-center shadow-sm">
-              <Bot size={18} className="text-white" />
-            </div>
-            <span className="font-extrabold text-slate-900 text-lg leading-none">
-              xo<span className="text-brand">Bot</span>
-            </span>
+            <BrandLogo className="h-9 w-auto select-none" />
           </button>
 
           {/* Partnership badge */}
@@ -355,9 +351,7 @@ const StorifyPartnerPage: React.FC<StorifyPartnerPageProps> = ({
               </div>
               {/* xoBot bubble */}
               <div className="absolute bottom-5 left-5 flex items-end gap-2">
-                <div className="w-9 h-9 rounded-full bg-brand flex items-center justify-center shadow-md">
-                  <Bot size={18} className="text-white" />
-                </div>
+                <BrandLogo variant="mark" className="h-9 w-9 object-contain drop-shadow-md" decorative />
                 <div className="bg-brand text-white text-xs font-semibold px-3 py-2 rounded-2xl rounded-bl-sm shadow-md max-w-[160px]">
                   أهلاً! كيف أقدر أساعدك اليوم؟ 🤖
                 </div>
@@ -606,12 +600,7 @@ const StorifyPartnerPage: React.FC<StorifyPartnerPageProps> = ({
         <div className="max-w-6xl mx-auto">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-xl bg-brand flex items-center justify-center">
-                <Bot size={15} className="text-white" />
-              </div>
-              <span className="font-extrabold text-slate-800">
-                xo<span className="text-brand">Bot</span>
-              </span>
+              <BrandLogo className="h-8 w-auto select-none" />
               <span className="text-slate-300 mx-2">×</span>
               <a
                 href={STORIFY_URL}

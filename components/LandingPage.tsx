@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Bot, Zap, MessageCircle, CheckCircle, Mail, ArrowRight, Shield,
+  Zap, MessageCircle, CheckCircle, Mail, ArrowRight, Shield,
   Plus, Minus, Loader2, TrendingUp, Clock, UserCircle, BarChart2,
   MessageSquare, Database, Cpu, Sparkles, Inbox, Image, Package,
   Send, Instagram, Facebook, ShoppingCart, Store
 } from 'lucide-react';
 import LandingChatBot from './LandingChatBot';
 import AntigravityHero from './AntigravityHero';
+import BrandLogo from './BrandLogo';
 import SeoHead from './SeoHead';
 import { apiService } from '../services/api';
 import { logger } from '../utils/logger';
@@ -191,14 +192,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
       {/* Navbar */}
       <nav className="fixed top-0 w-full z-50 bg-white/80 backdrop-blur-xl border-b border-brand-100/80">
         <div className="container mx-auto px-6 py-4 flex justify-between items-center">
-          <div className="flex items-center gap-2.5">
-            <div className="bg-brand p-2 rounded-xl shadow-md shadow-brand/25">
-              <Bot size={22} className="text-white" />
-            </div>
-            <span className="text-xl font-extrabold tracking-tight text-slate-900">
-              Xo <span className="text-brand">Bot</span>
-            </span>
-          </div>
+          <BrandLogo className="h-9 w-auto select-none" />
 
           <div className="hidden md:flex items-center gap-7 text-sm font-semibold text-slate-600">
             <button onClick={() => scrollToSection('home')} className="hover:text-brand transition-colors">الرئيسية</button>
@@ -229,9 +223,9 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
       <section id="home" className="relative min-h-[100svh] flex flex-col justify-center pt-28 pb-16 md:pt-32 md:pb-24">
         <div className="container mx-auto px-6 relative z-10">
           <div className="max-w-4xl mx-auto text-center">
-            <p className="text-4xl sm:text-5xl md:text-6xl font-extrabold tracking-tight text-slate-900 mb-5 animate-fade-in-up">
-              Xo <span className="text-brand">Bot</span>
-            </p>
+            <div className="flex justify-center mb-6 animate-fade-in-up">
+              <BrandLogo className="h-16 sm:h-20 md:h-24 w-auto select-none drop-shadow-sm" />
+            </div>
 
             <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-slate-800 leading-snug mb-5 animate-fade-in-up" style={{ animationDelay: '0.08s' }}>
               ذكاء اصطناعي يرد على عملائك ويبيع عنك
@@ -309,11 +303,10 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
                   <p className="text-sm font-medium text-slate-700">هل متوفر مقاس L؟</p>
                 </div>
 
-                <img
-                  src="/cpu_xo_bot_v2.png"
-                  alt="Xo Bot — نواة الذكاء الاصطناعي"
+                <BrandLogo
                   className="relative z-10 max-w-[85%] md:max-w-[70%] h-auto drop-shadow-xl"
-                  style={{ maxHeight: '420px' }}
+                  style={{ maxHeight: '280px' }}
+                  alt="Xo Bot — بوت المبيعات الذكي"
                 />
               </div>
             </div>
@@ -627,10 +620,10 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
           <div className="grid md:grid-cols-4 gap-12 mb-12 border-b border-slate-800 pb-12">
             <div>
               <div className="flex items-center gap-2 mb-4">
-                <div className="bg-brand p-1.5 rounded-lg">
-                  <Bot size={18} className="text-white" />
-                </div>
-                <span className="text-lg font-bold">Xo Bot</span>
+                <BrandLogo variant="mark" className="h-9 w-9 object-contain" decorative />
+                <span className="text-lg font-bold">
+                  Xo <span className="text-brand">Bot</span>
+                </span>
               </div>
               <p className="text-slate-400 text-sm leading-relaxed">
                 بوت مبيعات عربي لمتاجر السوشيال ميديا — واتساب، فيسبوك، إنستغرام، وتيليجرام في لوحة واحدة.

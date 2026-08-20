@@ -12,7 +12,7 @@ export const SEO_DEFAULTS = {
   title: 'Xo Bot للمتاجر',
   description:
     'بوت مبيعات عربي على واتساب وفيسبوك وإنستغرام وتيليجرام — يرد على الرسائل والتعليقات ويبيع عنك.',
-  ogImagePath: '/cpu_xo_bot_v2.png',
+  ogImagePath: '/xo-bot-og.png',
   locale: 'ar_SA',
   supportEmail: 'support@xo-bot.com',
 } as const;
@@ -128,7 +128,7 @@ export function buildOrganizationJsonLd(): Record<string, unknown> {
     '@type': 'Organization',
     name: SEO_DEFAULTS.siteName,
     url: origin,
-    logo: absoluteUrl('/icons/icon-512.png'),
+    logo: absoluteUrl('/xo-bot-logo.png'),
     description: SEO_DEFAULTS.description,
     email: SEO_DEFAULTS.supportEmail,
     sameAs: [
