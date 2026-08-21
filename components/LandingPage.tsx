@@ -46,6 +46,12 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
   );
 
   useEffect(() => {
+    import('../utils/marketingAttribution').then(({ captureAndPersistAttribution }) => {
+      captureAndPersistAttribution();
+    });
+  }, []);
+
+  useEffect(() => {
     const fetchPlans = async () => {
       try {
         setIsLoadingPlans(true);

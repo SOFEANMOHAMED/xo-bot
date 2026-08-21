@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { AdminView } from '../types';
 import { adminPath } from '../routes/paths';
@@ -21,9 +21,12 @@ import {
   FileText as FileTextIcon,
   Headphones,
   Wallet,
-  MessageSquareText
+  MessageSquareText,
+  Megaphone,
+  Inbox
 } from 'lucide-react';
 import ConfirmDialog from './admin/ConfirmDialog';
+import apiService from '../services/api';
 
 interface AdminLayoutProps {
   currentView: AdminView;
@@ -35,6 +38,25 @@ interface AdminLayoutProps {
 const AdminLayout: React.FC<AdminLayoutProps> = ({ currentView, onLogout, children }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [inboxUnread, setInboxUnread] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const data = await apiService.getOfficialInboxUnreadCount();
+        if (!cancelled) setInboxUnread(data.unreadConversations || 0);
+      } catch {
+        if (!cancelled) setInboxUnread(0);
+      }
+    };
+    void load();
+    const interval = setInterval(load, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [currentView]);
 
   const handleLogoutClick = () => {
     setShowLogoutConfirm(true);
@@ -52,9 +74,11 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ currentView, onLogout, childr
     { id: AdminView.PAYMENT_REQUESTS, label: 'طلبات الدفع', icon: Wallet },
     { id: AdminView.USAGE, label: 'استخدام النظام', icon: Activity },
     { id: AdminView.AFFILIATE_PROGRAM, label: 'التسويق بالعمولة', icon: Share2 },
+    { id: AdminView.ACQUISITION, label: 'اكتساب الحملات', icon: Megaphone },
     { id: AdminView.TRIALS, label: 'التجارب المجانية', icon: Clock },
     { id: AdminView.ALERTS, label: 'التنبيهات', icon: AlertTriangle },
     { id: AdminView.PAGES, label: 'إدارة الصفحات', icon: FileTextIcon },
+    { id: AdminView.OFFICIAL_PAGE_INBOX, label: 'وارد صفحة XO Bot', icon: Inbox },
     { id: AdminView.OFFICIAL_PAGE_COMMENTS, label: 'تعليقات صفحة XO Bot', icon: MessageSquareText },
     { id: AdminView.SUPPORT_TICKETS, label: 'رسائل الدعم', icon: Headphones },
     { id: AdminView.NOTIFICATIONS, label: 'الإشعارات', icon: Bell },
@@ -113,7 +137,12 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ currentView, onLogout, childr
               }
             >
               <item.icon size={20} />
-              <span>{item.label}</span>
+              <span className="flex-1">{item.label}</span>
+              {item.id === AdminView.OFFICIAL_PAGE_INBOX && inboxUnread > 0 && (
+                <span className="min-w-[1.25rem] h-5 px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                  {inboxUnread > 99 ? '99+' : inboxUnread}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>

@@ -2,10 +2,25 @@ import { Response, NextFunction } from 'express';
 import { AuthRequest } from './auth.js';
 import { createError } from './errorHandler.js';
 import pool from '../database/connection.js';
+import { enforceMerchantSubscriptionExpiry, ensureSubscriptionEndsAtColumn } from '../services/subscriptionExpiry/index.js';
+
+/** Paths still reachable after trial/paid subscription expiry (renewal + profile). */
+const ALLOWED_WHEN_EXPIRED = [
+  '/api/auth/profile',
+  '/api/auth/logout',
+  '/api/admin/subscriptions/public',
+  '/api/subscriptions',
+  '/api/billing',
+  '/api/upload/proof'
+];
+
+function isAllowedExpiredPath(requestPath: string): boolean {
+  return ALLOWED_WHEN_EXPIRED.some((path) => requestPath.includes(path));
+}
 
 /**
- * Middleware to check if user's trial period has expired
- * Blocks access if trial expired and user hasn't subscribed to a paid plan
+ * Middleware to check if user's trial / paid subscription has expired.
+ * Blocks access if expired (except profile + billing renewal paths).
  */
 export const checkSubscriptionStatus = async (
   req: AuthRequest,
@@ -23,10 +38,11 @@ export const checkSubscriptionStatus = async (
       return next();
     }
 
-    // Get merchant subscription details
+    await ensureSubscriptionEndsAtColumn();
+
     const result = await pool.query(
-      `SELECT subscription_plan, subscription_status, trial_ends_at 
-       FROM merchants 
+      `SELECT subscription_plan, subscription_status, trial_ends_at, subscription_ends_at
+       FROM merchants
        WHERE id = $1`,
       [merchantId]
     );
@@ -37,54 +53,52 @@ export const checkSubscriptionStatus = async (
 
     const merchant = result.rows[0];
     const subscriptionPlan = merchant.subscription_plan || 'trial';
-    const subscriptionStatus = merchant.subscription_status || 'active';
+    let subscriptionStatus = merchant.subscription_status || 'active';
     const trialEndsAt = merchant.trial_ends_at;
 
-    // Check if subscription is suspended or expired
+    // Auto-expire paid plans whose period has ended
+    const enforced = await enforceMerchantSubscriptionExpiry(merchantId, {
+      subscription_plan: merchant.subscription_plan,
+      subscription_status: merchant.subscription_status,
+      subscription_ends_at: merchant.subscription_ends_at
+    });
+    subscriptionStatus = enforced.subscriptionStatus;
+
     if (subscriptionStatus === 'suspended' || subscriptionStatus === 'expired') {
-      return next(createError(
-        'تم تعليق حسابك. يرجى التواصل مع الدعم أو ترقية باقاتك للاستمرار.',
-        403
-      ));
+      if (isAllowedExpiredPath(req.path) || isAllowedExpiredPath(req.originalUrl || '')) {
+        return next();
+      }
+      return next(
+        createError(
+          'انتهى اشتراكك أو تم تعليق حسابك. يرجى تجديد الباقة للاستمرار في استخدام الخدمة.',
+          403,
+          true,
+          'SUBSCRIPTION_EXPIRED'
+        )
+      );
     }
 
-    // Check if user is on trial plan and trial has expired
-    // During trial period (7 days), all features are unlimited
-    // After trial expires, block access except for profile and subscription pages
+    // Trial plan: block after trial_ends_at (except renewal paths)
     if (subscriptionPlan === 'trial' && trialEndsAt) {
       const now = new Date();
       const trialEndDate = new Date(trialEndsAt);
 
       if (now > trialEndDate) {
-        // Trial has expired - block access except for profile and subscription pages
-        const allowedPaths = [
-          '/api/auth/profile',
-          '/api/auth/logout',
-          '/api/admin/subscriptions/public',
-          '/api/subscriptions',
-          '/api/billing',
-          '/api/upload/proof'
-        ];
-
-        const requestPath = req.path;
-        const isAllowedPath = allowedPaths.some(path => requestPath.includes(path));
-
-        if (!isAllowedPath) {
-          const error: any = createError(
-            'انتهت الفترة التجريبية المجانية. يرجى ترقية باقاتك للاستمرار في استخدام الخدمة.',
-            403
+        if (!isAllowedExpiredPath(req.path) && !isAllowedExpiredPath(req.originalUrl || '')) {
+          return next(
+            createError(
+              'انتهت الفترة التجريبية المجانية. يرجى ترقية باقاتك للاستمرار في استخدام الخدمة.',
+              403,
+              true,
+              'TRIAL_EXPIRED'
+            )
           );
-          error.code = 'TRIAL_EXPIRED';
-          error.requiresUpgrade = true;
-          return next(error);
         }
       }
     }
 
-    // If user has a paid plan (not trial), or trial is still active, allow access
     next();
   } catch (error) {
     next(error);
   }
 };
-

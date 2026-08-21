@@ -188,10 +188,13 @@ class ApiService {
           httpErr.status = 429;
           throw httpErr;
         }
-        // Check for trial expired error
-        if (response.status === 403 && data.error?.code === 'TRIAL_EXPIRED') {
-          const error = new Error(data.error?.message || 'Trial expired') as any;
-          error.code = 'TRIAL_EXPIRED';
+        // Check for trial / paid subscription expired errors
+        if (
+          response.status === 403 &&
+          (data.error?.code === 'TRIAL_EXPIRED' || data.error?.code === 'SUBSCRIPTION_EXPIRED')
+        ) {
+          const error = new Error(data.error?.message || 'Subscription expired') as any;
+          error.code = data.error.code;
           error.requiresUpgrade = true;
           error.status = 403;
           throw error;
@@ -265,7 +268,14 @@ class ApiService {
   }
 
   // Auth endpoints
-  async register(email: string, password: string, name?: string, referralCode?: string, phone?: string) {
+  async register(
+    email: string,
+    password: string,
+    name?: string,
+    referralCode?: string,
+    phone?: string,
+    acquisition?: Record<string, unknown>
+  ) {
     const response = await this.request<{
       user: {
         id: string;
@@ -274,12 +284,13 @@ class ApiService {
         subscriptionPlan: string;
         subscriptionStatus?: string;
         trialEndsAt?: string | null;
+        subscriptionEndsAt?: string | null;
         createdAt?: string;
       };
       token: string;
     }>('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password, name, referralCode, phone }),
+      body: JSON.stringify({ email, password, name, referralCode, phone, acquisition }),
     }, false);
     
     this.setToken(response.token);
@@ -295,6 +306,7 @@ class ApiService {
         subscriptionPlan: string;
         subscriptionStatus?: string;
         trialEndsAt?: string | null;
+        subscriptionEndsAt?: string | null;
         createdAt?: string;
       };
       token: string;
@@ -330,6 +342,7 @@ class ApiService {
         subscriptionPlan: string;
         subscriptionStatus: string;
         trialEndsAt: string | null;
+        subscriptionEndsAt?: string | null;
         createdAt: string;
         role?: 'owner' | 'admin' | 'user';
       };
@@ -377,7 +390,12 @@ class ApiService {
     });
   }
 
-  async completeProfile(data: { password: string; phone: string; referralCode?: string }) {
+  async completeProfile(data: {
+    password: string;
+    phone: string;
+    referralCode?: string;
+    acquisition?: Record<string, unknown>;
+  }) {
     return this.request<{ message: string; data: { user: { id: string; email: string } } }>('/auth/complete-profile', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -1948,6 +1966,32 @@ class ApiService {
     }>('/admin/affiliates');
   }
 
+  async getAdminAcquisitionStats() {
+    return this.request<{
+      totals: {
+        withAcquisition: number;
+        paidConverted: number;
+        trialActive: number;
+        last7Days: number;
+        last30Days: number;
+      };
+      bySource: Array<{ key: string; signups: number; paid: number }>;
+      byCampaign: Array<{ key: string; signups: number; paid: number }>;
+      recent: Array<{
+        id: string;
+        name: string | null;
+        email: string;
+        plan: string;
+        status: string | null;
+        source: string | null;
+        campaign: string | null;
+        adId: string | null;
+        acqCode: string | null;
+        createdAt: string;
+      }>;
+    }>('/admin/acquisition');
+  }
+
   async getAffiliateStats() {
     return this.request<{
       referralCode: string;
@@ -2214,6 +2258,122 @@ class ApiService {
       '/admin/facebook/official/disconnect',
       { method: 'DELETE' }
     );
+  }
+
+  async getOfficialInboxConversations(params?: {
+    status?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set('status', params.status);
+    if (params?.search) qs.set('search', params.search);
+    if (params?.limit != null) qs.set('limit', String(params.limit));
+    if (params?.offset != null) qs.set('offset', String(params.offset));
+    const query = qs.toString() ? `?${qs.toString()}` : '';
+    return this.request<{
+      linked: boolean;
+      page?: { pageId: string; pageName: string | null } | null;
+      conversations: Array<{
+        id: string;
+        platform: string;
+        userId?: string | null;
+        userName?: string | null;
+        lastMessageAt: string;
+        createdAt: string;
+        botDisabled: boolean;
+        status: string;
+        lastHumanResponseAt?: string | null;
+        lastMessagePreview?: string | null;
+        lastSenderType?: string | null;
+        messageCount: number;
+        unreadCount?: number;
+      }>;
+      total: number;
+      limit: number;
+      offset: number;
+    }>(`/admin/facebook/official/conversations${query}`);
+  }
+
+  async getOfficialInboxConversation(id: string) {
+    return this.request<{
+      conversation: {
+        id: string;
+        platform: string;
+        userId?: string | null;
+        userName?: string | null;
+        lastMessageAt: string;
+        createdAt: string;
+        botDisabled: boolean;
+        status: string;
+        lastHumanResponseAt?: string | null;
+        messages: Array<{
+          id: string;
+          role: string;
+          content: string;
+          senderType?: string;
+          source?: string | null;
+          imageUrl?: string | null;
+          metadata?: Record<string, unknown> | null;
+          timestamp: string;
+          createdAt: string;
+        }>;
+      };
+    }>(`/admin/facebook/official/conversations/${id}`);
+  }
+
+  async sendOfficialInboxHumanMessage(
+    conversationId: string,
+    message: string,
+    imageUrl?: string | null
+  ) {
+    return this.request<{
+      conversationId: string;
+      delivered: boolean;
+      message: {
+        id: string;
+        role: string;
+        content: string;
+        senderType: string;
+        createdAt: string;
+        timestamp: string;
+      };
+      botDisabled: boolean;
+      status: string;
+    }>(`/admin/facebook/official/conversations/${conversationId}/send-human-message`, {
+      method: 'POST',
+      body: JSON.stringify({ message, imageUrl: imageUrl || undefined }),
+    });
+  }
+
+  async disableOfficialInboxBot(conversationId: string) {
+    return this.request<{ success?: boolean; message?: string }>(
+      `/admin/facebook/official/conversations/${conversationId}/disable-bot`,
+      { method: 'PUT' }
+    );
+  }
+
+  async enableOfficialInboxBot(conversationId: string) {
+    return this.request<{ success?: boolean; message?: string }>(
+      `/admin/facebook/official/conversations/${conversationId}/enable-bot`,
+      { method: 'PUT' }
+    );
+  }
+
+  async markOfficialInboxRead(conversationId: string) {
+    return this.request<{ ok: boolean }>(
+      `/admin/facebook/official/conversations/${conversationId}/mark-read`,
+      { method: 'POST', body: JSON.stringify({}) }
+    );
+  }
+
+  async getOfficialInboxUnreadCount() {
+    return this.request<{
+      linked: boolean;
+      unreadConversations: number;
+      unreadMessages: number;
+    }>('/admin/facebook/official/inbox/unread-count');
   }
 
   async syncOfficialPagePosts() {

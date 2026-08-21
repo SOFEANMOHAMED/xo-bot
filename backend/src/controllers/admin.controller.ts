@@ -1070,6 +1070,20 @@ export const getSystemLogs = async (
   }
 };
 
+export const getAdminAcquisitionStatsHandler = async (
+  _req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { getAdminAcquisitionStats } = await import('../services/merchantAcquisition.js');
+    const data = await getAdminAcquisitionStats();
+    res.json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getAdminAffiliateStats = async (
   req: AuthRequest,
   res: Response,

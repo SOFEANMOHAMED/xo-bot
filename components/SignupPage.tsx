@@ -7,6 +7,11 @@ import { handleApiError } from '../utils/errorHandler';
 import CountryCodeSelector from './CountryCodeSelector';
 import AuthLayout from './AuthLayout';
 import BrandLogo from './BrandLogo';
+import {
+  captureAndPersistAttribution,
+  getAttributionForApi,
+  buildGoogleAuthQuery,
+} from '../utils/marketingAttribution';
 
 interface SignupPageProps {
   onSignupSuccess: () => void;
@@ -32,8 +37,9 @@ const SignupPage: React.FC<SignupPageProps> = ({ onSignupSuccess, onNavigateToLo
   const { register } = useAuth();
 
   useEffect(() => {
+    const attr = captureAndPersistAttribution();
     const urlParams = new URLSearchParams(window.location.search);
-    const refCode = urlParams.get('ref');
+    const refCode = urlParams.get('ref') || attr.ref;
     if (refCode) {
       const cleanRefCode = refCode.toUpperCase().replace(/[^A-Z0-9\-_]/g, '');
       setFormData(prev => ({ ...prev, referralCode: cleanRefCode }));
@@ -68,12 +74,14 @@ const SignupPage: React.FC<SignupPageProps> = ({ onSignupSuccess, onNavigateToLo
 
     setIsLoading(true);
     try {
+      const acquisition = getAttributionForApi();
       await register(
         formData.email,
         formData.password,
         formData.fullName,
         formData.referralCode.trim() || undefined,
-        fullPhoneNumber.trim() || undefined
+        fullPhoneNumber.trim() || undefined,
+        acquisition
       );
       onSignupSuccess();
     } catch (err: any) {
@@ -85,10 +93,7 @@ const SignupPage: React.FC<SignupPageProps> = ({ onSignupSuccess, onNavigateToLo
 
   const handleGoogleSignup = () => {
     const apiUrl = import.meta.env.VITE_API_URL || 'https://xo-bot.com/api';
-    const ref = new URLSearchParams(window.location.search).get('ref');
-    const clean = ref ? ref.toUpperCase().replace(/[^A-Z0-9\-_]/g, '') : '';
-    const suffix = clean ? `?ref=${encodeURIComponent(clean)}` : '';
-    window.location.href = `${apiUrl}/auth/google${suffix}`;
+    window.location.href = `${apiUrl}/auth/google${buildGoogleAuthQuery()}`;
   };
 
   const inputClass =

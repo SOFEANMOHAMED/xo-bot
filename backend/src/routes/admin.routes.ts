@@ -7,6 +7,7 @@ import {
   getAdminUsageStats,
   getAdminChartData,
   getAdminAffiliateStats,
+  getAdminAcquisitionStatsHandler,
   getAdminUsers,
   getAdminUser,
   createAdminUser,
@@ -42,6 +43,16 @@ import {
   updateOfficialPageKeywordRule,
   deleteOfficialPageKeywordRule,
 } from '../controllers/adminOfficialPageComments.controller.js';
+import {
+  listOfficialInboxConversations,
+  getOfficialInboxConversation,
+  sendOfficialInboxHumanMessage,
+  disableOfficialInboxBot,
+  enableOfficialInboxBot,
+  markOfficialInboxRead,
+  getOfficialInboxUnreadCount,
+  streamOfficialInboxEvents,
+} from '../controllers/adminOfficialInbox.controller.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { requireAdminGate } from '../middleware/adminGate.js';
 import { enableFullAIMode, disableFullAIMode } from './admin/enable-full-ai.js';
@@ -65,6 +76,7 @@ router.put('/subscriptions/:planKey/limits', updateAdminPlanLimits);
 router.get('/usage', getAdminUsageStats);
 router.get('/charts', getAdminChartData);
 router.get('/affiliates', getAdminAffiliateStats);
+router.get('/acquisition', getAdminAcquisitionStatsHandler);
 
 // Users management
 router.get('/users', getAdminUsers);
@@ -93,6 +105,19 @@ router.get('/facebook/official/keyword-rules', listOfficialPageKeywordRules);
 router.post('/facebook/official/keyword-rules', createOfficialPageKeywordRule);
 router.put('/facebook/official/keyword-rules/:ruleId', updateOfficialPageKeywordRule);
 router.delete('/facebook/official/keyword-rules/:ruleId', deleteOfficialPageKeywordRule);
+
+// Official page Messenger inbox (platform-scoped — not merchant conversations)
+router.get('/facebook/official/inbox/stream', streamOfficialInboxEvents);
+router.get('/facebook/official/inbox/unread-count', getOfficialInboxUnreadCount);
+router.get('/facebook/official/conversations', listOfficialInboxConversations);
+router.get('/facebook/official/conversations/:id', getOfficialInboxConversation);
+router.post(
+  '/facebook/official/conversations/:id/send-human-message',
+  sendOfficialInboxHumanMessage
+);
+router.put('/facebook/official/conversations/:id/disable-bot', disableOfficialInboxBot);
+router.put('/facebook/official/conversations/:id/enable-bot', enableOfficialInboxBot);
+router.post('/facebook/official/conversations/:id/mark-read', markOfficialInboxRead);
 
 // Notifications
 router.get('/notifications', getAdminNotifications);

@@ -14,18 +14,92 @@ import {
   linkMerchantToAffiliateReferrer,
   referralCodeFromOAuthState
 } from '../utils/affiliateReferral.js';
+import {
+  applyMerchantAcquisition,
+  acquisitionFromOAuthState,
+  normalizeAcquisitionInput,
+  type MerchantAcquisitionInput
+} from '../services/merchantAcquisition.js';
 import { setAuthCookie, clearAuthCookie } from '../utils/authCookies.js';
+import {
+  ensureSubscriptionEndsAtColumn,
+  enforceMerchantSubscriptionExpiry
+} from '../services/subscriptionExpiry/index.js';
 import '../config/passport.js'; // Initialize passport
 
 /** تطبيع البريد: المقارنة في قاعدة البيانات حساسة لحالة الأحرف بدون هذا. */
 const normalizeMerchantEmail = (email: string): string => email.trim().toLowerCase();
+
+function toIsoOrNull(value: Date | string | null | undefined): string | null {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/** Public merchant user payload for auth responses (tenant-safe fields only). */
+async function buildPublicMerchantUser(merchant: {
+  id: string;
+  email: string;
+  name: string | null;
+  subscription_plan?: string | null;
+  subscription_status?: string | null;
+  trial_ends_at?: Date | string | null;
+  subscription_ends_at?: Date | string | null;
+  created_at?: Date | string | null;
+  role?: string | null;
+}) {
+  await ensureSubscriptionEndsAtColumn();
+  const enforced = await enforceMerchantSubscriptionExpiry(merchant.id, {
+    subscription_plan: merchant.subscription_plan ?? null,
+    subscription_status: merchant.subscription_status ?? null,
+    subscription_ends_at: merchant.subscription_ends_at ?? null
+  });
+
+  return {
+    id: merchant.id,
+    email: merchant.email,
+    name: merchant.name,
+    subscriptionPlan: merchant.subscription_plan || 'trial',
+    subscriptionStatus: enforced.subscriptionStatus,
+    trialEndsAt: toIsoOrNull(merchant.trial_ends_at),
+    subscriptionEndsAt: toIsoOrNull(enforced.subscriptionEndsAt ?? merchant.subscription_ends_at),
+    createdAt: toIsoOrNull(merchant.created_at) ?? undefined,
+    role: (merchant.role || 'user') as 'owner' | 'admin' | 'user'
+  };
+}
+
+const acquisitionBodySchema = z
+  .object({
+    utm_source: z.string().optional(),
+    utm_medium: z.string().optional(),
+    utm_campaign: z.string().optional(),
+    utm_content: z.string().optional(),
+    utm_term: z.string().optional(),
+    source: z.string().optional(),
+    medium: z.string().optional(),
+    campaign: z.string().optional(),
+    content: z.string().optional(),
+    term: z.string().optional(),
+    ad_id: z.string().optional(),
+    adId: z.string().optional(),
+    acq: z.string().optional(),
+    acqCode: z.string().optional(),
+    landing_path: z.string().optional(),
+    landingPath: z.string().optional(),
+    fbclid: z.string().optional(),
+    gclid: z.string().optional(),
+    ref: z.string().optional()
+  })
+  .passthrough()
+  .optional();
 
 const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
   name: z.string().optional(),
   referralCode: z.string().optional(),
-  phone: z.string().optional()
+  phone: z.string().optional(),
+  acquisition: acquisitionBodySchema
 });
 
 const loginSchema = z.object({
@@ -42,6 +116,11 @@ export const register = async (
     const validated = registerSchema.parse(req.body);
     const email = normalizeMerchantEmail(validated.email);
     const { password, name, referralCode: inputReferralCode, phone } = validated;
+    const acquisitionInput: MerchantAcquisitionInput | null = normalizeAcquisitionInput({
+      ...(validated.acquisition || {}),
+      ref: validated.acquisition?.ref || inputReferralCode || undefined,
+      acq: validated.acquisition?.acq || validated.acquisition?.acqCode || undefined
+    } as Record<string, unknown>);
 
     // Check if user exists
     const existingUser = await pool.query(
@@ -155,6 +234,15 @@ export const register = async (
       }
     }
 
+    try {
+      await applyMerchantAcquisition(merchant.id, acquisitionInput);
+    } catch (acqErr: unknown) {
+      logger.warn('Failed to apply merchant acquisition on register', {
+        merchantId: merchant.id,
+        error: acqErr instanceof Error ? acqErr.message : String(acqErr)
+      });
+    }
+
     // Get role from database (default to 'user' if not set)
     const role = merchant.role || 'user';
 
@@ -165,19 +253,12 @@ export const register = async (
     const token = generateToken(merchant.id, merchant.id, role);
     setAuthCookie(res, token);
 
+    const user = await buildPublicMerchantUser(merchant);
+
     res.status(201).json({
       success: true,
       data: {
-        user: {
-          id: merchant.id,
-          email: merchant.email,
-          name: merchant.name,
-          subscriptionPlan: merchant.subscription_plan,
-          subscriptionStatus: merchant.subscription_status,
-          trialEndsAt: merchant.trial_ends_at,
-          createdAt: merchant.created_at,
-          role: role
-        },
+        user,
         // Token also returned for transitional clients; prefer HttpOnly cookie.
         token
       }
@@ -200,9 +281,13 @@ export const login = async (
     const email = normalizeMerchantEmail(validated.email);
     const { password } = validated;
 
+    await ensureSubscriptionEndsAtColumn();
+
     // Password comes from DB only; sync SUPER_ADMIN_* from .env via: npm run create-super-admin
     const result = await pool.query(
-      'SELECT id, email, password_hash, name, subscription_plan, subscription_status, trial_ends_at, role, created_at FROM merchants WHERE LOWER(TRIM(email)) = $1',
+      `SELECT id, email, password_hash, name, subscription_plan, subscription_status,
+              trial_ends_at, subscription_ends_at, role, created_at
+       FROM merchants WHERE LOWER(TRIM(email)) = $1`,
       [email]
     );
 
@@ -230,19 +315,12 @@ export const login = async (
     const token = generateToken(merchant.id, merchant.id, role);
     setAuthCookie(res, token);
 
+    const user = await buildPublicMerchantUser(merchant);
+
     res.json({
       success: true,
       data: {
-        user: {
-          id: merchant.id,
-          email: merchant.email,
-          name: merchant.name,
-          subscriptionPlan: merchant.subscription_plan,
-          subscriptionStatus: merchant.subscription_status,
-          trialEndsAt: merchant.trial_ends_at,
-          createdAt: merchant.created_at,
-          role: role
-        },
+        user,
         token
       }
     });
@@ -260,8 +338,11 @@ export const getProfile = async (
   next: NextFunction
 ) => {
   try {
+    await ensureSubscriptionEndsAtColumn();
     const result = await pool.query(
-      'SELECT id, email, name, subscription_plan, subscription_status, trial_ends_at, role, created_at FROM merchants WHERE id = $1',
+      `SELECT id, email, name, subscription_plan, subscription_status,
+              trial_ends_at, subscription_ends_at, role, created_at
+       FROM merchants WHERE id = $1`,
       [req.merchantId]
     );
 
@@ -270,20 +351,10 @@ export const getProfile = async (
     }
 
     const merchant = result.rows[0];
+    const user = await buildPublicMerchantUser(merchant);
     res.json({
       success: true,
-      data: {
-        user: {
-          id: merchant.id,
-          email: merchant.email,
-          name: merchant.name,
-          subscriptionPlan: merchant.subscription_plan,
-          subscriptionStatus: merchant.subscription_status,
-          trialEndsAt: merchant.trial_ends_at,
-          role: merchant.role || 'user',
-          createdAt: merchant.created_at
-        }
-      }
+      data: { user }
     });
   } catch (error) {
     next(error);
@@ -496,16 +567,44 @@ function generateToken(userId: string, merchantId: string, role: string): string
   );
 }
 
-// Google OAuth - Initiate login (optional ?ref=AFFILIATE_CODE via OAuth state)
+// Google OAuth - Initiate login (optional ?ref= + acquisition via OAuth state)
 export const googleAuth = (req: Request, res: Response, next: NextFunction) => {
   const refRaw = req.query.ref;
+  const acqRaw = req.query.acq;
   let state: string | undefined;
-    if (typeof refRaw === 'string' && refRaw.trim()) {
+  const statePayload: Record<string, unknown> = {};
+
+  if (typeof refRaw === 'string' && refRaw.trim()) {
     const clean = refRaw.trim().toUpperCase().replace(/[^A-Z0-9\-_]/g, '');
-    if (clean) {
-      state = Buffer.from(JSON.stringify({ ref: clean }), 'utf8').toString('base64url');
-    }
+    if (clean) statePayload.ref = clean;
   }
+  if (typeof acqRaw === 'string' && acqRaw.trim()) {
+    const cleanAcq = acqRaw.trim().toUpperCase().replace(/[^A-Z0-9\-_]/g, '');
+    if (cleanAcq) statePayload.acq = cleanAcq;
+  }
+
+  const acquisition = normalizeAcquisitionInput({
+    utm_source: req.query.utm_source,
+    utm_medium: req.query.utm_medium,
+    utm_campaign: req.query.utm_campaign,
+    utm_content: req.query.utm_content,
+    utm_term: req.query.utm_term,
+    ad_id: req.query.ad_id,
+    fbclid: req.query.fbclid,
+    gclid: req.query.gclid,
+    landing_path: req.query.landing_path,
+    acq: statePayload.acq,
+    ref: statePayload.ref
+  } as Record<string, unknown>);
+
+  if (acquisition) {
+    statePayload.acquisition = acquisition;
+  }
+
+  if (Object.keys(statePayload).length > 0) {
+    state = Buffer.from(JSON.stringify(statePayload), 'utf8').toString('base64url');
+  }
+
   passport.authenticate('google', {
     scope: ['profile', 'email'],
     ...(state ? { state } : {})
@@ -606,8 +705,19 @@ export const googleCallback = async (
         
         const frontendUrl = process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'https://xo-bot.com';
         const refFromState = referralCodeFromOAuthState(req.query.state);
+        const acqFromState = acquisitionFromOAuthState(req.query.state);
+        try {
+          await applyMerchantAcquisition(user.id, acqFromState);
+        } catch (acqErr) {
+          logger.warn('OAuth acquisition apply failed (complete-profile path)', {
+            userId: user.id,
+            error: acqErr instanceof Error ? acqErr.message : String(acqErr)
+          });
+        }
         const refQuery = refFromState ? `&ref=${encodeURIComponent(refFromState)}` : '';
-        const redirectUrl = `${frontendUrl}/complete-profile?token=${token}${refQuery}`;
+        const acqQuery =
+          acqFromState?.acqCode ? `&acq=${encodeURIComponent(acqFromState.acqCode)}` : '';
+        const redirectUrl = `${frontendUrl}/complete-profile?token=${token}${refQuery}${acqQuery}`;
         console.log('[Google OAuth] Redirecting to:', redirectUrl);
         res.redirect(redirectUrl);
         return;
@@ -632,6 +742,17 @@ export const googleCallback = async (
       // Cookie carries auth — do not put JWT in the URL
       const frontendUrl = process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'https://xo-bot.com';
       const refFromState = referralCodeFromOAuthState(req.query.state);
+      try {
+        if (refFromState) {
+          await linkMerchantToAffiliateReferrer(pool, user.id, refFromState);
+        }
+        await applyMerchantAcquisition(user.id, acquisitionFromOAuthState(req.query.state));
+      } catch (postAuthErr) {
+        logger.warn('OAuth post-auth affiliate/acquisition failed', {
+          userId: user.id,
+          error: postAuthErr instanceof Error ? postAuthErr.message : String(postAuthErr)
+        });
+      }
       res.redirect(
         refFromState
           ? `${frontendUrl}/?ref=${encodeURIComponent(refFromState)}`
@@ -827,7 +948,7 @@ export const completeProfile = async (
       return next(createError('Unauthorized', 401));
     }
 
-    const { password, phone, referralCode: inputReferralCode } = req.body;
+    const { password, phone, referralCode: inputReferralCode, acquisition } = req.body;
 
     // Validate required fields
     if (!password || !phone) {
@@ -879,6 +1000,25 @@ export const completeProfile = async (
           refError instanceof Error ? refError : new Error(String(refError))
         );
       }
+    }
+
+    try {
+      const acqInput = normalizeAcquisitionInput({
+        ...(typeof acquisition === 'object' && acquisition ? acquisition : {}),
+        ref:
+          (typeof acquisition === 'object' && acquisition?.ref) ||
+          inputReferralCode ||
+          undefined,
+        acq:
+          (typeof acquisition === 'object' && (acquisition?.acq || acquisition?.acqCode)) ||
+          undefined
+      } as Record<string, unknown>);
+      await applyMerchantAcquisition(merchantId, acqInput);
+    } catch (acqErr: unknown) {
+      logger.warn('Failed to apply merchant acquisition on complete profile', {
+        merchantId,
+        error: acqErr instanceof Error ? acqErr.message : String(acqErr)
+      });
     }
 
     logger.info('Profile completed successfully', { merchantId });

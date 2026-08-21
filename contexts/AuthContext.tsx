@@ -8,6 +8,7 @@ interface User {
   subscriptionPlan: string;
   subscriptionStatus?: string;
   trialEndsAt?: string | null;
+  subscriptionEndsAt?: string | null;
   createdAt?: string;
   role?: 'owner' | 'admin' | 'user';
 }
@@ -17,7 +18,14 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, name?: string, referralCode?: string, phone?: string) => Promise<void>;
+  register: (
+    email: string,
+    password: string,
+    name?: string,
+    referralCode?: string,
+    phone?: string,
+    acquisition?: Record<string, unknown>
+  ) => Promise<void>;
   logout: () => void;
   refreshUser: () => Promise<void>;
   setToken: (token: string | null) => Promise<void>;
@@ -53,8 +61,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return response.user;
   };
 
-  const register = async (email: string, password: string, name?: string, referralCode?: string, phone?: string) => {
-    const response = await apiService.register(email, password, name, referralCode, phone);
+  const register = async (
+    email: string,
+    password: string,
+    name?: string,
+    referralCode?: string,
+    phone?: string,
+    acquisition?: Record<string, unknown>
+  ) => {
+    const response = await apiService.register(email, password, name, referralCode, phone, acquisition);
     setUser(response.user);
   };
 

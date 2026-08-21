@@ -1,9 +1,12 @@
 
 import React, { useEffect, useState } from 'react';
-import { Bell, X, CheckCircle, DollarSign, User, Calendar, CheckCheck } from 'lucide-react';
+import { Bell, X, CheckCircle, DollarSign, User, Calendar, CheckCheck, Inbox } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import apiService from '../../services/api';
 import { useAdminNotifications } from './AdminNotificationContext';
 import { logger } from '../../utils/logger';
+import { adminPath } from '../../routes/paths';
+import { AdminView } from '../../types';
 
 interface AdminNotification {
   id: string;
@@ -147,6 +150,11 @@ const AdminNotifications: React.FC = () => {
                         <DollarSign size={24} className="text-green-600 dark:text-green-400" />
                       </div>
                     )}
+                    {notification.type === 'official_inbox' && (
+                      <div className="p-3 bg-indigo-100 dark:bg-indigo-900/30 rounded-xl">
+                        <Inbox size={24} className="text-indigo-600 dark:text-indigo-400" />
+                      </div>
+                    )}
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
                         <h3 className="text-lg font-bold text-gray-900 dark:text-white">
@@ -161,6 +169,20 @@ const AdminNotifications: React.FC = () => {
                       <p className="text-gray-600 dark:text-gray-300 mb-3">
                         {notification.message}
                       </p>
+                      {notification.type === 'official_inbox' && (
+                        <Link
+                          to={adminPath(AdminView.OFFICIAL_PAGE_INBOX)}
+                          onClick={() => {
+                            if (!notification.isRead) {
+                              void handleMarkAsRead(notification.id);
+                            }
+                          }}
+                          className="inline-flex items-center gap-2 text-sm font-bold text-indigo-600 dark:text-indigo-400 hover:underline mb-3"
+                        >
+                          <Inbox size={16} />
+                          فتح صندوق وارد صفحة XO Bot
+                        </Link>
+                      )}
                       {notification.type === 'withdrawal_request' && notification.data && (
                         <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 space-y-2">
                           <div className="flex items-center gap-2 text-sm">

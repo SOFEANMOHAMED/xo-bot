@@ -45,8 +45,13 @@ export async function getPlanLimits(planKey: string): Promise<PlanLimits> {
  */
 export async function getMerchantPlanLimits(merchantId: string): Promise<PlanLimits> {
   try {
+    const { ensureSubscriptionEndsAtColumn, enforceMerchantSubscriptionExpiry } = await import(
+      '../services/subscriptionExpiry/index.js'
+    );
+    await ensureSubscriptionEndsAtColumn();
+
     const result = await pool.query(
-      `SELECT subscription_plan, subscription_status, trial_ends_at 
+      `SELECT subscription_plan, subscription_status, trial_ends_at, subscription_ends_at
        FROM merchants 
        WHERE id = $1`,
       [merchantId]
@@ -58,8 +63,22 @@ export async function getMerchantPlanLimits(merchantId: string): Promise<PlanLim
 
     const merchant = result.rows[0];
     const subscriptionPlan = merchant.subscription_plan || 'trial';
-    const subscriptionStatus = merchant.subscription_status || 'active';
+    let subscriptionStatus = merchant.subscription_status || 'active';
     const trialEndsAt = merchant.trial_ends_at;
+
+    // Keep bot/webhook paths in sync with dashboard: expire paid period when due
+    if (
+      subscriptionStatus === 'active' &&
+      subscriptionPlan !== 'trial' &&
+      merchant.subscription_ends_at
+    ) {
+      const enforced = await enforceMerchantSubscriptionExpiry(merchantId, {
+        subscription_plan: merchant.subscription_plan,
+        subscription_status: merchant.subscription_status,
+        subscription_ends_at: merchant.subscription_ends_at
+      });
+      subscriptionStatus = enforced.subscriptionStatus;
+    }
 
     if (subscriptionPlan === 'trial' && trialEndsAt) {
       const now = new Date();

@@ -11,6 +11,18 @@ import {
   ensurePlatformFacebookTables,
   type PlatformFacebookPage,
 } from './platformFacebookPage.js';
+import {
+  captureOfficialPageAcquisition,
+  ensureConversationAcqCode,
+  buildTrackedSignupUrl,
+} from './merchantAcquisition.js';
+import { extractReferralFromMessagingEvent } from './socialAcquisition.js';
+import { notifyAdminOfficialInboxMessage } from './adminNotifications.js';
+import {
+  ensurePlatformConversationCustomerName,
+  isPlaceholderCustomerName,
+  resolvePlatformFacebookCustomerName,
+} from './socialProfile.js';
 
 const HISTORY_LIMIT = 20;
 const DEFAULT_SYSTEM_MESSAGE = `أنت XO Bot — مساعد منصة XO Bot الرسمي على فيسبوك.
@@ -55,11 +67,13 @@ async function getOrCreateConversation(params: {
   pageId: string;
   userId: string;
   userName?: string | null;
-}): Promise<{ id: string; bot_disabled: boolean; status: string }> {
+  accessToken?: string | null;
+}): Promise<{ id: string; bot_disabled: boolean; status: string; user_name: string | null }> {
   await ensurePlatformFacebookTables();
 
   const existing = await pool.query(
-    `SELECT id, COALESCE(bot_disabled, false) AS bot_disabled, COALESCE(status, 'bot') AS status
+    `SELECT id, COALESCE(bot_disabled, false) AS bot_disabled, COALESCE(status, 'bot') AS status,
+            user_name
      FROM platform_conversations
      WHERE page_id = $1 AND user_id = $2
      LIMIT 1`,
@@ -67,32 +81,65 @@ async function getOrCreateConversation(params: {
   );
 
   if (existing.rows[0]) {
-    if (params.userName) {
+    let userName = (existing.rows[0].user_name as string | null) || null;
+
+    if (params.userName && isPlaceholderCustomerName(userName)) {
       await pool.query(
         `UPDATE platform_conversations
-         SET user_name = COALESCE(user_name, $1), updated_at = CURRENT_TIMESTAMP
+         SET user_name = $1, updated_at = CURRENT_TIMESTAMP
          WHERE id = $2`,
         [params.userName, existing.rows[0].id]
       );
+      userName = params.userName;
     }
+
+    if (
+      params.accessToken &&
+      isPlaceholderCustomerName(userName)
+    ) {
+      userName = await ensurePlatformConversationCustomerName({
+        conversationId: existing.rows[0].id,
+        pageId: params.pageId,
+        userId: params.userId,
+        accessToken: params.accessToken,
+        currentName: userName,
+      });
+      if (isPlaceholderCustomerName(userName)) userName = null;
+    }
+
     return {
       id: existing.rows[0].id,
       bot_disabled: !!existing.rows[0].bot_disabled,
       status: String(existing.rows[0].status || 'bot'),
+      user_name: userName,
     };
+  }
+
+  let resolvedName = params.userName || null;
+  if (params.accessToken && isPlaceholderCustomerName(resolvedName)) {
+    resolvedName =
+      (await resolvePlatformFacebookCustomerName({
+        userId: params.userId,
+        pageId: params.pageId,
+        accessToken: params.accessToken,
+      })) || null;
   }
 
   const inserted = await pool.query(
     `INSERT INTO platform_conversations (page_id, user_id, user_name)
      VALUES ($1, $2, $3)
-     ON CONFLICT (page_id, user_id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
-     RETURNING id, COALESCE(bot_disabled, false) AS bot_disabled, COALESCE(status, 'bot') AS status`,
-    [params.pageId, params.userId, params.userName || null]
+     ON CONFLICT (page_id, user_id) DO UPDATE SET
+       user_name = COALESCE(NULLIF(platform_conversations.user_name, ''), EXCLUDED.user_name),
+       updated_at = CURRENT_TIMESTAMP
+     RETURNING id, COALESCE(bot_disabled, false) AS bot_disabled, COALESCE(status, 'bot') AS status,
+               user_name`,
+    [params.pageId, params.userId, resolvedName]
   );
   return {
     id: inserted.rows[0].id,
     bot_disabled: !!inserted.rows[0].bot_disabled,
     status: String(inserted.rows[0].status || 'bot'),
+    user_name: (inserted.rows[0].user_name as string | null) || resolvedName,
   };
 }
 
@@ -118,12 +165,14 @@ async function saveMessage(
   conversationId: string,
   role: 'user' | 'model' | 'human',
   content: string,
-  externalMessageId?: string | null
-) {
-  await pool.query(
+  externalMessageId?: string | null,
+  notifyMeta?: { userId?: string; userName?: string | null }
+): Promise<boolean> {
+  const inserted = await pool.query(
     `INSERT INTO platform_messages (conversation_id, role, content, external_message_id)
      VALUES ($1, $2, $3, $4)
-     ON CONFLICT DO NOTHING`,
+     ON CONFLICT DO NOTHING
+     RETURNING id`,
     [conversationId, role, content, externalMessageId || null]
   );
   await pool.query(
@@ -132,6 +181,17 @@ async function saveMessage(
      WHERE id = $1`,
     [conversationId]
   );
+
+  const saved = (inserted.rowCount || 0) > 0;
+  if (saved && role === 'user' && notifyMeta?.userId) {
+    void notifyAdminOfficialInboxMessage({
+      conversationId,
+      userId: notifyMeta.userId,
+      userName: notifyMeta.userName,
+      preview: content,
+    });
+  }
+  return saved;
 }
 
 function extractInboundText(event: any): string {
@@ -272,11 +332,9 @@ export async function processOfficialPageMessage(
   const userId = String(event?.sender?.id || '');
   const pageId = String(event?.recipient?.id || page.page_id);
   const userName =
-    typeof event?.sender?.name === 'string'
-      ? event.sender.name
-      : typeof event?.postback?.title === 'string'
-        ? null
-        : null;
+    typeof event?.sender?.name === 'string' && event.sender.name.trim()
+      ? event.sender.name.trim()
+      : null;
 
   if (!userId || !pageId) {
     logger.warn('Official page bot: incomplete event', { pageId, userId });
@@ -291,11 +349,6 @@ export async function processOfficialPageMessage(
     return true;
   }
 
-  if (!settings.enabled) {
-    logger.info('Official page bot disabled — ignoring inbound message', { pageId, userId });
-    return true;
-  }
-
   const inboundText = extractInboundText(event);
   if (!inboundText) {
     logger.debug('Official page bot: empty inbound', { pageId, userId });
@@ -307,9 +360,50 @@ export async function processOfficialPageMessage(
       pageId,
       userId,
       userName,
+      accessToken: page.access_token,
     });
 
-    await saveMessage(conversation.id, 'user', inboundText);
+    // Always persist inbound for admin inbox (even when bot is globally/per-thread off)
+    const externalMessageId =
+      typeof event?.message?.mid === 'string' ? event.message.mid : null;
+    await saveMessage(conversation.id, 'user', inboundText, externalMessageId, {
+      userId,
+      userName: conversation.user_name || userName,
+    });
+
+    // Capture ads / ref attribution + tracked signup link for this conversation
+    const referralInfo = extractReferralFromMessagingEvent(event);
+    let signupUrl = buildTrackedSignupUrl(await ensureConversationAcqCode(conversation.id));
+    try {
+      if (referralInfo && (referralInfo.ref || referralInfo.adId || referralInfo.postId)) {
+        const captured = await captureOfficialPageAcquisition({
+          conversationId: conversation.id,
+          pageId,
+          adId: referralInfo.adId || null,
+          ref: referralInfo.ref || null,
+          postId: referralInfo.postId || null,
+          source: referralInfo.source || null,
+        });
+        signupUrl = captured.signupUrl;
+      } else {
+        const code = await ensureConversationAcqCode(conversation.id);
+        signupUrl = buildTrackedSignupUrl(code);
+      }
+    } catch (acqErr) {
+      logger.warn('Official page acquisition capture failed', {
+        conversationId: conversation.id,
+        error: acqErr instanceof Error ? acqErr.message : String(acqErr),
+      });
+    }
+
+    if (!settings.enabled) {
+      logger.info('Official page bot disabled — message stored for admin inbox only', {
+        pageId,
+        userId,
+        conversationId: conversation.id,
+      });
+      return true;
+    }
 
     // Human takeover: do not race the page admin / Inbox agent
     if (conversation.bot_disabled || conversation.status === 'human') {
@@ -346,9 +440,16 @@ export async function processOfficialPageMessage(
       return true;
     }
 
+    const systemInstruction = `${settings.systemMessage}
+
+# رابط التسجيل المتتبَّع لهذه المحادثة
+عند تشجيع الزائر على التجربة أو الاشتراك، استخدم هذا الرابط حصراً (لا تستبدله برابط عام):
+${signupUrl}
+اذكر أن التجربة مجانية 7 أيام عند الدعوة للتسجيل.`;
+
     const history = await loadRecentMessages(conversation.id);
     const result = await generateContent(history, {
-      systemInstruction: settings.systemMessage,
+      systemInstruction,
       temperature: 0.5,
       maxOutputTokens: 600,
     });
@@ -378,15 +479,17 @@ export async function processOfficialPageMessage(
     });
   } catch (err) {
     logger.error('Official page bot processing failed', err as Error, { pageId, userId });
-    try {
-      await sendFacebookMessage(
-        pageId,
-        userId,
-        'حدث خطأ مؤقت. حاول مراسلتنا مرة أخرى بعد قليل.',
-        page.access_token
-      );
-    } catch {
-      /* ignore */
+    if (settings.enabled) {
+      try {
+        await sendFacebookMessage(
+          pageId,
+          userId,
+          'حدث خطأ مؤقت. حاول مراسلتنا مرة أخرى بعد قليل.',
+          page.access_token
+        );
+      } catch {
+        /* ignore */
+      }
     }
   }
 

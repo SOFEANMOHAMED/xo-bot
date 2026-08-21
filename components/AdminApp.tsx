@@ -15,6 +15,8 @@ import AdminPages from './admin/AdminPages';
 import AdminSupportTickets from './admin/AdminSupportTickets';
 import AdminPaymentRequests from './admin/AdminPaymentRequests';
 import AdminOfficialPageComments from './admin/AdminOfficialPageComments';
+import AdminOfficialPageInbox from './admin/AdminOfficialPageInbox';
+import AdminAcquisition from './admin/AdminAcquisition';
 import NotificationContainer from './Notification';
 import { AdminNotificationProvider, useAdminNotifications } from './admin/AdminNotificationContext';
 import apiService from '../services/api';
@@ -162,8 +164,12 @@ const AdminAppContent: React.FC<AdminAppProps & { currentView: AdminView }> = ({
         return <AdminSupportTickets />;
       case AdminView.PAYMENT_REQUESTS:
         return <AdminPaymentRequests />;
+      case AdminView.OFFICIAL_PAGE_INBOX:
+        return <AdminOfficialPageInbox />;
       case AdminView.OFFICIAL_PAGE_COMMENTS:
         return <AdminOfficialPageComments />;
+      case AdminView.ACQUISITION:
+        return <AdminAcquisition />;
       default:
         return <AdminOverview />;
     }

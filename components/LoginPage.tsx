@@ -4,6 +4,7 @@ import { UserRole } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import AuthLayout from './AuthLayout';
 import BrandLogo from './BrandLogo';
+import { buildGoogleAuthQuery, captureAndPersistAttribution } from '../utils/marketingAttribution';
 
 interface LoginPageProps {
   onLoginSuccess: (role?: UserRole) => void;
@@ -46,8 +47,9 @@ const LoginPage: React.FC<LoginPageProps> = ({
   };
 
   const handleGoogleLogin = () => {
+    captureAndPersistAttribution();
     const apiUrl = import.meta.env.VITE_API_URL || 'https://xo-bot.com/api';
-    window.location.href = `${apiUrl}/auth/google`;
+    window.location.href = `${apiUrl}/auth/google${buildGoogleAuthQuery()}`;
   };
 
   return (

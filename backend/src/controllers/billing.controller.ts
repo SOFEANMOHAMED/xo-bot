@@ -379,19 +379,25 @@ export const reviewPaymentRequest = async (
     );
 
     if (action === 'approve') {
-      // Ensure optional end-date column exists (for yearly/monthly renewals)
-      await pool.query(`
-        ALTER TABLE merchants
-        ADD COLUMN IF NOT EXISTS subscription_ends_at TIMESTAMP
-      `);
+      const { ensureSubscriptionEndsAtColumn } = await import(
+        '../services/subscriptionExpiry/index.js'
+      );
+      await ensureSubscriptionEndsAtColumn();
 
       const planConfig = await getPlanConfig(paymentRequest.plan_key);
       const periodInterval = planConfig.billingPeriod === 'yearly' ? '1 year' : '1 month';
+      // Renew from remaining time when still active, otherwise from now
       await pool.query(
         `UPDATE merchants
          SET subscription_plan = $1,
              subscription_status = 'active',
-             subscription_ends_at = CURRENT_TIMESTAMP + ($2)::interval,
+             subscription_ends_at = CASE
+               WHEN subscription_ends_at IS NOT NULL
+                    AND subscription_ends_at > CURRENT_TIMESTAMP
+                    AND COALESCE(subscription_status, 'active') = 'active'
+               THEN subscription_ends_at + ($2)::interval
+               ELSE CURRENT_TIMESTAMP + ($2)::interval
+             END,
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $3`,
         [paymentRequest.plan_key, periodInterval, paymentRequest.merchant_id]

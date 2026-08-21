@@ -12,6 +12,8 @@ const PLACEHOLDER_NAMES = new Set([
   'عميل غير معروف',
   'عميل إنستغرام',
   'عميل فيسبوك',
+  'زائر',
+  'زائر فيسبوك',
   'facebook user',
   'instagram user',
   'عميل واتساب',
@@ -19,6 +21,7 @@ const PLACEHOLDER_NAMES = new Set([
   'عميل تجريبي',
   'unknown',
   'user',
+  'visitor',
 ]);
 
 export function isPlaceholderCustomerName(name: string | null | undefined): boolean {
@@ -26,6 +29,8 @@ export function isPlaceholderCustomerName(name: string | null | undefined): bool
   const normalized = name.trim().toLowerCase();
   if (!normalized) return true;
   if (PLACEHOLDER_NAMES.has(normalized)) return true;
+  // Arabic visitor / customer placeholders: «زائر · …» / «عميل فيسبوك»
+  if (normalized.startsWith('زائر') || normalized.startsWith('عميل')) return true;
   // IGSID / PSID mistaken as name
   if (/^\d{10,}$/.test(normalized)) return true;
   return false;
@@ -291,6 +296,70 @@ export async function ensureConversationCustomerName(params: {
         error: (error as Error).message,
       });
     }
+  }
+
+  return resolved;
+}
+
+/**
+ * Resolve Facebook Messenger display name using the official platform page token
+ * (not merchant facebook_pages — SaaS isolation).
+ */
+export async function resolvePlatformFacebookCustomerName(params: {
+  userId: string;
+  pageId: string;
+  accessToken: string;
+}): Promise<string | null> {
+  const { userId, pageId, accessToken } = params;
+  if (!userId || !accessToken) return null;
+  try {
+    return await fetchFacebookUserName(userId, accessToken, pageId || null);
+  } catch (error) {
+    logger.error('resolvePlatformFacebookCustomerName failed', error as Error, {
+      userId,
+      pageId,
+    });
+    return null;
+  }
+}
+
+/**
+ * Prefer an existing real name; otherwise fetch from Meta and persist on platform_conversations.
+ */
+export async function ensurePlatformConversationCustomerName(params: {
+  conversationId: string;
+  pageId: string;
+  userId: string;
+  accessToken: string;
+  currentName?: string | null;
+}): Promise<string> {
+  const current = (params.currentName || '').trim();
+  if (!isPlaceholderCustomerName(current)) {
+    return current;
+  }
+
+  const resolved = await resolvePlatformFacebookCustomerName({
+    userId: params.userId,
+    pageId: params.pageId,
+    accessToken: params.accessToken,
+  });
+
+  if (!resolved) {
+    return current || '';
+  }
+
+  try {
+    await pool.query(
+      `UPDATE platform_conversations
+       SET user_name = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2 AND page_id = $3`,
+      [resolved, params.conversationId, params.pageId]
+    );
+  } catch (error) {
+    logger.warn('Failed to persist platform customer name', {
+      conversationId: params.conversationId,
+      error: (error as Error).message,
+    });
   }
 
   return resolved;

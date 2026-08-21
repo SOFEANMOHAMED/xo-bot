@@ -29,6 +29,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import TrialBanner from './TrialBanner';
+import SubscriptionRenewalBanner from './SubscriptionRenewalBanner';
 import SubscriptionModal from './SubscriptionModal';
 import TrialExpiredBlock from './TrialExpiredBlock';
 import SupportTicketModal from './SupportTicketModal';
@@ -68,7 +69,7 @@ const Layout: React.FC<LayoutProps> = ({
     else navigate(appPath(view));
   };
   const { user } = useAuth();
-  const { requiresUpgrade, isTrialExpired } = useSubscriptionCheck();
+  const { isRenewalWarning, subscriptionEndsAt } = useSubscriptionCheck();
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -409,7 +410,7 @@ const Layout: React.FC<LayoutProps> = ({
         </div>
 
         {/* Trial Banner Sticky Below Header - Only show if user is on trial plan */}
-        {user && (user.subscriptionPlan === 'trial' || user.trialEndsAt) && (() => {
+        {user && (user.subscriptionPlan === 'trial' || user.trialEndsAt) && user.subscriptionPlan === 'trial' && (() => {
           // Calculate trial end date: use trialEndsAt from DB, or calculate from createdAt + 7 days
           let trialEndDate: Date | string | null = null;
           if (user.trialEndsAt) {
@@ -432,6 +433,19 @@ const Layout: React.FC<LayoutProps> = ({
             </div>
           );
         })()}
+
+        {/* Paid subscription renewal warning (last 5 days) */}
+        {user &&
+          user.subscriptionPlan !== 'trial' &&
+          isRenewalWarning &&
+          subscriptionEndsAt && (
+            <div className="fixed md:sticky top-16 md:top-0 right-0 left-0 w-full z-10">
+              <SubscriptionRenewalBanner
+                subscriptionEndsAt={subscriptionEndsAt}
+                onRenew={handleUpgrade}
+              />
+            </div>
+          )}
 
         <div className="md:p-8 p-4 pt-4 flex-1">
            <div className="max-w-6xl mx-auto">

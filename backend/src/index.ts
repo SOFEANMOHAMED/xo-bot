@@ -40,8 +40,13 @@ import { startSyncScheduler } from './services/syncScheduler.js';
 import { startAbandonedCheckoutScheduler } from './services/abandonedCheckout/index.js';
 import { startContentPublishingScheduler } from './services/contentPublishing/index.js';
 import { startLifecycleEmailsScheduler } from './services/lifecycleEmails/index.js';
+import { startSubscriptionExpiryScheduler } from './services/subscriptionExpiry/index.js';
 import contentPublishingRoutes from './routes/contentPublishing.routes.js';
 import { startInboxRealtime, stopInboxRealtime } from './services/inbox/inboxRealtime.js';
+import {
+  startPlatformInboxRealtime,
+  stopPlatformInboxRealtime,
+} from './services/inbox/platformInboxRealtime.js';
 import {
   ensureWhatsAppWebSessionsSchema,
   restoreConnectedWhatsAppSessions,
@@ -333,6 +338,7 @@ async function connectDatabaseWithRetry(maxAttempts = 15, delayMs = 3000): Promi
 async function shutdown(signal: string) {
   logger.info(`Received ${signal}, shutting down gracefully`);
   await stopInboxRealtime().catch(() => undefined);
+  await stopPlatformInboxRealtime().catch(() => undefined);
   await shutdownWhatsAppWebSessions().catch(() => undefined);
   if (server) {
     await new Promise<void>((resolve) => server!.close(() => resolve()));
@@ -376,6 +382,16 @@ async function startServer() {
       logger.error('Inbox realtime failed to start (inbox will fall back to polling)', error as Error);
     }
 
+    try {
+      await startPlatformInboxRealtime();
+      console.log('📥 Platform official-page inbox realtime ready');
+    } catch (error) {
+      logger.error(
+        'Platform inbox realtime failed to start (admin inbox will fall back to polling)',
+        error as Error
+      );
+    }
+
     server = app.listen(PORT, () => {
       logger.info(`Server started successfully`, {
         port: PORT,
@@ -410,6 +426,9 @@ async function startServer() {
 
       startLifecycleEmailsScheduler(15);
       console.log('📧 Lifecycle emails scheduler started (every 15 minutes)');
+
+      startSubscriptionExpiryScheduler(15);
+      console.log('⏳ Subscription expiry scheduler started (every 15 minutes)');
 
       void restoreConnectedWhatsAppSessions()
         .then(() => console.log('📱 WhatsApp Web sessions restore started'))

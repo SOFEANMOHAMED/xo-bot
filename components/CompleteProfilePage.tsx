@@ -7,6 +7,7 @@ import CountryCodeSelector from './CountryCodeSelector';
 import apiService from '../services/api';
 import AuthLayout from './AuthLayout';
 import BrandLogo from './BrandLogo';
+import { captureAndPersistAttribution, getAttributionForApi } from '../utils/marketingAttribution';
 
 interface CompleteProfilePageProps {
   onComplete: () => void;
@@ -25,8 +26,9 @@ const CompleteProfilePage: React.FC<CompleteProfilePageProps> = ({ onComplete })
   const { refreshUser } = useAuth();
 
   useEffect(() => {
+    const attr = captureAndPersistAttribution();
     const urlParams = new URLSearchParams(window.location.search);
-    const refCode = urlParams.get('ref');
+    const refCode = urlParams.get('ref') || attr.ref;
     if (refCode) {
       const cleanRefCode = refCode.toUpperCase().replace(/[^A-Z0-9\-_]/g, '');
       setFormData((prev) => ({ ...prev, referralCode: cleanRefCode }));
@@ -53,7 +55,8 @@ const CompleteProfilePage: React.FC<CompleteProfilePageProps> = ({ onComplete })
       await apiService.completeProfile({
         password: formData.password,
         phone: fullPhoneNumber,
-        referralCode: formData.referralCode.trim() || undefined
+        referralCode: formData.referralCode.trim() || undefined,
+        acquisition: getAttributionForApi()
       });
       await refreshUser();
       onComplete();

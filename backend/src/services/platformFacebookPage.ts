@@ -60,6 +60,10 @@ export async function ensurePlatformFacebookTables(): Promise<void> {
     ALTER TABLE platform_conversations
       ADD COLUMN IF NOT EXISTS last_human_response_at TIMESTAMP
   `);
+  await pool.query(`
+    ALTER TABLE platform_conversations
+      ADD COLUMN IF NOT EXISTS admin_last_read_at TIMESTAMP
+  `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS platform_messages (
