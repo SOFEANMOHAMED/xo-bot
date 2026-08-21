@@ -7,6 +7,7 @@ import { useAdminNotifications } from './AdminNotificationContext';
 import { logger } from '../../utils/logger';
 import { adminPath } from '../../routes/paths';
 import { AdminView } from '../../types';
+import AdminPushSetup from './AdminPushSetup';
 
 interface AdminNotification {
   id: string;
@@ -117,6 +118,8 @@ const AdminNotifications: React.FC = () => {
           </div>
         </div>
       </div>
+
+      <AdminPushSetup />
 
       {/* Notifications List */}
       {isLoading ? (

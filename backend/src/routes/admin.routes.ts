@@ -53,6 +53,13 @@ import {
   getOfficialInboxUnreadCount,
   streamOfficialInboxEvents,
 } from '../controllers/adminOfficialInbox.controller.js';
+import {
+  getAdminPushVapidPublicKey,
+  getAdminPushStatus,
+  subscribeAdminPush,
+  unsubscribeAdminPush,
+  sendAdminTestPush,
+} from '../controllers/adminPush.controller.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { requireAdminGate } from '../middleware/adminGate.js';
 import { enableFullAIMode, disableFullAIMode } from './admin/enable-full-ai.js';
@@ -123,6 +130,13 @@ router.post('/facebook/official/conversations/:id/mark-read', markOfficialInboxR
 router.get('/notifications', getAdminNotifications);
 router.put('/notifications/:id/read', markNotificationAsRead);
 router.put('/notifications/read-all', markAllNotificationsAsRead);
+
+// Super Admin Web Push (mobile / PWA)
+router.get('/notifications/push/vapid-public-key', getAdminPushVapidPublicKey);
+router.get('/notifications/push/status', getAdminPushStatus);
+router.post('/notifications/push/subscribe', subscribeAdminPush);
+router.delete('/notifications/push/unsubscribe', unsubscribeAdminPush);
+router.post('/notifications/push/test', sendAdminTestPush);
 
 // Email Broadcast
 router.get('/email/recipient-count', getEmailRecipientCount);

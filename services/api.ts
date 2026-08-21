@@ -2726,6 +2726,44 @@ class ApiService {
     });
   }
 
+  // Super Admin Web Push
+  async getAdminPushVapidPublicKey() {
+    return this.request<{ publicKey: string }>('/admin/notifications/push/vapid-public-key');
+  }
+
+  async getAdminPushStatus() {
+    return this.request<{ subscribed: boolean; configured: boolean }>(
+      '/admin/notifications/push/status'
+    );
+  }
+
+  async subscribeAdminPush(subscription: {
+    endpoint: string;
+    keys: { p256dh: string; auth: string };
+    expirationTime?: number | null;
+  }) {
+    return this.request<{ subscribed: boolean }>('/admin/notifications/push/subscribe', {
+      method: 'POST',
+      body: JSON.stringify({
+        subscription,
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+      }),
+    });
+  }
+
+  async unsubscribeAdminPush(endpoint: string) {
+    return this.request<{ removed: boolean }>('/admin/notifications/push/unsubscribe', {
+      method: 'DELETE',
+      body: JSON.stringify({ endpoint }),
+    });
+  }
+
+  async sendAdminTestPush() {
+    return this.request<{ sent: number; failed: number }>('/admin/notifications/push/test', {
+      method: 'POST',
+    });
+  }
+
   // CRM Methods
   async getCrmStats() {
     return this.request<{

@@ -1,10 +1,11 @@
 /**
  * Platform-level admin notifications (not merchant-scoped).
- * Used for official page inbox, billing alerts, etc.
+ * Persists to admin_notifications and fans out Web Push to owner/admin devices.
  */
 
 import pool from '../database/connection.js';
 import { logger } from '../utils/logger.js';
+import { sendPushToAdminsAsync } from './webPush.js';
 
 let tableEnsured = false;
 
@@ -25,11 +26,38 @@ export async function ensureAdminNotificationsTable(): Promise<void> {
   tableEnsured = true;
 }
 
+function fanOutAdminPush(params: {
+  notificationId?: string | null;
+  type: string;
+  title: string;
+  message: string;
+  data?: Record<string, unknown>;
+}): void {
+  const pushBody = params.message.replace(/\s+/g, ' ').trim().slice(0, 180);
+  const data = {
+    ...(params.data || {}),
+    kind: params.type,
+  };
+  sendPushToAdminsAsync({
+    title: params.title.trim().slice(0, 120),
+    body: pushBody,
+    type: params.type,
+    notificationId: params.notificationId || null,
+    tag:
+      params.type === 'official_inbox' && params.data?.conversationId
+        ? `official-inbox-${params.data.conversationId}`
+        : params.notificationId || `admin-${params.type}-${Date.now()}`,
+    data,
+  });
+}
+
 export async function createAdminNotification(params: {
   type: string;
   title: string;
   message: string;
   data?: Record<string, unknown>;
+  /** Skip Web Push (rare) */
+  skipPush?: boolean;
 }): Promise<string | null> {
   try {
     await ensureAdminNotificationsTable();
@@ -44,7 +72,19 @@ export async function createAdminNotification(params: {
         JSON.stringify(params.data || {}),
       ]
     );
-    return result.rows[0]?.id ? String(result.rows[0].id) : null;
+    const notificationId = result.rows[0]?.id ? String(result.rows[0].id) : null;
+
+    if (notificationId && !params.skipPush) {
+      fanOutAdminPush({
+        notificationId,
+        type: params.type,
+        title: params.title,
+        message: params.message,
+        data: params.data,
+      });
+    }
+
+    return notificationId;
   } catch (error) {
     logger.warn('Failed to create admin notification', {
       type: params.type,
@@ -56,7 +96,8 @@ export async function createAdminNotification(params: {
 
 /**
  * Notify admins of a new inbound Messenger message on the official page.
- * Coalesces to at most one unread notification per conversation within 90 seconds.
+ * Coalesces DB rows (max one unread per conversation / 90s) but still pushes
+ * so the Super Admin mobile app receives each new alert.
  */
 export async function notifyAdminOfficialInboxMessage(params: {
   conversationId: string;
@@ -67,6 +108,20 @@ export async function notifyAdminOfficialInboxMessage(params: {
   try {
     await ensureAdminNotificationsTable();
 
+    const displayName =
+      (params.userName && params.userName.trim()) ||
+      (params.userId ? `زائر · ${params.userId.slice(-6)}` : 'زائر');
+    const preview = (params.preview || '').trim().slice(0, 160) || 'رسالة جديدة';
+    const title = 'رسالة جديدة — صفحة XO Bot';
+    const message = `${displayName}: ${preview}`;
+    const data = {
+      conversationId: params.conversationId,
+      userId: params.userId,
+      userName: params.userName || null,
+      source: 'official_facebook_page',
+      kind: 'official_inbox',
+    };
+
     const recent = await pool.query(
       `SELECT id FROM admin_notifications
        WHERE type = 'official_inbox'
@@ -76,23 +131,30 @@ export async function notifyAdminOfficialInboxMessage(params: {
        LIMIT 1`,
       [params.conversationId]
     );
-    if (recent.rows.length > 0) return;
 
-    const displayName =
-      (params.userName && params.userName.trim()) ||
-      (params.userId ? `زائر · ${params.userId.slice(-6)}` : 'زائر');
-    const preview = (params.preview || '').trim().slice(0, 160) || 'رسالة جديدة';
+    if (recent.rows.length > 0) {
+      // Update preview on the existing row and still push to mobile
+      await pool.query(
+        `UPDATE admin_notifications
+         SET message = $2, data = $3::jsonb
+         WHERE id = $1`,
+        [recent.rows[0].id, message, JSON.stringify(data)]
+      );
+      fanOutAdminPush({
+        notificationId: String(recent.rows[0].id),
+        type: 'official_inbox',
+        title,
+        message,
+        data,
+      });
+      return;
+    }
 
     await createAdminNotification({
       type: 'official_inbox',
-      title: 'رسالة جديدة — صفحة XO Bot',
-      message: `${displayName}: ${preview}`,
-      data: {
-        conversationId: params.conversationId,
-        userId: params.userId,
-        userName: params.userName || null,
-        source: 'official_facebook_page',
-      },
+      title,
+      message,
+      data,
     });
   } catch (error) {
     logger.warn('Official inbox admin notify failed', {

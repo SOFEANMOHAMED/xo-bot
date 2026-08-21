@@ -3,6 +3,7 @@ import { AuthRequest } from '../middleware/auth.js';
 import { createError } from '../middleware/errorHandler.js';
 import pool from '../database/connection.js';
 import { getPlanConfig } from '../utils/planConfig.js';
+import { createAdminNotification } from '../services/adminNotifications.js';
 import path from 'path';
 import fs from 'fs';
 
@@ -189,27 +190,23 @@ export const submitPaymentRequest = async (
     );
     const request = insertResult.rows[0];
 
-    await pool.query(
-      `INSERT INTO admin_notifications (type, title, message, data, is_read)
-       VALUES ($1, $2, $3, $4, FALSE)`,
-      [
-        'subscription_payment',
-        `طلب اشتراك جديد — ${selectedMethod.name}`,
-        `طلب التاجر ${merchant.name || merchant.email} الاشتراك في خطة ${planConfig.name} بمبلغ ${amount}$ عبر ${selectedMethod.name}`,
-        JSON.stringify({
-          paymentRequestId: request.id,
-          merchantId: merchant.id,
-          merchantName: merchant.name,
-          merchantEmail: merchant.email,
-          planKey,
-          planName: planConfig.name,
-          amount,
-          method: methodId,
-          proofUrl,
-          createdAt: request.created_at
-        })
-      ]
-    );
+    await createAdminNotification({
+      type: 'subscription_payment',
+      title: `طلب اشتراك جديد — ${selectedMethod.name}`,
+      message: `طلب التاجر ${merchant.name || merchant.email} الاشتراك في خطة ${planConfig.name} بمبلغ ${amount}$ عبر ${selectedMethod.name}`,
+      data: {
+        paymentRequestId: request.id,
+        merchantId: merchant.id,
+        merchantName: merchant.name,
+        merchantEmail: merchant.email,
+        planKey,
+        planName: planConfig.name,
+        amount,
+        method: methodId,
+        proofUrl,
+        createdAt: request.created_at,
+      },
+    });
 
     res.json({
       success: true,

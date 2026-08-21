@@ -59,7 +59,11 @@ self.addEventListener('push', (event) => {
     badge: '/icons/icon-192.png',
     tag: payload.tag || 'xobot-default',
     renotify: true,
-    requireInteraction: payload.type === 'escalation' || payload.data?.kind === 'escalation',
+    requireInteraction:
+      payload.type === 'escalation' ||
+      payload.type === 'official_inbox' ||
+      payload.data?.kind === 'escalation' ||
+      payload.data?.kind === 'official_inbox',
     data: {
       url: payload.url || '/app/notifications',
       notificationId: payload.notificationId || null,

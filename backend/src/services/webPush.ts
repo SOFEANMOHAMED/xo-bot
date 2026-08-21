@@ -153,7 +153,38 @@ function resolveNotificationUrl(payload: PushPayload): string {
   if (kind === 'escalation') {
     return `${base}/app/notifications`;
   }
+  if (kind === 'official_inbox' || kind === 'subscription_payment' || kind === 'withdrawal_request') {
+    return resolveAdminDeepLink(kind);
+  }
   return `${base}/app/notifications`;
+}
+
+function getAdminBasePath(): string {
+  const fallback =
+    process.env.ADMIN_FRONTEND_BASE_PATH ||
+    process.env.VITE_ADMIN_BASE_PATH ||
+    '/ops-change-me-to-a-random-path';
+  let p = String(fallback).trim();
+  if (!p.startsWith('/')) p = `/${p}`;
+  return p.replace(/\/+$/, '') || '/ops-change-me-to-a-random-path';
+}
+
+function resolveAdminDeepLink(kind: string): string {
+  const base = (process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'https://xo-bot.com')
+    .split(',')[0]
+    .trim()
+    .replace(/\/$/, '');
+  const adminBase = getAdminBasePath();
+  if (kind === 'official_inbox') {
+    return `${base}${adminBase}/xo-page-inbox`;
+  }
+  if (kind === 'subscription_payment') {
+    return `${base}${adminBase}/payment-requests`;
+  }
+  if (kind === 'withdrawal_request') {
+    return `${base}${adminBase}/affiliate`;
+  }
+  return `${base}${adminBase}/notifications`;
 }
 
 /**
@@ -175,64 +206,114 @@ export async function sendPushToMerchant(
     await ensurePushSubscriptionsTable();
 
     const result = await pool.query(
-      `SELECT id, endpoint, p256dh, auth
+      `SELECT id, endpoint, p256dh, auth, merchant_id
        FROM push_subscriptions
        WHERE merchant_id = $1`,
       [merchantId]
     );
 
-    if (result.rows.length === 0) {
-      return { sent: 0, failed: 0 };
-    }
-
-    const body = JSON.stringify({
-      title: payload.title.trim().slice(0, 120),
-      body: (payload.body || '').trim().slice(0, 240),
-      url: resolveNotificationUrl(payload),
-      tag: payload.tag || payload.notificationId || `xobot-${Date.now()}`,
-      type: payload.type || 'info',
-      notificationId: payload.notificationId || null,
-      data: payload.data || {},
-    });
-
-    let sent = 0;
-    let failed = 0;
-
-    await Promise.all(
-      result.rows.map(async (row) => {
-        try {
-          await webpush.sendNotification(
-            {
-              endpoint: row.endpoint,
-              keys: { p256dh: row.p256dh, auth: row.auth },
-            },
-            body,
-            { TTL: 60 * 60 * 12, urgency: 'high' }
-          );
-          sent++;
-        } catch (err: any) {
-          failed++;
-          const statusCode = err?.statusCode || err?.status;
-          // Gone / expired subscription — remove only for this merchant
-          if (statusCode === 404 || statusCode === 410) {
-            await pool.query(
-              `DELETE FROM push_subscriptions WHERE id = $1 AND merchant_id = $2`,
-              [row.id, merchantId]
-            );
-          } else {
-            logger.warn('Web Push send failed', {
-              merchantId,
-              statusCode,
-              message: err?.message,
-            });
-          }
-        }
-      })
-    );
-
-    return { sent, failed };
+    return await deliverPushRows(result.rows, payload);
   } catch (error) {
     logger.error('sendPushToMerchant failed', error as Error, { merchantId });
+    return { sent: 0, failed: 0 };
+  }
+}
+
+type PushRow = {
+  id: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  merchant_id: string;
+};
+
+async function deliverPushRows(
+  rows: PushRow[],
+  payload: PushPayload
+): Promise<{ sent: number; failed: number }> {
+  if (rows.length === 0) {
+    return { sent: 0, failed: 0 };
+  }
+
+  const body = JSON.stringify({
+    title: payload.title.trim().slice(0, 120),
+    body: (payload.body || '').trim().slice(0, 240),
+    url: resolveNotificationUrl(payload),
+    tag: payload.tag || payload.notificationId || `xobot-${Date.now()}`,
+    type: payload.type || 'info',
+    notificationId: payload.notificationId || null,
+    data: payload.data || {},
+  });
+
+  let sent = 0;
+  let failed = 0;
+
+  await Promise.all(
+    rows.map(async (row) => {
+      try {
+        await webpush.sendNotification(
+          {
+            endpoint: row.endpoint,
+            keys: { p256dh: row.p256dh, auth: row.auth },
+          },
+          body,
+          { TTL: 60 * 60 * 12, urgency: 'high' }
+        );
+        sent++;
+      } catch (err: any) {
+        failed++;
+        const statusCode = err?.statusCode || err?.status;
+        // Gone / expired subscription — remove only for this merchant
+        if (statusCode === 404 || statusCode === 410) {
+          await pool.query(
+            `DELETE FROM push_subscriptions WHERE id = $1 AND merchant_id = $2`,
+            [row.id, row.merchant_id]
+          );
+        } else {
+          logger.warn('Web Push send failed', {
+            merchantId: row.merchant_id,
+            statusCode,
+            message: err?.message,
+          });
+        }
+      }
+    })
+  );
+
+  return { sent, failed };
+}
+
+/**
+ * Fan-out Web Push to every device belonging to owner/admin accounts.
+ * Used for platform alerts (official inbox, payments, withdrawals).
+ */
+export async function sendPushToAdmins(
+  payload: PushPayload
+): Promise<{ sent: number; failed: number }> {
+  if (!payload.title?.trim()) {
+    return { sent: 0, failed: 0 };
+  }
+  if (!ensureVapidConfigured()) {
+    return { sent: 0, failed: 0 };
+  }
+
+  try {
+    await ensurePushSubscriptionsTable();
+
+    const result = await pool.query(
+      `SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth, ps.merchant_id
+       FROM push_subscriptions ps
+       INNER JOIN merchants m ON m.id = ps.merchant_id
+       WHERE m.role IN ('owner', 'admin')`
+    );
+
+    const delivery = await deliverPushRows(result.rows, payload);
+    if (delivery.sent === 0 && result.rows.length === 0) {
+      logger.info('Admin Web Push skipped — no admin device subscriptions');
+    }
+    return delivery;
+  } catch (error) {
+    logger.error('sendPushToAdmins failed', error as Error);
     return { sent: 0, failed: 0 };
   }
 }
@@ -241,5 +322,11 @@ export async function sendPushToMerchant(
 export function sendPushToMerchantAsync(merchantId: string, payload: PushPayload): void {
   void sendPushToMerchant(merchantId, payload).catch((err) => {
     logger.error('sendPushToMerchantAsync failed', err as Error, { merchantId });
+  });
+}
+
+export function sendPushToAdminsAsync(payload: PushPayload): void {
+  void sendPushToAdmins(payload).catch((err) => {
+    logger.error('sendPushToAdminsAsync failed', err as Error);
   });
 }

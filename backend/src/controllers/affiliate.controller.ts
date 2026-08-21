@@ -4,6 +4,7 @@ import { createError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
 import crypto from 'crypto';
 import { recordAffiliateClick } from '../utils/affiliateReferral.js';
+import { createAdminNotification } from '../services/adminNotifications.js';
 
 /**
  * Generate or get referral code for a user
@@ -369,24 +370,19 @@ export const requestWithdrawal = async (
       )
     `);
 
-    // Send notification to admin
-    await pool.query(
-      `INSERT INTO admin_notifications (type, title, message, data, is_read)
-       VALUES ($1, $2, $3, $4, FALSE)`,
-      [
-        'withdrawal_request',
-        'طلب سحب أرباح جديد',
-        `طلب المسوق ${merchant.name || merchant.email} سحب مبلغ ${amount}$`,
-        JSON.stringify({
-          withdrawalId: withdrawal.id,
-          merchantId: merchant.id,
-          merchantName: merchant.name,
-          merchantEmail: merchant.email,
-          amount: amount,
-          createdAt: withdrawal.created_at
-        })
-      ]
-    );
+    await createAdminNotification({
+      type: 'withdrawal_request',
+      title: 'طلب سحب أرباح جديد',
+      message: `طلب المسوق ${merchant.name || merchant.email} سحب مبلغ ${amount}$`,
+      data: {
+        withdrawalId: withdrawal.id,
+        merchantId: merchant.id,
+        merchantName: merchant.name,
+        merchantEmail: merchant.email,
+        amount: amount,
+        createdAt: withdrawal.created_at,
+      },
+    });
 
     res.json({
       success: true,
