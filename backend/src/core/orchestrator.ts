@@ -1,6 +1,6 @@
 /**
  * Orchestrator - Main entry point for message processing
- * Routes messages to appropriate pipeline and coordinates all components
+ * Routes all merchant bot traffic through SalesGPT (Full AI).
  */
 
 import type {
@@ -9,14 +9,10 @@ import type {
   Message,
   ConversationState,
   MerchantConfig,
-  Language,
-  Intent,
-  Stage
+  Language
 } from './types.js';
-import { routeToPipeline, type RoutingDecision } from './pipeline-router.js';
 import { handleError, createBotError, logError } from './error-handler.js';
-import { processSmartPipeline } from '../pipelines/smart-pipeline/index.js';
-import { processSimplePipeline } from '../pipelines/simple-pipeline/index.js';
+import { processWithSalesGPT } from '../services/salesgpt/index.js';
 import { resetAICallsCount, getAICallsCount } from '../ai/gemini-client.js';
 import { logger } from '../utils/logger.js';
 
@@ -37,12 +33,7 @@ export interface OrchestratorResult {
 // ==================== MAIN ORCHESTRATOR ====================
 
 /**
- * Process incoming message through orchestrator
- * 
- * Flow:
- * 1. Route to appropriate pipeline (simple or smart)
- * 2. Process through selected pipeline
- * 3. Return response with metadata
+ * Process incoming message through SalesGPT pipeline.
  */
 export const processMessage = async (
   input: OrchestratorInput
@@ -64,139 +55,52 @@ export const processMessage = async (
   });
 
   try {
-    // ==================== STEP 1: Check Full AI Mode ====================
-    const useFullAIMode = process.env.ENABLE_FULL_AI_MODE === 'true' || merchantConfig.use_full_ai_mode || false;
-    
-    // ==================== STEP 2: Route to Pipeline ====================
-    const routingDecision: RoutingDecision = routeToPipeline(
-      message.messageText,
-      conversationState,
+    const salesResult = await processWithSalesGPT({
+      merchantId: message.merchantId,
+      messageText: message.messageText,
       recentMessages,
-      useFullAIMode  // ← Pass Full AI flag
-    );
-
-    console.log('🔀 Routing decision:', {
-      useFullAIMode,
-      pipeline: routingDecision.pipeline,
-      reason: routingDecision.reason
+      conversationState,
+      merchantConfig,
+      platform: message.platform
     });
 
-    logger.debug('Routing decision', {
-      pipeline: routingDecision.pipeline,
-      reason: routingDecision.reason,
-      confidence: routingDecision.confidence
-    });
-
-    // ==================== STEP 2: Process Through Pipeline ====================
-    let replyText: string;
-    let intent: Intent = routingDecision.suggestedIntent || 'other';
-    let stage: Stage = routingDecision.suggestedStage || 'discover';
-    let updatedState = conversationState;
-    let usedFallback = false;
-    let language: Language = 'arabic';
-    let next_action: string | undefined = undefined;
-
-    if (routingDecision.pipeline === 'simple') {
-      // Try simple pipeline first
-      const simpleResult = processSimplePipeline({
-        merchantId: message.merchantId,
-        messageText: message.messageText,
-        recentMessages,
-        conversationState,
-        merchantConfig
-      });
-
-      language = simpleResult.language;
-
-      if (!simpleResult.shouldContinueToSmart) {
-        // Simple pipeline handled it
-        replyText = simpleResult.replyText;
-        intent = simpleResult.intent;
-        stage = simpleResult.stage;
-
-        logger.info('Simple pipeline completed', {
-          merchantId: message.merchantId,
-          intent,
-          processingTimeMs: Date.now() - startTime
-        });
-      } else {
-        // Fall through to smart pipeline
-        const smartResult = await processSmartPipeline({
-          merchantId: message.merchantId,
-          messageText: message.messageText,
-          recentMessages,
-          conversationState,
-          merchantConfig,
-          platform: message.platform
-        });
-
-        replyText = smartResult.replyText;
-        intent = smartResult.intent;
-        stage = smartResult.stage;
-        updatedState = smartResult.updatedState;
-        language = smartResult.language;
-        next_action = smartResult.next_action;  // ✅ Capture next_action
-      }
-    } else {
-      // Direct to smart pipeline
-      const smartResult = await processSmartPipeline({
-        merchantId: message.merchantId,
-        messageText: message.messageText,
-        recentMessages,
-        conversationState,
-        merchantConfig,
-        platform: message.platform
-      });
-
-      replyText = smartResult.replyText;
-      intent = smartResult.intent;
-      stage = smartResult.stage;
-      updatedState = smartResult.updatedState;
-      language = smartResult.language;
-      next_action = smartResult.next_action;  // ✅ Capture next_action
-    }
-
-    // ==================== STEP 3: Build Response ====================
     const processingTime = Date.now() - startTime;
     const aiCallsCount = getAICallsCount();
 
     const response: BotResponse = {
-      replyText,
+      replyText: salesResult.replyText,
       meta: {
-        conversationId: '', // Set by caller
-        intent,
-        stage,
-        pipelineUsed: routingDecision.pipeline,
+        conversationId: '',
+        intent: salesResult.intent,
+        stage: salesResult.stage,
+        pipelineUsed: 'smart',
         aiCallsCount,
-        usedFallback,
+        usedFallback: false,
         processingTimeMs: processingTime,
-        next_action  // ✅ Pass next_action to response
+        next_action: salesResult.next_action
       }
     };
 
     logger.info('Orchestrator: Message processed', {
       merchantId: message.merchantId,
-      intent,
-      stage,
-      pipelineUsed: routingDecision.pipeline,
+      intent: salesResult.intent,
+      stage: salesResult.stage,
+      pipelineUsed: 'smart',
       aiCallsCount,
       processingTimeMs: processingTime
     });
 
     return {
       response,
-      updatedState
+      updatedState: salesResult.updatedState
     };
-
   } catch (error) {
-    // ==================== ERROR HANDLING ====================
     const botError = createBotError(error, {
       merchantId: message.merchantId,
       platform: message.platform
     });
     logError(botError);
 
-    // Detect language for error message
     const isArabic = /[\u0600-\u06FF]/.test(message.messageText);
     const language: Language = isArabic ? 'arabic' : 'english';
 
@@ -224,18 +128,6 @@ export const processMessage = async (
   }
 };
 
-// ==================== UTILITY FUNCTIONS ====================
-
-/**
- * Quick greeting check (for fast path)
- */
-export const isQuickGreeting = (messageText: string): boolean => {
-  const patterns = [
-    /^(السلام|مرحبا|أهلا|سلام|هلا|hello|hi|hey)[\s!،,.]*$/i
-  ];
-  return patterns.some(p => p.test(messageText.trim()));
-};
-
 /**
  * Get default merchant config
  */
@@ -245,11 +137,9 @@ export const getDefaultMerchantConfig = (merchantId: string): MerchantConfig => 
   storeCurrency: 'USD',
   persona: 'friendly',
   botLanguage: 'auto',
-  
+  use_full_ai_mode: true,
 });
 
 // ==================== EXPORTS ====================
 
-export { routeToPipeline } from './pipeline-router.js';
 export { handleError, createBotError } from './error-handler.js';
-export type { RoutingDecision } from './pipeline-router.js';

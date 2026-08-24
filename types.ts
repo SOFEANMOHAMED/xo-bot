@@ -42,6 +42,8 @@ export interface OrderItem {
   quantity: number;
   price: number;
   currency?: string;
+  color?: string | null;
+  size?: string | null;
 }
 
 export type OrderStatus = 'pending' | 'paid' | 'fulfilled' | 'cancelled';
@@ -53,6 +55,7 @@ export interface Order {
   customerEmail: string;
   customerPhone?: string;
   customerAddress?: string;
+  deliveryTime?: string | null;
   total: number;
   currency: string;
   status: OrderStatus;
@@ -244,6 +247,7 @@ export enum AdminView {
   PAYMENT_REQUESTS = 'PAYMENT_REQUESTS',
   OFFICIAL_PAGE_INBOX = 'OFFICIAL_PAGE_INBOX',
   OFFICIAL_PAGE_COMMENTS = 'OFFICIAL_PAGE_COMMENTS',
+  CONTENT_PUBLISHING = 'CONTENT_PUBLISHING',
   ACQUISITION = 'ACQUISITION'
 }
 

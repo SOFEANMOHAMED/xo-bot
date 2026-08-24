@@ -1,42 +1,9 @@
 /**
- * Pipelines Module - Export all pipelines
+ * Pipelines Module - SalesGPT pipeline export
  */
 
-// ==================== SMART PIPELINE ====================
 export {
   processSmartPipeline,
-  detectIntent,
-  buildContext,
-  updateContext
+  type SmartPipelineInput,
+  type SmartPipelineResult
 } from './smart-pipeline/index.js';
-
-export type {
-  SmartPipelineInput,
-  SmartPipelineResult
-} from './smart-pipeline/index.js';
-
-export type {
-  IntentDetectionResult,
-  DetectIntentParams
-} from './smart-pipeline/intent-detector.js';
-
-export type {
-  ConversationContext,
-  ContextUpdateInput
-} from './smart-pipeline/context-manager.js';
-
-// ==================== SIMPLE PIPELINE ====================
-export {
-  processSimplePipeline,
-  canHandleSimply,
-  handleGreeting,
-  isPureGreeting,
-  handleConfirmation,
-  isSimpleConfirmation,
-  isThanks
-} from './simple-pipeline/index.js';
-
-export type {
-  SimplePipelineInput,
-  SimplePipelineResult
-} from './simple-pipeline/index.js';

@@ -1,6 +1,5 @@
 /**
- * Channel Adapters
- * Export all channel adapters
+ * Channel Adapters + shared bot-turn helpers
  */
 
 export { ChannelAdapter, ParsedIncomingEvent, SendMessageParams, TypingIndicatorParams } from './channel.interface.js';
@@ -17,6 +16,20 @@ export {
   type DeliverHumanLikeReplyParams,
   type DeliverHumanLikeReplyResult
 } from './replyDelivery.js';
+export {
+  extractImageUrl,
+  extractOrderData,
+  parseBotReplyTags,
+  isCompleteOrderPayload,
+  sanitizeUUID,
+  isValidUUID,
+  resetConversationAfterOrder,
+  persistOrderIfPresent,
+  runSalesBotTurn,
+  type PersistOrderIfPresentParams,
+  type RunSalesBotTurnParams,
+  type RunSalesBotTurnResult,
+} from './botTurn.js';
 
 import { facebookAdapter } from './facebook.adapter.js';
 import { telegramAdapter } from './telegram.adapter.js';

@@ -1,39 +1,9 @@
 /**
- * Orders Module - Order validation and building
+ * Orders Module - Order persistence
  */
 
-// ==================== ORDER VALIDATOR ====================
-export {
-  validateOrder,
-  hasAllMandatoryFields,
-  getNextMissingField,
-  extractName,
-  extractPhone,
-  extractAddress,
-  extractDeliveryTime,
-  extractCity
-} from './order-validator.js';
+export { generateOrderId } from './order-builder.js';
 
-export type {
-  ValidationResult,
-  OrderFieldLabels
-} from './order-validator.js';
-
-// ==================== ORDER BUILDER ====================
-export {
-  buildOrderData,
-  generateOrderDataTag,
-  generateConfirmationMessage,
-  generateOrderRequestMessage,
-  generateOrderSummary,
-  calculateOrderTotal,
-  isOrderComplete,
-  generateOrderId
-} from './order-builder.js';
-
-export type { BuildOrderInput } from './order-builder.js';
-
-// ==================== ORDER STORAGE ====================
 export {
   createOrder,
   getOrderById,

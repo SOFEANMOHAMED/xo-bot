@@ -5,6 +5,7 @@ import { Package, Calendar, User, DollarSign, ShoppingCart, CheckCircle, XCircle
 import { useDebounce } from '../hooks/useDebounce';
 import Pagination from './Pagination';
 import { getOrderSourceBadgeClass, getOrderSourceLabel } from '../utils/orderSource';
+import { formatOrderNotesForMerchant, formatVariantCaption } from '../utils/orderNotes';
 import { formatCurrency as formatCurrencyAmount } from '../utils/locale';
 
 interface OrderManagerProps {
@@ -479,6 +480,12 @@ const OrderManager: React.FC<OrderManagerProps> = ({ orders, storeCurrency, onUp
                       <p className="text-sm font-medium text-gray-900 dark:text-white">{selectedOrder.customerAddress}</p>
                     </div>
                   )}
+                  {selectedOrder.deliveryTime && (
+                    <div>
+                      <span className="text-xs text-gray-500 dark:text-gray-400">وقت التوصيل:</span>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">{selectedOrder.deliveryTime}</p>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -507,10 +514,17 @@ const OrderManager: React.FC<OrderManagerProps> = ({ orders, storeCurrency, onUp
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                      {selectedOrder.items.map((item, index) => (
+                      {selectedOrder.items.map((item, index) => {
+                        const variant = formatVariantCaption(item.color, item.size);
+                        return (
                         <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                           <td className="px-4 py-3">
                             <p className="text-sm font-medium text-gray-900 dark:text-white">{item.productName}</p>
+                            {variant ? (
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                {variant}
+                              </p>
+                            ) : null}
                             {item.productId && (
                               <p className="text-xs text-gray-500 dark:text-gray-400 font-mono mt-1">ID: {item.productId.substring(0, 8)}...</p>
                             )}
@@ -531,7 +545,8 @@ const OrderManager: React.FC<OrderManagerProps> = ({ orders, storeCurrency, onUp
                             </span>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                     <tfoot className="bg-gray-50 dark:bg-gray-900/50">
                       <tr>
@@ -593,14 +608,18 @@ const OrderManager: React.FC<OrderManagerProps> = ({ orders, storeCurrency, onUp
                 </div>
               </div>
 
-              {selectedOrder.notes && (
-                <div>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">ملاحظات:</span>
-                  <p className="text-sm text-gray-900 dark:text-white mt-1 bg-gray-50 dark:bg-gray-700/50 p-3 rounded-lg">
-                    {selectedOrder.notes}
-                  </p>
-                </div>
-              )}
+              {(() => {
+                const displayNotes = formatOrderNotesForMerchant(selectedOrder.notes);
+                if (!displayNotes) return null;
+                return (
+                  <div>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">ملاحظات:</span>
+                    <p className="text-sm text-gray-900 dark:text-white mt-1 bg-gray-50 dark:bg-gray-700/50 p-3 rounded-lg whitespace-pre-line">
+                      {displayNotes}
+                    </p>
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="mt-6 flex justify-end">

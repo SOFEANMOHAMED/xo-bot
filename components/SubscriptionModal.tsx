@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import {
   X, CheckCircle, Zap, Star, Briefcase, Loader2,
-  Copy, Upload, ArrowRight, Wallet
+  Copy, Upload, ArrowRight, Check
 } from 'lucide-react';
 import { apiService } from '../services/api';
 import { logger } from '../utils/logger';
+import { PaymentMethodLogo, paymentMethodHint } from './PaymentMethodLogo';
 
 interface SubscriptionModalProps {
   onClose: () => void;
@@ -212,7 +213,7 @@ const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ onClose }) => {
 
   const headerSubtitle =
     step === 'plans' ? 'اختر الخطة المناسبة ثم أكمل التحويل.' :
-    step === 'payment' ? `خطة ${selectedPlan?.name} — ${selectedPlan?.priceLabel} / شهرياً` :
+    step === 'payment' ? `خطة ${selectedPlan?.name} — ${selectedPlan?.priceLabel} / ${selectedPlan?.period}` :
     'بانتظار تأكيد الدفع من الإدارة';
 
   return (
@@ -323,9 +324,10 @@ const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ onClose }) => {
               </div>
             ) : methods.length > 0 ? (
               <div className="max-w-xl mx-auto space-y-6">
-                {methods.length > 1 && (
-                  <div className="grid grid-cols-2 gap-3">
-                    {methods.map((method) => (
+                <div className={`grid gap-3 ${methods.length > 1 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+                  {methods.map((method) => {
+                    const selected = selectedMethod?.id === method.id;
+                    return (
                       <button
                         key={method.id}
                         type="button"
@@ -335,27 +337,43 @@ const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ onClose }) => {
                           setProofPreview(null);
                           setError(null);
                         }}
-                        className={`p-4 rounded-2xl border text-sm font-bold transition-all ${
-                          selectedMethod?.id === method.id
-                            ? 'border-brand bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300 ring-1 ring-brand'
-                            : 'border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:border-brand-300'
+                        className={`relative flex items-center gap-4 p-4 rounded-2xl border text-right transition-all ${
+                          selected
+                            ? 'border-brand bg-brand-50 dark:bg-brand-900/25 ring-2 ring-brand/30 shadow-sm'
+                            : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 hover:border-brand-300 hover:shadow-sm'
                         }`}
                       >
-                        {method.name}
-                        {method.network ? (
-                          <span className="block text-xs font-normal mt-1 opacity-70">{method.network}</span>
-                        ) : null}
+                        <PaymentMethodLogo methodId={method.id} className="w-14 h-14 shrink-0 rounded-[14px] shadow-sm" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-base font-bold text-gray-900 dark:text-white">
+                            {method.name}
+                          </span>
+                          <span className="block text-xs font-medium text-gray-500 dark:text-gray-400 mt-0.5">
+                            {paymentMethodHint(method.id, method.network)}
+                          </span>
+                        </span>
+                        <span
+                          className={`shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center ${
+                            selected
+                              ? 'border-brand bg-brand text-white'
+                              : 'border-gray-300 dark:border-gray-600'
+                          }`}
+                          aria-hidden
+                        >
+                          {selected ? <Check size={14} strokeWidth={3} /> : null}
+                        </span>
                       </button>
-                    ))}
-                  </div>
-                )}
+                    );
+                  })}
+                </div>
 
                 {selectedMethod ? (
                   <div className="rounded-2xl border border-gray-200 dark:border-gray-700 p-6 bg-gray-50 dark:bg-gray-800/50 space-y-5">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-                        <Wallet size={20} />
-                      </div>
+                      <PaymentMethodLogo
+                        methodId={selectedMethod.id}
+                        className="w-12 h-12 shrink-0 rounded-xl shadow-sm"
+                      />
                       <div>
                         <h3 className="font-bold text-gray-900 dark:text-white">{selectedMethod.name}</h3>
                         <p className="text-xs text-gray-500">
@@ -392,13 +410,15 @@ const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ onClose }) => {
                       </div>
                     </div>
 
-                    <div className="flex justify-center">
-                      <img
-                        src={selectedMethod.qrImageUrl}
-                        alt={`QR ${selectedMethod.name}`}
-                        className="w-48 h-48 object-contain rounded-2xl border border-gray-200 dark:border-gray-600 bg-white p-3"
-                      />
-                    </div>
+                    {selectedMethod.qrImageUrl ? (
+                      <div className="flex justify-center">
+                        <img
+                          src={selectedMethod.qrImageUrl}
+                          alt={`QR ${selectedMethod.name}`}
+                          className="w-48 h-48 object-contain rounded-2xl border border-gray-200 dark:border-gray-600 bg-white p-3"
+                        />
+                      </div>
+                    ) : null}
 
                     <div>
                       <label className="block text-xs font-semibold text-gray-500 mb-2">إثبات الدفع (صورة أو PDF)</label>

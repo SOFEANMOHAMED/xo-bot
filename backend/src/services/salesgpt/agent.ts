@@ -9,6 +9,10 @@
 import { generateJSON, trackAICall } from '../../ai/gemini-client.js';
 import { getStageDescription, mapStageIdToStage } from './stages.js';
 import {
+    FRESH_CONVERSATION_STAGE_ID,
+    normalizeSalesGPTStageId,
+} from './conversationStateSync.js';
+import {
     buildSalesGPTSystemPrompt,
     getSalesGPTPersonaMeta,
 } from './prompts.js';
@@ -27,7 +31,8 @@ import type {
     Language,
     MerchantConfig,
     Intent,
-    Stage
+    Stage,
+    CartItem,
 } from '../../core/types.js';
 import { logger } from '../../utils/logger.js';
 import { getCurrencyDisplayName } from '../../utils/currencyDisplayName.js';
@@ -38,7 +43,11 @@ import {
     sanitizeCollectedText,
     sanitizeCollectedSnapshot,
     resolveOrderNextAction,
-    sanitizeProductDescriptionForPrompt
+    sanitizeProductDescriptionForPrompt,
+    customerAffirmsOrder,
+    customerDeclinesMoreItems,
+    botReplyAsksToAddMore,
+    isPrematureCheckoutCopy,
 } from './orderConfirmationPolicy.js';
 import {
     hasCustomerRequestBlock,
@@ -47,6 +56,20 @@ import {
 } from './customerRequest.js';
 import { formatColorOptionsForDisplay } from '../../catalog/color-options.js';
 import { extractColorFromUserText, isColorInProductCatalog } from './orderColorPolicy.js';
+import {
+    formatCartSummary,
+    getCartItems,
+    coerceSafeQuantity,
+    messageSignalsBothProducts,
+    isCheckoutReady,
+} from './conversationCart.js';
+import {
+    browseMediaCaptionFallback,
+    isExplicitPhotoRequest,
+    nextActionForBrowseTurn,
+    resolveTurnIntent,
+    type TurnIntent,
+} from './turnIntent.js';
 
 /** Values the sales-response model may return in JSON `next_action` */
 const SALESGPT_MODEL_NEXT_ACTIONS = new Set([
@@ -79,6 +102,7 @@ const NEXT_ACTION_TO_STAGE_ID: Record<string, string> = {
   collect_info: '7',
   await_confirmation: '8',
   confirm_order: '8',
+  add_to_cart: '4',
   end_conversation: '9'
 };
 
@@ -147,6 +171,10 @@ export interface SalesGPTState {
     };
     /** Persisted from ConversationState — ready for customer yes */
     awaitingOrderConfirmation?: boolean;
+    /** Read-only cart summary for prompts (code owns cart writes). */
+    cartSummary?: string;
+    cartItemCount?: number;
+    cartItems?: CartItem[];
 }
 
 export interface SalesGPTResult {
@@ -176,38 +204,6 @@ export interface CatalogAwareness {
     isExploring?: boolean;
 }
 
-// ==================== HELPER: Extract keywords ====================
-
-const extractProductKeywords = (messageText: string): string[] => {
-    if (!messageText || messageText.trim().length === 0) return [];
-    const text = messageText.trim().toLowerCase();
-
-    const stopWords = [
-        'بدي', 'ابي', 'اريد', 'ابغى', 'عاوز', 'اشتري', 'احجز', 'اطلب',
-        'شو', 'ايش', 'كم', 'وين', 'متى', 'كيف', 'هل',
-        'سعر', 'ثمن', 'تكلفة', 'قيمة',
-        'عندكم', 'عندك', 'لديكم', 'معكم', 'موجود', 'متوفر',
-        'السلام', 'عليكم', 'مرحبا', 'اهلا', 'هلا', 'صباح', 'مساء',
-        'من', 'الى', 'في', 'على', 'عن', 'مع', 'هذا', 'هذه', 'ذلك',
-        'نعم', 'اي', 'اه', 'طيب', 'تمام', 'ماشي',
-        'لا', 'لأ', 'مو', 'ما', 'مش',
-        'صورة', 'صور', 'وريني', 'فرجيني', 'ارني',
-        'want', 'need', 'buy', 'purchase', 'order', 'get',
-        'what', 'how', 'where', 'when', 'which',
-        'price', 'cost', 'available', 'have', 'do', 'you',
-        'the', 'a', 'an', 'is', 'are',
-        'yes', 'no', 'ok', 'okay',
-        'image', 'picture', 'photo', 'show', 'see'
-    ];
-
-    const words = text
-        .replace(/[.,;:!?()]/g, ' ')
-        .split(/\s+/)
-        .filter(w => w.length >= 2 && !stopWords.includes(w) && !/^\d+$/.test(w));
-
-    return [...new Set(words)].slice(0, 5);
-};
-
 // ==================== SALESGPT AGENT CLASS ====================
 
 export class SalesGPTAgent {
@@ -218,6 +214,7 @@ export class SalesGPTAgent {
     private currentProductsHaveColors: boolean = false;
     private currentProductsHaveSizes: boolean = false;
     private currentProductColors: string[] = [];
+    private focusedProduct: Product | null = null;
 
     constructor(config: SalesGPTConfig) {
         this.config = config;
@@ -241,6 +238,9 @@ export class SalesGPTAgent {
         this.state.conversationHistory = [];
         this.state.collectedInfo = {};
         this.aiCallsCount = 0;
+        this.state.cartItems = [];
+        this.state.cartItemCount = 0;
+        this.state.cartSummary = '';
     }
 
     /**
@@ -276,29 +276,22 @@ export class SalesGPTAgent {
 
         this.state.awaitingOrderConfirmation = !!conversationState.awaiting_order_confirmation;
 
-        // Restore SalesGPT numeric stage (1–9) when persisted — avoids mapping close→6 only
-        const persisted = conversationState.salesgpt_stage_id?.trim();
-        if (persisted && /^[1-9]$/.test(persisted)) {
-            this.state.conversationStageId = persisted;
-            this.state.currentConversationStage = getStageDescription(
-                persisted,
-                this.config.language
-            );
-        } else if (conversationState.current_stage) {
-            const stageMap: Record<string, string> = {
-                discover: '2',
-                offer: '4',
-                objection: '5',
-                close: '6',
-                handoff: '9',
-                clarify: '2'
-            };
-            this.state.conversationStageId = stageMap[conversationState.current_stage] || '1';
-            this.state.currentConversationStage = getStageDescription(
-                this.state.conversationStageId,
-                this.config.language
-            );
-        }
+        const cartItems = getCartItems(conversationState);
+        this.state.cartItems = cartItems;
+        this.state.cartItemCount = cartItems.length;
+        this.state.cartSummary =
+            cartItems.length > 0
+                ? formatCartSummary(cartItems, this.config.language)
+                : '';
+
+        // Restore SalesGPT numeric stage (1–9) — sole source of truth for stage position.
+        const persisted = normalizeSalesGPTStageId(conversationState.salesgpt_stage_id);
+        const stageId = persisted || FRESH_CONVERSATION_STAGE_ID;
+        this.state.conversationStageId = stageId;
+        this.state.currentConversationStage = getStageDescription(
+            stageId,
+            this.config.language
+        );
     }
 
     // ==================== HUMAN STEP ====================
@@ -358,9 +351,10 @@ export class SalesGPTAgent {
             products.find((p) => p.colors && p.colors.length > 0)?.colors ||
             products[0]?.colors ||
             [];
+        this.focusedProduct = products[0] || null;
 
         // Snapshot completeness BEFORE this turn's AI extraction merges new fields.
-        const fieldsWereCompleteBeforeTurn = this.getOrderFieldCompleteness().complete;
+        const fieldsWereCompleteBeforeTurn = this.getOrderFieldCompleteness(this.focusedProduct).complete;
         const wasAwaitingConfirmation =
             previousStageId === '8' ||
             !!this.state.awaitingOrderConfirmation;
@@ -394,25 +388,63 @@ export class SalesGPTAgent {
             });
         }
 
-        // Step 4.1: Image safety — honor send_image when the model asked for a photo
-        // OR the customer answered a color after we offered to send one.
+        // Step 4.1: Deterministic TurnIntent — browse_media / product_qa before order rails.
         const colorReply = this.isCatalogOrShortColorReply(messageText);
         const offeredPhoto = this.lastAssistantOfferedPhoto() || this.previousUserAskedForPhoto();
         const askedColorChoice = this.lastAssistantAskedColorChoice();
         const preferSendImage = colorReply && offeredPhoto;
-        const allowSendImage =
-            customerRequest?.wantsPhoto === true || preferSendImage;
-        if (nextAction === 'send_image' && !allowSendImage) {
-            nextAction = 'present_product';
-            intent = 'product_query';
-            logger.debug('SalesGPT: ignored send_image without photo intent', {
-                aiNextAction,
-                messageLength: messageText.length,
-            });
-        }
-        if (preferSendImage) {
-            nextAction = 'send_image';
-            intent = 'product_query';
+        const variantAfterPhotoOffer =
+            preferSendImage || (colorReply && askedColorChoice);
+
+        const lastBotReply = this.getLastAssistantHistoryText();
+        const turnIntent: TurnIntent = resolveTurnIntent({
+            userMessage: messageText,
+            customerRequest,
+            variantAfterPhotoOffer,
+            asksProductInfo:
+                customerRequest?.asksProductInfo === true ||
+                isProductInfoRequest(messageText),
+            isFinalizing:
+                customerAffirmsOrder(messageText) ||
+                (customerDeclinesMoreItems(messageText) &&
+                    botReplyAsksToAddMore(lastBotReply)) ||
+                customerRequest?.readyToConfirm === true,
+        });
+
+        // Force photo/Q&A actions before any checkout rewrite can run.
+        const browseAction = nextActionForBrowseTurn(turnIntent, nextAction);
+        if (browseAction) {
+            if (nextAction !== browseAction) {
+                logger.debug('SalesGPT: TurnIntent overrode next_action', {
+                    turnIntent,
+                    from: nextAction,
+                    to: browseAction,
+                    explicitPhoto: isExplicitPhotoRequest(messageText),
+                });
+            }
+            nextAction = browseAction;
+            intent = turnIntent === 'browse_media' ? 'product_query' : intentFromSalesGPTNextAction(browseAction);
+            if (
+                turnIntent === 'browse_media' &&
+                (isPrematureCheckoutCopy(response) ||
+                    /أحتاج|احتاج|اسمك|هاتفك|عنوان/i.test(response))
+            ) {
+                response = browseMediaCaptionFallback(this.config.language);
+            }
+        } else {
+            // Legacy image safety: model said send_image without photo intent → demote
+            const allowSendImage =
+                customerRequest?.wantsPhoto === true ||
+                preferSendImage ||
+                isExplicitPhotoRequest(messageText);
+            if (nextAction === 'send_image' && !allowSendImage) {
+                nextAction = 'present_product';
+                intent = 'product_query';
+                logger.debug('SalesGPT: ignored send_image without photo intent', {
+                    aiNextAction,
+                    messageLength: messageText.length,
+                });
+            }
         }
 
         // Step 4.1b: Alternatives → stay in product presentation (never invent "only one product").
@@ -421,9 +453,21 @@ export class SalesGPTAgent {
             intent = 'product_query';
         }
 
-        // Step 4.2: Order rails — confirm_order ONLY after explicit customer finalization
-        // while we were already ready. AI alone must never finalize.
-        const orderCompleteness = this.getOrderFieldCompleteness();
+        // Step 4.1c: Wants another product → present / discover (pipeline locks cart).
+        if (customerRequest?.wantsAddAnother || turnIntent === 'cart_edit') {
+            if (
+                nextAction === 'await_confirmation' ||
+                nextAction === 'confirm_order' ||
+                nextAction === 'collect_info' ||
+                nextAction === 'close_sale'
+            ) {
+                nextAction = 'present_product';
+                intent = 'browse';
+            }
+        }
+
+        // Step 4.2: Order rails — skipped for browse turns inside resolveOrderNextAction.
+        const orderCompleteness = this.getOrderFieldCompleteness(this.focusedProduct);
         const resolvedOrder = resolveOrderNextAction({
             aiNextAction: nextAction,
             fieldsComplete: orderCompleteness.complete,
@@ -433,17 +477,20 @@ export class SalesGPTAgent {
             language: this.config.language,
             collectedInfo: { ...this.state.collectedInfo },
             responseText: response,
-            // undefined → policy falls back to heuristic; boolean → model owns the classification
             modelAsksProductInfo:
                 customerRequest === null ? undefined : customerRequest.asksProductInfo,
             missingFields: orderCompleteness.missing,
-            preferSendImage: preferSendImage || (colorReply && askedColorChoice && !orderCompleteness.complete)
+            preferSendImage: variantAfterPhotoOffer && !orderCompleteness.complete,
+            cartLinesSummary: this.state.cartSummary || undefined,
+            turnIntent,
+            lastBotReply,
         });
         if (resolvedOrder.nextAction !== nextAction || resolvedOrder.responseText !== response) {
             logger.debug('SalesGPT: order confirmation policy applied', {
                 from: nextAction,
                 to: resolvedOrder.nextAction,
                 reason: resolvedOrder.reason,
+                turnIntent,
                 missing: orderCompleteness.missing,
                 fieldsWereCompleteBeforeTurn,
                 wasAwaitingConfirmation,
@@ -514,25 +561,36 @@ export class SalesGPTAgent {
         };
     }
 
-    /** Whether order-critical fields are complete for this merchant's active product options. */
-    private getOrderFieldCompleteness(): { complete: boolean; missing: string[] } {
-        const { name, phone, address, product_name, color, size } = this.state.collectedInfo;
-        const missing: string[] = [];
-        if (isPlaceholderCollectedValue(product_name)) missing.push('product_name');
-        if (isPlaceholderCollectedValue(name)) missing.push('name');
-        if (isPlaceholderCollectedValue(phone)) missing.push('phone');
-        if (isPlaceholderCollectedValue(address)) missing.push('address');
-        if (this.currentProductsHaveColors && isPlaceholderCollectedValue(color)) missing.push('color');
-        if (
-            this.currentProductsHaveColors &&
-            !isPlaceholderCollectedValue(color) &&
-            this.currentProductColors.length > 0 &&
-            !isColorInProductCatalog(color, this.currentProductColors)
-        ) {
-            missing.push('color');
-        }
-        if (this.currentProductsHaveSizes && isPlaceholderCollectedValue(size)) missing.push('size');
-        return { complete: missing.length === 0, missing };
+    /**
+     * Checkout readiness: identity + cart (or lockable draft).
+     * Delegates to conversationCart.isCheckoutReady so color/size stay required
+     * on the focused line even when other SKUs are already in the cart.
+     */
+    private getOrderFieldCompleteness(
+        product?: Product | null
+    ): { complete: boolean; missing: string[] } {
+        const info = this.state.collectedInfo;
+        return isCheckoutReady(
+            {
+                message_count: 0,
+                extracted_entities: {
+                    name: info.name,
+                    phone: info.phone,
+                    address: info.address,
+                    product_query: info.product_name,
+                    product_id: info.product_id,
+                    color: info.color,
+                    size: info.size,
+                    quantity: info.quantity,
+                },
+                cart: {
+                    items: this.state.cartItems || [],
+                    status: 'building',
+                    updatedAt: new Date().toISOString(),
+                },
+            },
+            product ?? null
+        );
     }
 
     // ==================== PRIVATE METHODS ====================
@@ -552,7 +610,19 @@ export class SalesGPTAgent {
             if (key === 'quantity') {
                 const n = typeof value === 'number' ? value : parseInt(String(value), 10);
                 if (!Number.isNaN(n) && n > 0) {
-                    (this.state.collectedInfo as any).quantity = n;
+                    // Quantity is sanitized against the latest user turn in history
+                    const lastUser = [...this.state.conversationHistory]
+                        .reverse()
+                        .find((line) => line.startsWith('المستخدم:'));
+                    const userText = lastUser
+                        ? lastUser.replace(/^المستخدم:\s*/u, '').replace(/\s*<END_OF_TURN>\s*$/u, '')
+                        : '';
+                    const safe = coerceSafeQuantity(userText, n);
+                    if (safe !== undefined) {
+                        (this.state.collectedInfo as any).quantity = safe;
+                    } else if (messageSignalsBothProducts(userText)) {
+                        delete (this.state.collectedInfo as any).quantity;
+                    }
                 }
                 continue;
             }
@@ -579,14 +649,17 @@ export class SalesGPTAgent {
             line.startsWith('المستخدم:')
         );
         if (userTurns.length < 2) return false;
-        return /صورة|صوره|صور |وريني|فرجيني|ارني|أرني|photo|picture|image/i.test(
-            userTurns[userTurns.length - 2]
-        );
+        const prev = userTurns[userTurns.length - 2]
+            .replace(/^المستخدم:\s*/, '')
+            .replace(/\s*<END_OF_TURN>\s*$/, '');
+        return isExplicitPhotoRequest(prev);
     }
 
     private lastAssistantOfferedPhoto(): boolean {
-        return /صورة|صوره|صور |وريني|فرجيني|سأرسل|رح أرسل|رح ارسل|رح ابعت|أرسلك|ابعثلك|photo|picture|image/i.test(
-            this.getLastAssistantHistoryText()
+        const lastBot = this.getLastAssistantHistoryText();
+        return (
+            isExplicitPhotoRequest(lastBot) ||
+            /سأرسل|رح أرسل|رح ارسل|رح ابعت|أرسلك|ابعثلك/i.test(lastBot)
         );
     }
 
@@ -859,14 +932,22 @@ export class SalesGPTAgent {
     "wants_alternatives": true/false,
     "asks_product_info": true/false,
     "wants_photo": true/false,
-    "ready_to_confirm": true/false
+    "ready_to_confirm": true/false,
+    "wants_add_another": true/false
   }`;
+
+        const cartBlock =
+            this.state.cartSummary && this.state.cartItemCount
+                ? this.config.language === 'arabic'
+                    ? `\n🛒 محتويات السلة (${this.state.cartItemCount}):\n${this.state.cartSummary}\n`
+                    : `\n🛒 Cart (${this.state.cartItemCount}):\n${this.state.cartSummary}\n`
+                : '';
 
         const userPrompt = isArabic
             ? `المرحلة الحالية: ${this.state.currentConversationStage}
 
 المعلومات المجمعة حتى الآن: ${collectedSummary || 'لا يوجد'}
-
+${cartBlock}
 ${productContext || 'لا توجد منتجات في السياق.'}
 ${toolContext}
 
@@ -881,9 +962,10 @@ ${conversationHistoryText || 'هذه أول رسالة'}
 - 🎯 إقناع من الوصف: عند present_product / handle_objection / close_sale استخرج 2–3 فوائد من **الوصف الكامل** للمنتج النشط. لا تختلق مميزات.
 - إذا asks_product_info=true → next_action="present_product" وانقل من الوصف الكامل. ممنوع ملخص تأكيد الطلب.
 - إذا wants_alternatives=true → أجب بصدق من **📚 منتجات أخرى** و/أو إجمالي المنتجات. اقترح 1–3 بدائل بأسعارها. ممنوع إنكار وجود منتجات أخرى إذا ظهر في السياق أكثر من منتج أو إجمالي > 1.
+- إذا wants_add_another=true → العميل يريد إضافة منتج آخر للسلة (كمان/أضيف/برضه). next_action="present_product". النظام يقفّل السطر الحالي في السلة — لا تختلق قائمة سلة.
 - إذا wants_photo=true فقط → next_action="send_image".
 - ready_to_confirm=true فقط عندما يوافق العميل صراحة على تثبيت الطلب (نعم/أكد)، وليس عند لفظة مجاملة مثل «تمام» داخل سؤال آخر.
-- إذا العميل قدم اسماً/هاتفاً/عنواناً → اشكره ثم اسأل المعلومة التالية أو اعرض ملخصاً لـ await_confirmation.
+- إذا العميل قدم اسماً/هاتفاً/عنواناً → اشكره ثم اسأل المعلومة التالية أو اعرض ملخصاً لـ await_confirmation (اشمل كل أسطر السلة إن وُجدت).
 - في extracted_info: استخدم JSON null فقط (وليس النص "null") لما لم يُذكر.
 - ممنوع await_confirmation أو كتابة «طلبك جاهز للتأكيد» قبل توفر اسم وهاتف وعنوان حقيقيين.
 
@@ -913,7 +995,7 @@ ${arColorSizeRules}- عند ذكر السعر استخدم اسم العملة �
             : `Current stage: ${this.state.currentConversationStage}
 
 Collected info so far: ${collectedSummary || 'None'}
-
+${cartBlock}
 ${productContext || 'No products in context.'}
 ${toolContext}
 
@@ -928,23 +1010,24 @@ Current customer message: "${messageText}"
 - 🎯 Persuade from the description: on present_product / handle_objection / close_sale extract 2–3 benefits from the active product's full description. Never invent features.
 - If asks_product_info=true → next_action="present_product" and use the full description. No order-confirmation summary.
 - If wants_alternatives=true → answer truthfully from **📚 Other products** and/or total product count. Suggest 1–3 alternatives with prices. Never deny other products when context shows more than one or total > 1.
+- If wants_add_another=true → customer wants another product in the cart. next_action="present_product". The system locks the current draft into the cart — never invent cart JSON.
 - If wants_photo=true only → next_action="send_image".
 - ready_to_confirm=true only when the customer explicitly affirms placing the order — not polite fillers like "ok" inside another question.
-- If customer provided name/phone/address → acknowledge, then ask next missing field or show await_confirmation summary.
+- If customer provided name/phone/address → acknowledge, then ask next missing field or show await_confirmation summary (include all cart lines when present).
 - In extracted_info: fill from history + current message; use JSON null (never the string "null") when absent.
 - Never await_confirmation or write "ready to confirm" until real name, phone, and address exist.
 
 🧭 Catalog policy:
 - Active product for deep detail; rest of catalog for truthful alternatives.
 - Never mix prices/descriptions across products.
-- Do not dump the full catalog unless the customer explicitly asks for it.
-${enColorSizeRules}- Use each product's currency name as shown.
-- Never invent information.
-- Keep replies short (2–4 sentences) unless asks_product_info — then use the description clearly.
+- Never dump the full catalog unless the customer explicitly asks.
+${enColorSizeRules}- When mentioning price use the currency name shown with each product.
+- Never invent facts.
+- Keep replies short (2–4 sentences) except when asks_product_info — then use the description clearly.
 
 Return JSON only:
 {
-  "response_text": "your direct response to the customer",
+  "response_text": "Your direct reply to the customer",
   "next_action": "greet | discover_needs | present_product | handle_objection | close_sale | collect_info | await_confirmation | confirm_order | send_image | end_conversation",
   ${customerRequestSchema},
   "extracted_info": {
@@ -1004,17 +1087,8 @@ Return JSON only:
         stageId: string
     ): { intent: Intent; nextAction: string } {
         if (['6', '7', '8'].includes(stageId)) {
-            const { name, phone, address, product_name, color, size } = this.state.collectedInfo;
-            const needsColor = this.currentProductsHaveColors && isPlaceholderCollectedValue(color);
-            const needsSize = this.currentProductsHaveSizes && isPlaceholderCollectedValue(size);
-            if (
-                !isPlaceholderCollectedValue(name) &&
-                !isPlaceholderCollectedValue(phone) &&
-                !isPlaceholderCollectedValue(address) &&
-                !isPlaceholderCollectedValue(product_name) &&
-                !needsColor &&
-                !needsSize
-            ) {
+            const completeness = this.getOrderFieldCompleteness(this.focusedProduct);
+            if (completeness.complete) {
                 return { intent: 'order', nextAction: 'await_confirmation' };
             }
             return { intent: 'order', nextAction: stageId === '6' ? 'close_sale' : 'collect_info' };

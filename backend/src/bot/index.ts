@@ -1,21 +1,18 @@
 /**
  * Bot Module - Main entry point for the new architecture
- * 
- * This module provides a clean, unified API for the bot system.
- * 
+ *
  * Architecture:
- * ├── core/           - Orchestrator, routing, error handling
- * ├── pipelines/      - Smart (AI) and Simple (rules) pipelines
+ * ├── core/           - Orchestrator, error handling
+ * ├── pipelines/      - SalesGPT pipeline wrapper
  * ├── catalog/        - Product search and formatting
- * ├── sales/          - Sales rules and recommendations
- * ├── orders/         - Order validation and building
- * ├── response/       - Response building and templates
- * └── ai/             - OpenAI client and prompts
- * 
+ * ├── orders/         - Order persistence
+ * ├── response/       - Reply sanitization
+ * └── ai/             - OpenAI client
+ *
  * Usage:
  * ```typescript
  * import { handleIncomingMessage } from './bot';
- * 
+ *
  * const result = await handleIncomingMessage({
  *   merchantId: 'merchant-123',
  *   platform: 'telegram',
@@ -29,9 +26,7 @@
 // ==================== CORE ====================
 export {
   processMessage,
-  isQuickGreeting,
   getDefaultMerchantConfig,
-  routeToPipeline,
   handleError,
   createBotError,
   logError,
@@ -59,8 +54,6 @@ export type {
   BotResponse,
   Product,
   OrderData,
-  RoutingDecision,
-  PipelineType,
   ErrorType,
   BotError
 } from '../core/index.js';
@@ -69,18 +62,12 @@ export { MANDATORY_ORDER_FIELDS } from '../core/index.js';
 
 // ==================== PIPELINES ====================
 export {
-  processSmartPipeline,
-  processSimplePipeline,
-  detectIntent,
-  canHandleSimply
+  processSmartPipeline
 } from '../pipelines/index.js';
 
 export type {
   SmartPipelineInput,
-  SmartPipelineResult,
-  SimplePipelineInput,
-  SimplePipelineResult,
-  IntentDetectionResult
+  SmartPipelineResult
 } from '../pipelines/index.js';
 
 // ==================== CATALOG ====================
@@ -94,45 +81,26 @@ export {
   clearProductCache
 } from '../catalog/index.js';
 
-// ==================== SALES ====================
-export {
-  planSalesAction,
-  getRecommendations
-} from '../sales/index.js';
-
-export type {
-  SalesPlan,
-  SalesPlanInput,
-  RecommendationResult
-} from '../sales/index.js';
-
 // ==================== ORDERS ====================
-export {
-  validateOrder,
-  buildOrderData,
-  generateOrderDataTag,
-  generateConfirmationMessage,
-  generateOrderRequestMessage
-} from '../orders/index.js';
+export { generateOrderId } from '../orders/index.js';
 
 export type {
-  ValidationResult,
-  BuildOrderInput
+  StoredOrder,
+  OrderStatus,
+  CreateOrderInput,
+  OrderQuery
 } from '../orders/index.js';
 
 // ==================== RESPONSE ====================
 export {
-  buildResponse,
-  buildGreetingResponse,
-  buildErrorResponse,
-  guardReply
+  prepareBotReplyForCustomer,
+  detectEscalationMarker,
+  stripInternalControlMarkers,
+  sanitizeCaptionWhenImageSent,
+  stripFalseImageDeliveryClaims
 } from '../response/index.js';
 
-export type {
-  ResponseBuilderInput,
-  ResponseBuilderResult,
-  GuardResult
-} from '../response/index.js';
+export type { PreparedBotReply } from '../response/index.js';
 
 // ==================== AI ====================
 export {
@@ -140,15 +108,14 @@ export {
   generateContent,
   generateJSON,
   getAICallsCount,
-  resetAICallsCount,
-  buildSalesPrompt,
-  buildIntentDetectionPrompt
+  resetAICallsCount
 } from '../ai/index.js';
 
 // ==================== CONVENIENCE WRAPPER ====================
 
 import type { Platform, MerchantConfig, BotResponse, ConversationState, Message } from '../core/types.js';
 import { processMessage, getDefaultMerchantConfig } from '../core/orchestrator.js';
+import { applyHandoffStage } from '../services/salesgpt/conversationStateSync.js';
 
 /**
  * High-level wrapper for handling incoming messages
@@ -171,12 +138,12 @@ export interface HandleMessageResult {
   meta: {
     intent: string;
     stage: string;
-    pipelineUsed: 'smart' | 'simple';
+    pipelineUsed: 'smart';
     aiCallsCount: number;
     processingTimeMs: number;
   };
   updatedState: ConversationState;
-  next_action?: string;  // For Full AI Mode order detection
+  next_action?: string;
   /** True when reply contained <ESCALATE> or next_action is handoff */
   shouldEscalate?: boolean;
 }
@@ -199,14 +166,12 @@ export const handleIncomingMessage = async (
     merchantConfig: partialConfig = {}
   } = params;
 
-  // Build full merchant config
   const merchantConfig: MerchantConfig = {
     ...getDefaultMerchantConfig(merchantId),
     ...partialConfig,
     merchantId
   };
 
-  // Process message
   const result = await processMessage({
     message: {
       merchantId,
@@ -231,15 +196,12 @@ export const handleIncomingMessage = async (
     meta: {
       intent: result.response.meta.intent,
       stage: prepared.shouldEscalate ? 'handoff' : result.response.meta.stage,
-      pipelineUsed: result.response.meta.pipelineUsed,
+      pipelineUsed: 'smart',
       aiCallsCount: result.response.meta.aiCallsCount,
       processingTimeMs: result.response.meta.processingTimeMs
     },
     updatedState: prepared.shouldEscalate
-      ? {
-          ...result.updatedState,
-          current_stage: 'handoff'
-        }
+      ? applyHandoffStage({ ...result.updatedState })
       : result.updatedState,
     next_action: result.response.meta.next_action,
     shouldEscalate: prepared.shouldEscalate
@@ -247,5 +209,5 @@ export const handleIncomingMessage = async (
 };
 
 // ==================== VERSION ====================
-export const BOT_VERSION = '2.0.0';
-export const ARCHITECTURE_NAME = 'XoBot Modular Architecture';
+export const BOT_VERSION = '2.1.0';
+export const ARCHITECTURE_NAME = 'XoBot SalesGPT Architecture';

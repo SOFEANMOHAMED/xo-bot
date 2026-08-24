@@ -10,6 +10,7 @@ import {
   ensureConversationCustomerName,
   isPlaceholderCustomerName,
 } from './socialProfile.js';
+import { HANDOFF_STAGE_ID } from './salesgpt/conversationStateSync.js';
 
 const PLATFORM_LABELS: Record<string, string> = {
   facebook_messenger: 'فيسبوك ماسنجر',
@@ -58,6 +59,7 @@ export async function escalateConversationToHuman(
            updated_at = CURRENT_TIMESTAMP,
            conversation_state = COALESCE(conversation_state, '{}'::jsonb)
              || jsonb_build_object(
+                  'salesgpt_stage_id', $4::text,
                   'current_stage', 'handoff',
                   'escalated_at', to_jsonb(NOW()::text),
                   'escalation_reason', to_jsonb(COALESCE($3::text, 'customer_requested_human'))
@@ -69,7 +71,7 @@ export async function escalateConversationToHuman(
            OR COALESCE(status, 'bot') <> 'human'
          )
        RETURNING id, platform, user_id, user_name`,
-      [conversationId, merchantId, params.reason || 'customer_requested_human']
+      [conversationId, merchantId, params.reason || 'customer_requested_human', HANDOFF_STAGE_ID]
     );
 
     if ((updated.rowCount ?? 0) === 0) {

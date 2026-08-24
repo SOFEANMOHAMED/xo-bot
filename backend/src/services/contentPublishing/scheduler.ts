@@ -9,6 +9,10 @@ import {
 } from './constants.js';
 import { executePublication } from './publisher.js';
 import { claimDuePublications } from './repository.js';
+import {
+  claimDuePlatformPublications,
+  executePlatformPublication,
+} from '../platformContentPublishing/index.js';
 
 let schedulerInterval: NodeJS.Timeout | null = null;
 let cycleInFlight = false;
@@ -43,6 +47,25 @@ async function safeCycle(): Promise<void> {
     if (claimed.length) {
       logger.info(`Content publishing scheduler claimed ${claimed.length} publication(s)`);
       await processClaimed(claimed);
+    }
+
+    const platformClaimed = await claimDuePlatformPublications(CONTENT_SCHEDULER_BATCH_SIZE);
+    if (platformClaimed.length) {
+      logger.info(
+        `Platform content publishing scheduler claimed ${platformClaimed.length} publication(s)`
+      );
+      for (const item of platformClaimed) {
+        try {
+          await executePlatformPublication({
+            publicationId: item.id,
+            alreadyClaimed: true,
+          });
+        } catch (error) {
+          logger.error('Scheduled platform content publication failed', error as Error, {
+            publicationId: item.id,
+          });
+        }
+      }
     }
   } catch (error) {
     logger.error('Content publishing cycle error', error as Error);

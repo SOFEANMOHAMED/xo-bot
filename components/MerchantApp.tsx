@@ -340,11 +340,14 @@ const MerchantApp: React.FC = () => {
             quantity: item.quantity,
             price: item.price,
             currency: item.currency || o.currency,
+            color: item.color || null,
+            size: item.size || null,
           })),
           date: new Date(o.date || o.createdAt || Date.now()),
           notes: o.notes || '',
           source: o.source || 'manual',
           viewedAt: viewedAt,
+          deliveryTime: o.deliveryTime || null,
         };
       });
       setOrders(ordersList);
@@ -805,10 +808,13 @@ const MerchantApp: React.FC = () => {
           quantity: item.quantity,
           price: item.price,
           currency: item.currency || response.order.currency,
+          color: item.color || null,
+          size: item.size || null,
         })),
         date: new Date(response.order.date || response.order.createdAt || Date.now()),
         notes: response.order.notes || '',
         source: response.order.source || 'manual',
+        deliveryTime: response.order.deliveryTime || null,
       };
       
       setOrders(prevOrders => [order, ...prevOrders]);

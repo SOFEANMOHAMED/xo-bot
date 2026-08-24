@@ -5,11 +5,15 @@ import { createError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
 import { logger } from '../utils/logger.js';
 // ✅ النظام الجديد - Modular Architecture v2.0
-import { handleIncomingMessage } from '../bot/index.js';
 import type { Message, ConversationState, MerchantConfig } from '../bot/index.js';
-import { escalateConversationToHuman } from '../services/escalation.js';
 import { stripInternalControlMarkers } from '../response/sanitize-reply.js';
-import { buildMerchantBotConfig, appendOrderDataIfConfirmed } from '../services/buildMerchantBotConfig.js';
+import { buildMerchantBotConfig } from '../services/buildMerchantBotConfig.js';
+import {
+  extractImageUrl,
+  extractOrderData,
+  persistOrderIfPresent,
+  runSalesBotTurn,
+} from '../services/channels/botTurn.js';
 import { telegramAdapter, sendTelegramTyping } from '../services/channels/telegram.adapter.js';
 import { startTypingKeepalive } from '../services/channels/replyDelivery.js';
 import {
@@ -22,52 +26,6 @@ import {
   voiceTranscriptionFallbackMessage
 } from '../services/voiceTranscription.js';
 import { getCurrencyDisplayName } from '../utils/currencyDisplayName.js';
-import { notifyMerchantNewOrderAsync } from '../services/notifyMerchantNewOrder.js';
-
-// ==================== UUID VALIDATION ====================
-
-/**
- * Validate UUID format (v4)
- * @param str - String to validate
- * @returns true if valid UUID v4, false otherwise
- */
-const isValidUUID = (str: string | null | undefined): boolean => {
-  if (!str) return false;
-  const uuidV4Regex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  // Also accept any standard UUID format (not just v4)
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  return uuidRegex.test(str);
-};
-
-/**
- * Sanitize and validate UUID
- * Returns null if invalid, or the cleaned UUID if valid
- * @param str - String to sanitize
- * @returns Valid UUID string or null
- */
-const sanitizeUUID = (str: string | null | undefined): string | null => {
-  if (!str) return null;
-  
-  // Remove extra dashes, spaces, and invalid characters
-  const cleaned = str.trim()
-    .replace(/--+/g, '-')  // Fix double dashes
-    .replace(/\s+/g, '')    // Remove spaces
-    .toLowerCase();
-  
-  // Check if it's a valid UUID after cleaning
-  if (isValidUUID(cleaned)) {
-    return cleaned;
-  }
-  
-  // Log warning for debugging
-  console.warn('[UUID] Invalid UUID detected:', {
-    original: str,
-    cleaned: cleaned,
-    isValid: false
-  });
-  
-  return null;
-};
 
 // Verify Telegram webhook secret (required — empty secret rejects)
 const verifyTelegramSecret = (req: any, secret: string): boolean => {
@@ -78,74 +36,6 @@ const verifyTelegramSecret = (req: any, secret: string): boolean => {
   const b = Buffer.from(secret, 'utf8');
   if (a.length !== b.length) return false;
   return crypto.timingSafeEqual(a, b);
-};
-
-// Extract image URL from response text
-const extractImageUrl = (text: string): { imageUrl: string | null; cleanText: string } => {
-  const imageRegex = /\[IMAGE:\s*([^\]]+)\]/i;
-  const match = text.match(imageRegex);
-  
-  if (match && match[1]) {
-    const imageUrl = match[1].trim();
-    // Remove the [IMAGE: url] tag from the text
-    const cleanText = text.replace(imageRegex, '').trim();
-    return { imageUrl, cleanText };
-  }
-  
-  return { imageUrl: null, cleanText: text };
-};
-
-// Extract ORDER_DATA from response text
-const extractOrderData = (text: string): { orderData: any | null; cleanText: string } => {
-  // ✅ تحسين الـ regex لالتقاط ORDER_DATA بشكل أفضل
-  const orderDataRegex = /\[ORDER_DATA\]([\s\S]*?)\[\/ORDER_DATA\]/gi;
-  // ✅ أيضاً التقاط أي صيغة مشابهة (مثل [_] أو [/] أو ORDER_DATA بدون أقواس)
-  const altOrderDataRegex = /\[_?\/?ORDER_?DATA_?\]([\s\S]*?)\[\/?\s*_?\/?ORDER_?DATA_?\]/gi;
-  const bracketTagRegex = /\[_\]([\s\S]*?)\[\/\_\]/gi;
-  
-  const match = text.match(orderDataRegex) || text.match(altOrderDataRegex) || text.match(bracketTagRegex);
-  
-  if (match && match.length > 0) {
-    try {
-      // استخراج JSON من أول match
-      const jsonMatch = match[0].match(/\[(?:ORDER_DATA|_)\]([\s\S]*?)\[\/(?:ORDER_DATA|_)\]/i);
-      if (jsonMatch && jsonMatch[1]) {
-        const orderData = JSON.parse(jsonMatch[1].trim());
-        // ✅ إزالة ORDER_DATA tag بالكامل من النص (جميع التكرارات)
-        let cleanText = text.replace(orderDataRegex, '').trim();
-        cleanText = cleanText.replace(altOrderDataRegex, '').trim();
-        cleanText = cleanText.replace(bracketTagRegex, '').trim();
-        // ✅ إزالة أي JSON structure متبقي (أي شيء بين { و } يحتوي أكثر من 50 حرف)
-        cleanText = cleanText.replace(/\{[\s\S]{50,}?\}/g, '').trim();
-        // ✅ إزالة أي أقواس مربعة فارغة أو مع محتوى ORDER
-        cleanText = cleanText.replace(/\[\s*\/?\s*(?:ORDER_?DATA|_)?\s*\]/gi, '').trim();
-        // ✅ إزالة المسافات والأسطر الفارغة المتكررة
-        cleanText = cleanText.replace(/\n{3,}/g, '\n\n').trim();
-        
-        console.log('[extractOrderData] Successfully extracted order data:', {
-          hasName: Boolean(orderData.customerName),
-          hasPhone: Boolean(orderData.customerPhone),
-          productsCount: Array.isArray(orderData.products) ? orderData.products.length : 0,
-        });
-        
-        return { orderData, cleanText };
-      }
-    } catch (error) {
-      console.error('[extractOrderData] Error parsing ORDER_DATA:', error);
-      logger.error('Error parsing ORDER_DATA', error as Error);
-    }
-  }
-  
-  // ✅ حتى لو لم نجد ORDER_DATA صالح، أزل أي JSON structure طويل
-  let cleanText = text;
-  cleanText = cleanText.replace(orderDataRegex, '').trim();
-  cleanText = cleanText.replace(altOrderDataRegex, '').trim();
-  cleanText = cleanText.replace(bracketTagRegex, '').trim();
-  cleanText = cleanText.replace(/\{[\s\S]{50,}?\}/g, '').trim();
-  cleanText = cleanText.replace(/\[\s*\/?\s*(?:ORDER_?DATA|_)?\s*\]/gi, '').trim();
-  cleanText = cleanText.replace(/\n{3,}/g, '\n\n').trim();
-  
-  return { orderData: null, cleanText };
 };
 
 // Send photo via Telegram Bot API
@@ -363,8 +253,7 @@ const processTelegramMessage = async (update: any) => {
       payment_methods: cachedSettings.payment_methods,
       return_policy: cachedSettings.return_policy,
       additional_notes: cachedSettings.additional_notes,
-      enable_ai_injection: cachedSettings.enable_ai_injection,
-      ai_mode: cachedSettings.ai_mode
+      enable_ai_injection: cachedSettings.enable_ai_injection
     };
 
     // ==================== VOICE TRANSCRIPTION (OpenAI STT) ====================
@@ -593,605 +482,94 @@ const processTelegramMessage = async (update: any) => {
       return;
     }
 
-    // ==================== Process through NEW orchestrator ====================
+    // ==================== SalesGPT turn (shared) ====================
     let responseText: string;
     let updatedState: ConversationState = conversationState;
 
     const stopTypingKeepalive = botToken
       ? startTypingKeepalive(() => sendTelegramTyping(chatId, botToken))
       : () => undefined;
-    
+
     try {
-      // ✅ بناء merchantConfig للنظام الجديد
       const merchantConfig: Partial<MerchantConfig> = buildMerchantBotConfig({
         merchantId,
         settings,
+        systemPromptSuffix: '',
       });
 
-      const result = await handleIncomingMessage({
+      const turn = await runSalesBotTurn({
         merchantId,
         platform: 'telegram',
+        escalatePlatform: 'telegram',
         userId,
         userName: userName || 'عميل',
         messageText,
-        externalMessageId: update.message?.message_id?.toString() || '',
-        recentMessages,           // ✅ الرسائل السابقة
-        conversationState,        // ✅ حالة المحادثة
-        merchantConfig            // ✅ اسم جديد
-      });
-
-      responseText = result.replyText;
-      updatedState = result.updatedState;
-
-      // Shared gate: ORDER_DATA only when pipeline next_action === confirm_order
-      const entities = updatedState.extracted_entities || {};
-      const products = updatedState.last_recommended_products || [];
-      responseText = appendOrderDataIfConfirmed({
-        responseText,
-        nextAction: result.next_action,
-        entities,
-        productIds: products,
+        externalMessageId:
+          message.message_id != null ? String(message.message_id) : '',
+        recentMessages,
+        conversationState,
+        merchantConfig,
+        conversationId,
         storeCurrency: settings?.store_currency || 'USD',
-        channelLabel: 'Telegram (Full AI Mode)',
+        channelLabel: 'Telegram',
+        pool,
+        userMessageMetadata: inboundImageUrl
+          ? { type: 'image', imageUrl: inboundImageUrl }
+          : { type: 'text' },
       });
 
-      if (result.next_action === 'confirm_order' && responseText.includes('[ORDER_DATA]')) {
-        console.log('[processTelegramMessage] Full AI Mode: Order confirmed, ORDER_DATA attached:', {
-          hasName: Boolean(entities.name),
-          productsCount: products.length,
-          next_action: result.next_action
-        });
-      }
+      responseText = turn.responseText;
+      updatedState = turn.updatedState;
 
-      if (result.shouldEscalate) {
-        await escalateConversationToHuman({
+      if (!turn.failed) {
+        console.log('[processTelegramMessage] SalesGPT response generated:', {
+          conversationId,
+          responseLength: responseText.length,
+          pipelineUsed: turn.meta.pipelineUsed,
+          aiCallsCount: turn.meta.aiCallsCount,
+          processingTimeMs: turn.meta.processingTimeMs,
+          intent: turn.meta.intent,
+          stage: turn.meta.stage
+        });
+        logger.info('Telegram message processed via SalesGPT', {
           merchantId,
           conversationId,
-          platform: 'telegram',
-          userId,
-          userName: userName || 'عميل',
-          reason: result.next_action === 'handoff' ? 'handoff_action' : 'escalate_marker',
-          replyPreview: responseText,
+          pipelineUsed: turn.meta.pipelineUsed,
+          aiCallsCount: turn.meta.aiCallsCount,
+          processingTimeMs: turn.meta.processingTimeMs
         });
       }
-
-      responseText = stripInternalControlMarkers(responseText);
-
-      console.log('[processTelegramMessage] NEW Orchestrator response generated:', {
-        conversationId,
-        responseLength: responseText.length,
-        // ✅ metadata جديدة من النظام الجديد
-        pipelineUsed: result.meta.pipelineUsed,
-        aiCallsCount: result.meta.aiCallsCount,
-        processingTimeMs: result.meta.processingTimeMs,
-        intent: result.meta.intent,
-        stage: result.meta.stage
-      });
-
-      logger.info('Telegram message processed via NEW orchestrator', {
-        merchantId,
-        conversationId,
-        pipelineUsed: result.meta.pipelineUsed,
-        aiCallsCount: result.meta.aiCallsCount,
-        processingTimeMs: result.meta.processingTimeMs
-      });
-
-      // ✅ حفظ الرسائل في قاعدة البيانات (النظام الجديد لا يحفظها تلقائياً)
-      try {
-        // حفظ رسالة المستخدم
-        await pool.query(
-          `INSERT INTO messages (conversation_id, role, content, metadata, intent, entities)
-           VALUES ($1, 'user', $2, $3, $4, $5)`,
-          [
-            conversationId,
-            messageText,
-            JSON.stringify({
-              platform: 'telegram',
-              timestamp: new Date().toISOString(),
-              externalId: update.message?.message_id?.toString() || null,
-              ...(inboundImageUrl
-                ? { type: 'image', imageUrl: inboundImageUrl }
-                : { type: 'text' }),
-            }),
-            result.meta.intent,
-            JSON.stringify({})
-          ]
-        );
-
-        // حفظ رد البوت
-        await pool.query(
-          `INSERT INTO messages (conversation_id, role, content, metadata, intent, entities)
-           VALUES ($1, 'assistant', $2, $3, $4, $5)`,
-          [
-            conversationId,
-            responseText,
-            JSON.stringify({
-              platform: 'telegram',
-              pipelineUsed: result.meta.pipelineUsed,
-              aiCallsCount: result.meta.aiCallsCount,
-              processingTimeMs: result.meta.processingTimeMs
-            }),
-            result.meta.intent,
-            JSON.stringify({})
-          ]
-        );
-
-        // ✅ تحديث حالة المحادثة
-        await pool.query(
-          `UPDATE conversations 
-           SET conversation_state = $1,
-               current_intent = $2,
-               stage = $3,
-               last_message_at = CURRENT_TIMESTAMP,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $4 AND merchant_id = $5`,
-          [
-            JSON.stringify(updatedState),
-            result.meta.intent,
-            result.meta.stage,
-            conversationId,
-            merchantId
-          ]
-        );
-
-        console.log('[processTelegramMessage] Messages and state saved successfully');
-      } catch (saveError) {
-        logger.error('Failed to save messages after successful processing', saveError as Error);
-      }
-    } catch (orchestratorError: any) {
-      // Orchestrator failed - log, save messages manually, and return error
-      logger.error('Orchestrator failed completely', orchestratorError as Error, {
-        merchantId,
-        conversationId,
-        userId
-      });
-
-      responseText = 'عذراً، حدث خطأ في معالجة رسالتك. يرجى المحاولة مرة أخرى.';
-      
-      // Save user message and error response manually since orchestrator failed
-      try {
-        await pool.query(
-          `INSERT INTO messages (conversation_id, role, content)
-           SELECT $1, 'user', $2
-           FROM conversations
-           WHERE id = $1 AND merchant_id = $3`,
-          [conversationId, messageText, merchantId]
-        );
-        
-        await pool.query(
-          `INSERT INTO messages (conversation_id, role, content)
-           SELECT $1, 'assistant', $2
-           FROM conversations
-           WHERE id = $1 AND merchant_id = $3`,
-          [conversationId, responseText, merchantId]
-        );
-      } catch (saveError) {
-        logger.error('Failed to save messages after orchestrator failure', saveError as Error);
-      }
-      
-      console.log('[processTelegramMessage] Orchestrator failed, sending error message');
     } finally {
       stopTypingKeepalive();
     }
 
-    // ✅ Extract ORDER_DATA and remove it from message text
-    let { orderData, cleanText: responseWithoutOrderData } = extractOrderData(responseText);
-    
-    // Extract image URL from response if present (use cleaned text)
+    const { orderData, cleanText: responseWithoutOrderData } = extractOrderData(responseText);
     const { imageUrl, cleanText } = extractImageUrl(responseWithoutOrderData);
-    
-    // ✅ Process order if ORDER_DATA was found (from either Hybrid or Full AI Mode)
-    if (orderData && orderData.customerName && orderData.customerPhone && 
-        orderData.customerAddress && orderData.products && 
-        Array.isArray(orderData.products) && orderData.products.length > 0) {
-      
+
+    if (orderData) {
       console.log('[processTelegramMessage] ORDER_DATA detected, processing order:', {
         merchantId,
         hasName: Boolean(orderData.customerName),
-        productsCount: orderData.products.length
+        productsCount: orderData.products?.length || 0
       });
-      
-      const client = await pool.connect();
-      try {
-        await client.query('BEGIN');
-
-        // ✅ Full AI Mode: Fetch product prices from database if not provided
-        for (const product of orderData.products) {
-          if (product.productId && (!product.price || product.price === 0)) {
-            try {
-              const productResult = await client.query(
-                `SELECT price, currency, name FROM products 
-                 WHERE id = $1 AND merchant_id = $2`,
-                [product.productId, merchantId]
-              );
-              
-              if (productResult.rows.length > 0) {
-                product.price = parseFloat(productResult.rows[0].price);
-                product.currency = productResult.rows[0].currency || settings?.store_currency || 'USD';
-                product.productName = productResult.rows[0].name;
-                
-                console.log('[processTelegramMessage] Fetched product price from DB:', {
-                  productId: product.productId,
-                  price: product.price,
-                  productName: product.productName
-                });
-              }
-            } catch (priceError) {
-              logger.error('Error fetching product price', priceError as Error, { productId: product.productId });
-            }
-          }
-        }
-        
-        // Calculate total
-        orderData.total = orderData.products.reduce((sum: number, item: any) => 
-          sum + ((item.price || 0) * (item.quantity || 1)), 0
-        );
-        
-        console.log('[processTelegramMessage] Order total calculated:', {
-          total: orderData.total,
-          products: orderData.products.map((p: any) => ({ 
-            name: p.productName, 
-            price: p.price, 
-            qty: p.quantity 
-          }))
-        });
-
-        // Generate email if not provided
-        const customerEmail = orderData.customerEmail?.trim() || 
-          `${orderData.customerPhone.replace(/\s+/g, '').replace(/[^0-9]/g, '')}@chat-order.com`;
-        const deliveryNote = orderData.deliveryTime ? `وقت التوصيل: ${orderData.deliveryTime}` : null;
-        const baseNotes = orderData.notes || 'Order created via Telegram bot';
-        const combinedNotes = deliveryNote ? `${baseNotes} | ${deliveryNote}` : baseNotes;
-
-        // Check if customer exists (by phone or email)
-        let customerId: string | null = null;
-        
-        const existingCustomer = await client.query(
-          `SELECT id FROM customers 
-           WHERE merchant_id = $1 
-           AND (phone = $2 OR email = $3)
-           LIMIT 1`,
-          [merchantId, orderData.customerPhone, customerEmail]
-        );
-
-        if (existingCustomer.rows.length > 0) {
-          // Customer exists - update their information
-          customerId = existingCustomer.rows[0].id;
-          
-          await client.query(
-            `UPDATE customers 
-             SET name = COALESCE($1, name),
-                 email = COALESCE($2, email),
-                 phone = COALESCE($3, phone),
-                 address = COALESCE($4, address),
-                 notes = CASE 
-                   WHEN $7::text IS NULL OR $7::text = '' THEN notes 
-                   ELSE COALESCE(notes, '') || ' | ' || $7::text 
-                 END,
-                 last_interaction_date = CURRENT_TIMESTAMP,
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = $5 AND merchant_id = $6`,
-            [
-              orderData.customerName,
-              customerEmail,
-              orderData.customerPhone,
-              orderData.customerAddress,
-              customerId,
-              merchantId, // ✅ SaaS: Ensure merchant isolation
-              deliveryNote
-            ]
-          );
-          
-          console.log('[processTelegramMessage] Customer updated in CRM:', { customerId });
-        } else {
-          // Customer doesn't exist - create new customer
-          const customerResult = await client.query(
-            `INSERT INTO customers (
-              merchant_id, name, email, phone, address,
-              customer_type, status, notes, tags
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            RETURNING id`,
-            [
-              merchantId,
-              orderData.customerName,
-              customerEmail,
-              orderData.customerPhone,
-              orderData.customerAddress,
-              'new',
-              'active',
-              combinedNotes,
-              ['bot-order', 'telegram']
-            ]
-          );
-          
-          customerId = customerResult.rows[0].id;
-          console.log('[processTelegramMessage] New customer created in CRM:', { customerId });
-        }
-
-        // Prevent duplicate orders: check recent pending orders for same phone within 5 minutes
-        const duplicateOrderCheck = await client.query(
-          `SELECT id FROM orders 
-             WHERE merchant_id = $1 
-               AND customer_phone = $2 
-               AND status IN ('pending','new','processing')
-               AND created_at >= NOW() - INTERVAL '5 minutes'
-             ORDER BY created_at DESC
-             LIMIT 1`,
-          [merchantId, orderData.customerPhone]
-        );
-
-        let orderId: string;
-        let isDuplicateOrder = false;
-        if (duplicateOrderCheck.rows.length > 0) {
-          orderId = duplicateOrderCheck.rows[0].id;
-          isDuplicateOrder = true;
-          console.log('[processTelegramMessage] Duplicate order prevented, using existing order:', { orderId });
-        } else {
-          // Create order
-          const deliveryTimeColumnCheck = await client.query(`
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_schema = 'public' 
-            AND table_name = 'orders' 
-            AND column_name = 'delivery_time'
-          `);
-          const hasDeliveryTimeColumn = deliveryTimeColumnCheck.rows.length > 0;
-
-          const orderInsertQuery = hasDeliveryTimeColumn
-            ? `INSERT INTO orders (
-                merchant_id, customer_name, customer_email, 
-                customer_phone, customer_address, delivery_time,
-                total, currency, status, source, notes
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-              RETURNING id`
-            : `INSERT INTO orders (
-                merchant_id, customer_name, customer_email, 
-                customer_phone, customer_address,
-                total, currency, status, source, notes
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-              RETURNING id`;
-
-          const orderInsertParams = hasDeliveryTimeColumn
-            ? [
-                merchantId,
-                orderData.customerName,
-                customerEmail,
-                orderData.customerPhone,
-                orderData.customerAddress,
-                orderData.deliveryTime || null,
-                orderData.total || 0,
-                settings.store_currency || 'USD',
-                'pending',
-                'telegram',
-                combinedNotes
-              ]
-            : [
-                merchantId,
-                orderData.customerName,
-                customerEmail,
-                orderData.customerPhone,
-                orderData.customerAddress,
-                orderData.total || 0,
-                settings.store_currency || 'USD',
-                'pending',
-                'telegram',
-                combinedNotes
-              ];
-
-          const orderResult = await client.query(orderInsertQuery, orderInsertParams);
-
-          orderId = orderResult.rows[0].id;
-        }
-
-        // Create order items with UUID validation
-        for (const item of orderData.products) {
-          // ✅ تنظيف وتصحيح UUID المنتج
-          const sanitizedProductId = sanitizeUUID(item.productId);
-          
-          if (item.productId && !sanitizedProductId) {
-            console.warn('[processTelegramMessage] Invalid productId detected and sanitized:', {
-              original: item.productId,
-              sanitized: sanitizedProductId,
-              productName: item.productName
-            });
-          }
-
-          // 🔥 منع تكرار نفس المنتج إذا كان الطلب مكرراً، مع تحديث الكمية إذا تغيرت
-          if (isDuplicateOrder) {
-            const existingItemCheck = await client.query(
-              `SELECT id, quantity FROM order_items WHERE order_id = $1 AND (product_id = $2 OR product_name = $3) LIMIT 1`,
-              [orderId, sanitizedProductId, item.productName || 'Unknown Product']
-            );
-            
-            if (existingItemCheck.rows.length > 0) {
-              const existingQty = existingItemCheck.rows[0].quantity || 1;
-              const newQty = item.quantity || 1;
-              if (newQty > existingQty) {
-                await client.query(
-                  `UPDATE order_items SET quantity = $1 WHERE id = $2`,
-                  [newQty, existingItemCheck.rows[0].id]
-                );
-                // Also update order total
-                const priceDiff = (newQty - existingQty) * (item.price || 0);
-                await client.query(
-                  `UPDATE orders SET total = total + $1 WHERE id = $2`,
-                  [priceDiff, orderId]
-                );
-                console.log('[processTelegramMessage] Updated quantity for existing item:', { productName: item.productName, newQty });
-              } else {
-                console.log('[processTelegramMessage] Item already exists in duplicate order, skipping insertion:', { productName: item.productName });
-              }
-              continue;
-            }
-          }
-          
-          await client.query(
-            `INSERT INTO order_items (
-              order_id, product_id, product_name, quantity, price, currency
-            ) VALUES ($1, $2, $3, $4, $5, $6)`,
-            [
-              orderId,
-              sanitizedProductId,  // ✅ استخدام UUID النظيف أو null
-              item.productName || 'Unknown Product',
-              item.quantity || 1,
-              item.price || 0,
-              settings.store_currency || 'USD'
-            ]
-          );
-
-          if (isDuplicateOrder) {
-            const addedPrice = (item.quantity || 1) * (item.price || 0);
-            await client.query(
-              `UPDATE orders SET total = total + $1 WHERE id = $2`,
-              [addedPrice, orderId]
-            );
-            console.log('[processTelegramMessage] Added new item to duplicate order, updated total:', { productName: item.productName, addedPrice });
-          }
-        }
-
-        // Update customer stats
-        await client.query(
-          `UPDATE customers 
-           SET total_orders = total_orders + ${isDuplicateOrder ? '0' : '1'},
-               total_spent = total_spent + $1,
-               last_order_date = CURRENT_TIMESTAMP,
-               last_interaction_date = CURRENT_TIMESTAMP
-           WHERE id = $2 AND merchant_id = $3`,
-          [orderData.total || 0, customerId, merchantId] // ✅ SaaS: Ensure merchant isolation
-        );
-
-        // Create customer interaction record
-        await client.query(
-          `INSERT INTO customer_interactions (
-            customer_id, merchant_id, interaction_type, 
-            title, description, platform, related_order_id
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [
-            customerId,
-            merchantId,
-            'order',
-            'Order Created via Telegram Bot',
-            `Order #${orderId} created via Telegram bot`,
-            'telegram',
-            orderId
-          ]
-        );
-
-        await client.query('COMMIT');
-        
-        console.log('[processTelegramMessage] Order processed successfully:', {
-          orderId,
-          customerId,
-          total: orderData.total
-        });
-        
-        logger.info('Telegram order processed successfully', {
-          merchantId,
-          orderId,
-          customerId,
-          total: orderData.total
-        });
-
-        if (!isDuplicateOrder) {
-          notifyMerchantNewOrderAsync({
-            merchantId,
-            orderId,
-            customerName: orderData.customerName,
-            customerPhone: orderData.customerPhone,
-            customerEmail,
-            customerAddress: orderData.customerAddress,
-            deliveryTime: orderData.deliveryTime || null,
-            notes: combinedNotes,
-            total: orderData.total || 0,
-            currency: settings?.store_currency || 'USD',
-            source: 'telegram',
-            items: (orderData.products || []).map((p: any) => ({
-              productName: p.productName,
-              quantity: p.quantity || 1,
-              price: p.price || 0,
-            })),
-          });
-        }
-
-        // 🧹 FULL RESET: After successful order → restart conversation fresh
-        const confirmedProductName =
-          updatedState.extracted_entities?.product_query ||
-          orderData.products?.[0]?.productName ||
-          'المنتج';
-        const confirmedCustomerName = updatedState.extracted_entities?.name || '';
-
-        updatedState.last_order = {
-          orderId,
-          productName: confirmedProductName,
-          customerName: confirmedCustomerName,
-          confirmedAt: new Date().toISOString()
-        };
-
-        updatedState.extracted_entities = {};
-        updatedState.last_recommended_products = [];
-        updatedState.current_stage = 'discover';
-        updatedState.salesgpt_stage_id = '1';
-        updatedState.last_intent = 'greeting';
-        updatedState.message_count = 0;
-        updatedState.awaiting_order_confirmation = false;
-        delete updatedState.abandoned_checkout;
-
-        console.log('🧹 Telegram: Full state reset after order. last_order saved:', {
-          orderId,
-          productName: confirmedProductName,
-          hasCustomerName: Boolean(confirmedCustomerName),
-        });
-
-        // 💾 Persist reset state + last_order (was only in memory — next message must load this from DB)
-        await pool.query(
-          `UPDATE conversations 
-           SET conversation_state = $1,
-               current_intent = $2,
-               stage = $3,
-               last_message_at = CURRENT_TIMESTAMP,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $4 AND merchant_id = $5`,
-          [
-            JSON.stringify(updatedState),
-            updatedState.last_intent || 'greeting',
-            updatedState.current_stage || 'discover',
-            conversationId,
-            merchantId
-          ]
-        );
-      } catch (orderError) {
-        await client.query('ROLLBACK');
-        
-        // ✅ تحديد نوع الخطأ للتشخيص الأفضل
-        const errorMessage = (orderError as Error).message || 'Unknown error';
-        const isUUIDError = errorMessage.includes('uuid') || errorMessage.includes('invalid input syntax');
-        const isDuplicateError = errorMessage.includes('duplicate') || errorMessage.includes('unique');
-        
-        console.error('[processTelegramMessage] Error processing order:', {
-          error: errorMessage,
-          errorType: isUUIDError ? 'INVALID_UUID' : isDuplicateError ? 'DUPLICATE' : 'UNKNOWN',
-          merchantId,
-          customerPhone: orderData.customerPhone,
-          productsCount: orderData.products?.length || 0
-        });
-        
-        logger.error('Error processing Telegram order', orderError as Error, {
-          merchantId,
-          errorType: isUUIDError ? 'INVALID_UUID' : 'OTHER',
-          orderDataSummary: {
-            customerName: orderData.customerName,
-            customerPhone: orderData.customerPhone,
-            productsCount: orderData.products?.length || 0
-          }
-        });
-        
-        // Don't fail the message sending if order processing fails
-        // The user still gets the response, but order needs manual review
-      } finally {
-        client.release();
-      }
+      await persistOrderIfPresent({
+        pool,
+        merchantId,
+        conversationId,
+        orderData,
+        settings: { store_currency: settings?.store_currency || 'USD' },
+        labels: {
+          defaultBaseNotes: 'Order created via Telegram bot',
+          customerTags: ['bot-order', 'telegram'],
+          interactionTitle: 'Order Created via Telegram Bot',
+          interactionDescription: (orderId: string) => `Order #${orderId} created via Telegram bot`,
+          interactionPlatform: 'telegram',
+          logPrefix: 'processTelegramMessage'
+        },
+        updatedState,
+      });
     }
-    
+
     // ==================== STEP 3: Human-like send (typing delay + ≤2 bubbles) ====================
     // ✅ NOTE: Messages are already saved by orchestrator / bot core
     // DO NOT save messages here to avoid duplication

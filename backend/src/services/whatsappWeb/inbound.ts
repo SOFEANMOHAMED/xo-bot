@@ -1,18 +1,15 @@
 import type { WAMessage } from '@whiskeysockets/baileys';
 import pool from '../../database/connection.js';
 import { logger } from '../../utils/logger.js';
-import {
-  handleIncomingMessage,
-  type ConversationState,
-  type Message
-} from '../../bot/index.js';
+import type { ConversationState, Message } from '../../bot/index.js';
 import { getCachedMerchantSettings } from '../cacheService.js';
-import { persistBotChannelOrder } from '../channelBotOrder.js';
 import {
-  appendOrderDataIfConfirmed,
-  buildMerchantBotConfig
-} from '../buildMerchantBotConfig.js';
-import { escalateConversationToHuman } from '../escalation.js';
+  extractImageUrl,
+  extractOrderData,
+  persistOrderIfPresent,
+  runSalesBotTurn,
+} from '../channels/botTurn.js';
+import { buildMerchantBotConfig } from '../buildMerchantBotConfig.js';
 import { stripInternalControlMarkers } from '../../response/sanitize-reply.js';
 import {
   deliverHumanLikeReply,
@@ -42,41 +39,6 @@ import {
 import { isDirectCustomerJid, normalizeWhatsAppJid } from './jid.js';
 import { wasSentByBot } from './runtimeRegistry.js';
 import { isPlaceholderCustomerName } from '../socialProfile.js';
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function sanitizeUUID(str: string | null | undefined): string | null {
-  if (!str) return null;
-  const cleaned = str.trim().toLowerCase();
-  return UUID_RE.test(cleaned) ? cleaned : null;
-}
-
-function extractImageUrl(text: string): { imageUrl: string | null; cleanText: string } {
-  const imageRegex = /\[IMAGE:\s*([^\]]+)\]/i;
-  const match = text.match(imageRegex);
-  if (match?.[1]) {
-    return { imageUrl: match[1].trim(), cleanText: text.replace(imageRegex, '').trim() };
-  }
-  return { imageUrl: null, cleanText: text };
-}
-
-function extractOrderData(text: string): { orderData: any | null; cleanText: string } {
-  const orderDataRegex = /\[ORDER_DATA\]([\s\S]*?)\[\/ORDER_DATA\]/gi;
-  const match = text.match(orderDataRegex);
-  if (match?.[0]) {
-    try {
-      const jsonMatch = match[0].match(/\[ORDER_DATA\]([\s\S]*?)\[\/ORDER_DATA\]/i);
-      if (jsonMatch?.[1]) {
-        const orderData = JSON.parse(jsonMatch[1].trim());
-        const cleanText = text.replace(orderDataRegex, '').replace(/\n{3,}/g, '\n\n').trim();
-        return { orderData, cleanText };
-      }
-    } catch (error) {
-      logger.error('Error parsing ORDER_DATA from WhatsApp Web reply', error as Error);
-    }
-  }
-  return { orderData: null, cleanText: text.replace(orderDataRegex, '').trim() };
-}
 
 type PreparedInbound = {
   merchantId: string;
@@ -166,7 +128,6 @@ async function processBotTurn(payload: PreparedInbound): Promise<void> {
     payment_methods: '',
     return_policy: '',
     additional_notes: '',
-    ai_mode: 'hybrid'
   };
 
   if (imageUrl) {
@@ -281,88 +242,35 @@ async function processBotTurn(payload: PreparedInbound): Promise<void> {
   let updatedState: ConversationState = conversationState;
 
   try {
-    const result = await handleIncomingMessage({
+    const turn = await runSalesBotTurn({
       merchantId,
       platform: 'whatsapp',
+      escalatePlatform: 'whatsapp',
       userId,
       userName: isPlaceholderCustomerName(userName) ? 'عميل' : userName,
       messageText,
       externalMessageId: messageId,
       recentMessages,
       conversationState,
-      merchantConfig: buildMerchantBotConfig({ merchantId, settings })
-    });
-
-    responseText = result.replyText;
-    updatedState = result.updatedState;
-
-    const entities = updatedState.extracted_entities || {};
-    const products = updatedState.last_recommended_products || [];
-    responseText = appendOrderDataIfConfirmed({
-      responseText,
-      nextAction: result.next_action,
-      entities,
-      productIds: products,
+      merchantConfig: buildMerchantBotConfig({ merchantId, settings }),
+      conversationId,
       storeCurrency: settings.store_currency || 'USD',
-      channelLabel: 'WhatsApp Web'
+      channelLabel: 'WhatsApp Web',
+      pool,
+      userMessageMetadata: imageUrl
+        ? { type: 'image', imageUrl }
+        : { type: 'text' },
     });
 
-    if (result.shouldEscalate) {
-      await escalateConversationToHuman({
+    responseText = turn.responseText;
+    updatedState = turn.updatedState;
+
+    if (turn.failed) {
+      logger.error('WhatsApp Web orchestrator failed', new Error('SalesGPT turn failed'), {
         merchantId,
         conversationId,
-        platform: 'whatsapp',
-        userId,
-        userName: isPlaceholderCustomerName(userName) ? 'عميل' : userName,
-        reason: result.next_action === 'handoff' ? 'handoff_action' : 'escalate_marker',
-        replyPreview: responseText
       });
     }
-
-    responseText = stripInternalControlMarkers(responseText);
-
-    await pool.query(
-      `INSERT INTO messages (conversation_id, role, content, sender_type, external_message_id, source, metadata)
-       VALUES ($1, 'user', $2, 'user', $3, 'whatsapp', $4::jsonb)`,
-      [
-        conversationId,
-        messageText,
-        messageId || null,
-        JSON.stringify({
-          platform: 'whatsapp',
-          ...(imageUrl ? { type: 'image', imageUrl } : { type: 'text' })
-        })
-      ]
-    );
-    await pool.query(
-      `INSERT INTO messages (conversation_id, role, content, sender_type, source, metadata)
-       VALUES ($1, 'assistant', $2, 'bot', 'whatsapp', $3::jsonb)`,
-      [
-        conversationId,
-        responseText,
-        JSON.stringify({
-          platform: 'whatsapp',
-          pipelineUsed: result.meta.pipelineUsed,
-          processingTimeMs: result.meta.processingTimeMs
-        })
-      ]
-    );
-    await pool.query(
-      `UPDATE conversations
-       SET conversation_state = $1,
-           current_intent = $2,
-           stage = $3,
-           last_message_at = CURRENT_TIMESTAMP,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $4 AND merchant_id = $5`,
-      [
-        JSON.stringify(updatedState),
-        result.meta.intent,
-        result.meta.stage,
-        conversationId,
-        merchantId
-      ]
-    );
   } catch (error) {
     logger.error('WhatsApp Web orchestrator failed', error as Error, { merchantId, conversationId });
     responseText = 'عذراً، حدث خطأ في معالجة رسالتك. يرجى المحاولة مرة أخرى.';
@@ -373,20 +281,14 @@ async function processBotTurn(payload: PreparedInbound): Promise<void> {
   const { orderData, cleanText: withoutOrder } = extractOrderData(responseText);
   const { imageUrl: replyImage, cleanText } = extractImageUrl(withoutOrder);
 
-  if (
-    orderData?.customerName &&
-    orderData?.customerPhone &&
-    orderData?.customerAddress &&
-    Array.isArray(orderData.products) &&
-    orderData.products.length > 0
-  ) {
-    const persisted = await persistBotChannelOrder(
+  if (orderData) {
+    await persistOrderIfPresent({
       pool,
       merchantId,
+      conversationId,
       orderData,
-      { store_currency: settings.store_currency || 'USD' },
-      sanitizeUUID,
-      {
+      settings: { store_currency: settings.store_currency || 'USD' },
+      labels: {
         defaultBaseNotes: 'Order created via WhatsApp bot',
         customerTags: ['bot-order', 'whatsapp'],
         interactionTitle: 'Order Created via WhatsApp Bot',
@@ -394,17 +296,16 @@ async function processBotTurn(payload: PreparedInbound): Promise<void> {
         interactionPlatform: 'whatsapp',
         logPrefix: 'whatsappWebInbound'
       },
-      updatedState
-    );
-    if (persisted) {
-      await pool.query(
-        `UPDATE conversations
-         SET conversation_state = $1, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $2 AND merchant_id = $3`,
-        [JSON.stringify(updatedState), conversationId, merchantId]
-      );
-    }
+      updatedState,
+    });
   }
+
+  await pool.query(
+    `UPDATE conversations
+     SET last_bot_response_at = CURRENT_TIMESTAMP
+     WHERE id = $1 AND merchant_id = $2`,
+    [conversationId, merchantId]
+  );
 
   const finalText = stripInternalControlMarkers(cleanText);
   const hasImage = !!(replyImage && replyImage.startsWith('http'));

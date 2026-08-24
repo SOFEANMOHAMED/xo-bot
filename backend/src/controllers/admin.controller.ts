@@ -2,7 +2,6 @@ import { Request, Response, NextFunction } from 'express';
 import pool from '../database/connection.js';
 import { createError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
-import { updateGeminiServicePrompt } from '../utils/updateGeminiService.js';
 import { getPlanConfig, calculateCommission } from '../utils/planConfig.js';
 import {
   createMerchantNotification,
@@ -1448,22 +1447,6 @@ export const updateGlobalSettings = async (
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
-
-    // Update System Messages in geminiService.ts if bots settings are provided
-    if (settings.bots) {
-      try {
-        if (settings.bots.productsBot?.systemMessage) {
-          await updateGeminiServicePrompt('productsBot', settings.bots.productsBot.systemMessage);
-        }
-        if (settings.bots.servicesBot?.systemMessage) {
-          await updateGeminiServicePrompt('servicesBot', settings.bots.servicesBot.systemMessage);
-        }
-      } catch (fileUpdateError: any) {
-        console.error('Error updating geminiService.ts:', fileUpdateError);
-        // Continue with database update even if file update fails
-        // We don't want to block the settings save if file update fails
-      }
-    }
 
     // Update or insert settings
     await pool.query(

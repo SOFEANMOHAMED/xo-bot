@@ -190,7 +190,9 @@ const BotPlayground: React.FC<BotPlaygroundProps> = ({ products, services = [], 
                     productName: item.productName || product?.name || 'منتج غير معروف',
                     quantity: item.quantity || 1,
                     price: product?.price || item.price || 0,
-                    currency: settings?.storeCurrency || 'USD'
+                    currency: settings?.storeCurrency || 'USD',
+                    color: item.variant?.color || item.color || null,
+                    size: item.variant?.size || item.size || null,
                   };
                 })
               };

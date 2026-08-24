@@ -557,9 +557,12 @@ class ApiService {
           quantity: number;
           price: number;
           currency: string;
+          color?: string | null;
+          size?: string | null;
         }>;
         date: string;
         viewedAt: string | null;
+        deliveryTime?: string | null;
         createdAt: string;
         updatedAt: string;
       }>;
@@ -587,9 +590,12 @@ class ApiService {
           quantity: number;
           price: number;
           currency: string;
+          color?: string | null;
+          size?: string | null;
         }>;
         date: string;
         viewedAt: string | null;
+        deliveryTime?: string | null;
         createdAt: string;
         updatedAt: string;
       };
@@ -612,6 +618,8 @@ class ApiService {
       quantity: number;
       price: number;
       currency?: string;
+      color?: string;
+      size?: string;
     }>;
     notes?: string;
   }) {
@@ -2216,7 +2224,12 @@ class ApiService {
   async getOfficialFacebookStatus() {
     return this.request<{
       linked: boolean;
-      page: { pageId: string; pageName: string | null; linkedAt: string } | null;
+      page: {
+        pageId: string;
+        pageName: string | null;
+        linkedAt: string;
+        instagram?: { igUserId: string; igUsername: string | null } | null;
+      } | null;
       bot: { enabled: boolean; systemMessage: string };
     }>('/admin/facebook/official/status');
   }
@@ -2464,6 +2477,69 @@ class ApiService {
       `/admin/facebook/official/keyword-rules/${ruleId}`,
       { method: 'DELETE' }
     );
+  }
+
+  // ── Official page content publishing (platform-scoped) ───────────────────
+
+  async getOfficialContentAccounts() {
+    return this.request<{ accounts: import('../types/contentPublishing').ContentPublishAccount[] }>(
+      '/admin/facebook/official/content/accounts'
+    );
+  }
+
+  async listOfficialContentPublications(params?: {
+    status?: string;
+    platform?: 'facebook' | 'instagram';
+    limit?: number;
+    offset?: number;
+  }) {
+    const q = new URLSearchParams();
+    if (params?.status) q.set('status', params.status);
+    if (params?.platform) q.set('platform', params.platform);
+    if (params?.limit) q.set('limit', String(params.limit));
+    if (params?.offset) q.set('offset', String(params.offset));
+    const qs = q.toString();
+    return this.request<{
+      publications: import('../types/contentPublishing').ContentPublication[];
+      total: number;
+    }>(`/admin/facebook/official/content/publications${qs ? `?${qs}` : ''}`);
+  }
+
+  async createOfficialContentPublication(
+    payload: import('../types/contentPublishing').CreateContentPublicationPayload
+  ) {
+    return this.request<{
+      message: string;
+      publication: import('../types/contentPublishing').ContentPublication;
+    }>('/admin/facebook/official/content/publications', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteOfficialContentPublication(id: string) {
+    return this.request<{ message: string }>(
+      `/admin/facebook/official/content/publications/${id}`,
+      { method: 'DELETE' }
+    );
+  }
+
+  async publishOfficialContentPublicationNow(id: string) {
+    return this.request<{
+      message: string;
+      publication: import('../types/contentPublishing').ContentPublication;
+    }>(`/admin/facebook/official/content/publications/${id}/publish`, {
+      method: 'POST',
+    });
+  }
+
+  async cancelOfficialContentPublication(id: string) {
+    return this.request<{
+      message: string;
+      publication: import('../types/contentPublishing').ContentPublication;
+    }>(`/admin/facebook/official/content/publications/${id}/cancel`, {
+      method: 'POST',
+    });
   }
 
   async uploadPaymentProof(file: File): Promise<{

@@ -60,9 +60,19 @@ import {
   unsubscribeAdminPush,
   sendAdminTestPush,
 } from '../controllers/adminPush.controller.js';
+import {
+  listOfficialContentAccounts,
+  listOfficialContentPublications,
+  getOfficialContentPublication,
+  createOfficialContentPublication,
+  updateOfficialContentPublication,
+  deleteOfficialContentPublication,
+  publishOfficialContentPublicationNow,
+  scheduleOfficialContentPublication,
+  cancelOfficialContentPublication,
+} from '../controllers/adminOfficialContent.controller.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { requireAdminGate } from '../middleware/adminGate.js';
-import { enableFullAIMode, disableFullAIMode } from './admin/enable-full-ai.js';
 
 const router = express.Router();
 
@@ -126,6 +136,17 @@ router.put('/facebook/official/conversations/:id/disable-bot', disableOfficialIn
 router.put('/facebook/official/conversations/:id/enable-bot', enableOfficialInboxBot);
 router.post('/facebook/official/conversations/:id/mark-read', markOfficialInboxRead);
 
+// Official page content publishing & scheduling (platform-scoped)
+router.get('/facebook/official/content/accounts', listOfficialContentAccounts);
+router.get('/facebook/official/content/publications', listOfficialContentPublications);
+router.post('/facebook/official/content/publications', createOfficialContentPublication);
+router.get('/facebook/official/content/publications/:id', getOfficialContentPublication);
+router.put('/facebook/official/content/publications/:id', updateOfficialContentPublication);
+router.delete('/facebook/official/content/publications/:id', deleteOfficialContentPublication);
+router.post('/facebook/official/content/publications/:id/publish', publishOfficialContentPublicationNow);
+router.post('/facebook/official/content/publications/:id/schedule', scheduleOfficialContentPublication);
+router.post('/facebook/official/content/publications/:id/cancel', cancelOfficialContentPublication);
+
 // Notifications
 router.get('/notifications', getAdminNotifications);
 router.put('/notifications/:id/read', markNotificationAsRead);
@@ -146,9 +167,5 @@ router.post('/email/broadcast', sendEmailBroadcast);
 // User Notifications
 router.get('/notifications/recipient-count', getNotificationRecipientCount);
 router.post('/notifications/send', sendUserNotification);
-
-// Full AI Mode Toggle
-router.post('/full-ai/enable', enableFullAIMode);
-router.post('/full-ai/disable', disableFullAIMode);
 
 export default router;

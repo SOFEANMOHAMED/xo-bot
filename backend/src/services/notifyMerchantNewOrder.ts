@@ -30,6 +30,8 @@ export type NotifyNewOrderInput = {
     productName?: string | null;
     quantity?: number | null;
     price?: number | null;
+    color?: string | null;
+    size?: string | null;
   }>;
 };
 
@@ -100,6 +102,8 @@ export async function notifyMerchantNewOrder(input: NotifyNewOrderInput): Promis
       productName: item.productName || 'منتج',
       quantity: item.quantity || 1,
       price: typeof item.price === 'number' ? item.price : parseFloat(String(item.price || 0)) || 0,
+      color: item.color || null,
+      size: item.size || null,
     }));
 
     // Hide synthetic chat emails from the merchant notification

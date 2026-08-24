@@ -20,13 +20,19 @@ export interface CustomerRequestSignals {
    * Never sufficient alone to persist ORDER_DATA — orderConfirmationPolicy still gates.
    */
   readyToConfirm: boolean;
+  /**
+   * Customer wants to add another product to the cart (not finalize yet).
+   * Code locks the current draft into cart; model must not invent cart JSON.
+   */
+  wantsAddAnother: boolean;
 }
 
 export const EMPTY_CUSTOMER_REQUEST: CustomerRequestSignals = {
   wantsAlternatives: false,
   asksProductInfo: false,
   wantsPhoto: false,
-  readyToConfirm: false
+  readyToConfirm: false,
+  wantsAddAnother: false
 };
 
 function asBool(value: unknown): boolean {
@@ -52,7 +58,8 @@ export function normalizeCustomerRequest(raw: unknown): CustomerRequestSignals {
     wantsAlternatives: asBool(o.wants_alternatives ?? o.wantsAlternatives),
     asksProductInfo: asBool(o.asks_product_info ?? o.asksProductInfo),
     wantsPhoto: asBool(o.wants_photo ?? o.wantsPhoto),
-    readyToConfirm: asBool(o.ready_to_confirm ?? o.readyToConfirm)
+    readyToConfirm: asBool(o.ready_to_confirm ?? o.readyToConfirm),
+    wantsAddAnother: asBool(o.wants_add_another ?? o.wantsAddAnother)
   };
 }
 

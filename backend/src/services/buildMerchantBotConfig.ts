@@ -5,6 +5,7 @@
 
 import type { MerchantConfig, Persona } from '../core/types.js';
 import { shouldAppendOrderData, sanitizeCollectedText } from './salesgpt/orderConfirmationPolicy.js';
+import { buildMerchantOrderNotes } from '../orders/merchantOrderNotes.js';
 
 export type MerchantSettingsLike = {
   store_name?: string | null;
@@ -16,7 +17,6 @@ export type MerchantSettingsLike = {
   payment_methods?: string | null;
   return_policy?: string | null;
   additional_notes?: string | null;
-  ai_mode?: 'hybrid' | 'full' | string | null;
 };
 
 export type BuildMerchantBotConfigOptions = {
@@ -30,7 +30,7 @@ export type BuildMerchantBotConfigOptions = {
 
 /**
  * Build Partial<MerchantConfig> matching channel controllers (FB / IG / Telegram).
- * Full AI mode follows merchant_settings.ai_mode (and ENABLE_FULL_AI_MODE inside orchestrator).
+ * SalesGPT (Full AI) is always enabled for merchant bot turns.
  */
 export function buildMerchantBotConfig(options: BuildMerchantBotConfigOptions): Partial<MerchantConfig> {
   const { merchantId, settings, systemPromptSuffix = '', overrides = {} } = options;
@@ -50,13 +50,14 @@ export function buildMerchantBotConfig(options: BuildMerchantBotConfigOptions): 
     returnPolicy: settings.return_policy || '',
     additionalNotes: settings.additional_notes || '',
     botLanguage: 'auto',
-    use_full_ai_mode: settings.ai_mode === 'full',
+    use_full_ai_mode: true,
   };
 }
 
 /**
  * Append [ORDER_DATA] when the pipeline finalized the order (next_action = confirm_order).
  * Shared by every channel — do not duplicate this gate in controllers.
+ * Prefers cart.items when present (multi-product); falls back to single productIds.
  */
 export function appendOrderDataIfConfirmed(params: {
   responseText: string;
@@ -64,7 +65,16 @@ export function appendOrderDataIfConfirmed(params: {
   entities: Record<string, any>;
   productIds: string[];
   storeCurrency: string;
-  channelLabel: string;
+  /** Locked cart lines from conversation_state.cart */
+  cartItems?: Array<{
+    productId: string;
+    productName: string;
+    quantity: number;
+    unitPrice?: number;
+    currency?: string;
+    color?: string;
+    size?: string;
+  }>;
   /** @deprecated Ignored — finalization is decided solely by next_action in SalesGPT policy */
   replyStillAsks?: boolean;
 }): string {
@@ -74,19 +84,41 @@ export function appendOrderDataIfConfirmed(params: {
     entities,
     productIds,
     storeCurrency,
-    channelLabel,
+    cartItems,
   } = params;
 
   const name = sanitizeCollectedText(entities.name);
   const phone = sanitizeCollectedText(entities.phone);
   const address = sanitizeCollectedText(entities.address);
 
-  const hasAllOrderInfo = !!(
-    name &&
-    phone &&
-    address &&
-    productIds.length > 0
-  );
+  const fromCart =
+    Array.isArray(cartItems) && cartItems.length > 0
+      ? cartItems
+          .filter((item) => item?.productId)
+          .map((item) => ({
+            productId: item.productId,
+            productName: item.productName || entities.product_query || 'Product',
+            quantity: item.quantity > 0 ? item.quantity : 1,
+            price: typeof item.unitPrice === 'number' ? item.unitPrice : 0,
+            currency: item.currency || storeCurrency || 'USD',
+            variant:
+              item.color || item.size
+                ? { color: item.color, size: item.size }
+                : undefined,
+          }))
+      : null;
+
+  const products =
+    fromCart ||
+    productIds.map((productId: string) => ({
+      productId,
+      productName: entities.product_query || 'Product',
+      quantity: entities.quantity || 1,
+      price: 0,
+      currency: storeCurrency || 'USD',
+    }));
+
+  const hasAllOrderInfo = !!(name && phone && address && products.length > 0);
 
   if (!hasAllOrderInfo || !shouldAppendOrderData(nextAction, responseText)) {
     return responseText;
@@ -98,15 +130,14 @@ export function appendOrderDataIfConfirmed(params: {
     customerAddress: address,
     customerEmail: entities.email || null,
     deliveryTime: entities.delivery_time || null,
-    notes: `Order via ${channelLabel} | Product: ${entities.product_query || 'N/A'}${entities.color ? ` | Color: ${entities.color}` : ''}${entities.size ? ` | Size: ${entities.size}` : ''}`,
-    products: productIds.map((productId: string) => ({
-      productId,
-      productName: entities.product_query || 'Product',
-      quantity: entities.quantity || 1,
-      price: 0,
-      currency: storeCurrency || 'USD',
-    })),
-    total: 0,
+    notes: buildMerchantOrderNotes({
+      notes: sanitizeCollectedText(entities.notes || entities.additional_notes),
+    }),
+    products,
+    total: products.reduce(
+      (sum, p) => sum + (p.price || 0) * (p.quantity || 1),
+      0
+    ),
   };
 
   return `${responseText}\n[ORDER_DATA]${JSON.stringify(fullAIOrderData)}[/ORDER_DATA]`;

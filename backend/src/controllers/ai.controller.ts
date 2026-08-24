@@ -24,6 +24,7 @@ import { conversationIngressQueue } from '../services/conversationIngressQueue.j
 import { getAIClient, isAIAvailable } from '../ai/gemini-client.js';
 import { generateImageWithKie, MAX_REFERENCE_IMAGES } from '../ai/kie-client.js';
 import { logger } from '../utils/logger.js';
+import { conversationStageForDb } from '../services/salesgpt/conversationStateSync.js';
 import type { ConversationState, Message, Persona, Platform } from '../core/types.js';
 
 const chatRequestSchema = z.object({
@@ -225,7 +226,7 @@ export const generateChatResponse = async (
           entities,
           productIds,
           storeCurrency: p.storeCurrency,
-          channelLabel: `Bot Playground (${p.botPlatform})`,
+          cartItems: updatedState.cart?.items,
         });
 
         if (result.shouldEscalate) {
@@ -281,7 +282,7 @@ export const generateChatResponse = async (
         await patchConversationState(p.conversationId, {
           conversation_state: updatedState,
           current_intent: result.meta.intent,
-          stage: result.meta.stage
+          stage: conversationStageForDb(updatedState)
         });
 
         logger.info('Playground message processed via channel bot path', {
@@ -290,7 +291,7 @@ export const generateChatResponse = async (
           platform: p.botPlatform,
           pipelineUsed: result.meta.pipelineUsed,
           intent: result.meta.intent,
-          stage: result.meta.stage,
+          stage: conversationStageForDb(updatedState),
           mergedParts: batch.parts.length
         });
 

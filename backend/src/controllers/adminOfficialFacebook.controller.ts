@@ -17,6 +17,7 @@ import {
 } from '../services/facebookPageWebhooks.js';
 import {
   ensurePlatformFacebookTables,
+  fetchLinkedInstagramBusinessAccount,
   getLinkedPlatformFacebookPage,
   linkPlatformFacebookPage,
   unlinkPlatformFacebookPage,
@@ -85,6 +86,8 @@ export const connectOfficialFacebook = async (
       'publish_video',
       'pages_manage_engagement',
       'business_management',
+      'instagram_basic',
+      'instagram_content_publish',
     ].join(',');
 
     const authUrl =
@@ -251,11 +254,18 @@ export const linkOfficialFacebookPage = async (
       return next(createError('تعذر الحصول على رمز الوصول للصفحة', 400));
     }
 
+    const ig = await fetchLinkedInstagramBusinessAccount({
+      pageId: String(pageData.id),
+      accessToken: pageAccessToken,
+    });
+
     const linked = await linkPlatformFacebookPage({
       pageId: String(pageData.id),
       pageName: pageData.name || String(pageData.id),
       accessToken: pageAccessToken,
       linkedByMerchantId: req.merchantId || null,
+      igUserId: ig?.igUserId ?? null,
+      igUsername: ig?.igUsername ?? null,
     });
 
     try {

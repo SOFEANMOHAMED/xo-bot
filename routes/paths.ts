@@ -90,6 +90,7 @@ export const ADMIN_VIEW_SLUG: Record<AdminView, string> = {
   [AdminView.PAYMENT_REQUESTS]: 'payment-requests',
   [AdminView.OFFICIAL_PAGE_INBOX]: 'xo-page-inbox',
   [AdminView.OFFICIAL_PAGE_COMMENTS]: 'xo-page-comments',
+  [AdminView.CONTENT_PUBLISHING]: 'content-publishing',
   [AdminView.ACQUISITION]: 'acquisition',
 };
 

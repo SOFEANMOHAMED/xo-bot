@@ -6,9 +6,7 @@
 // ==================== MAIN ORCHESTRATOR ====================
 export {
   processMessage,
-  isQuickGreeting,
-  getDefaultMerchantConfig,
-  routeToPipeline
+  getDefaultMerchantConfig
 } from './orchestrator.js';
 
 // ==================== TYPES ====================
@@ -16,7 +14,7 @@ export type {
   // Language & Localization
   Language,
   DetectedLanguage,
-  
+
   // Intent & Stage
   Intent,
   Stage,
@@ -24,30 +22,27 @@ export type {
   CtaType,
   NextAction,
   RecommendationStrategy,
-  
+
   // Platform & Persona
   Platform,
   Persona,
-  
+
   // Entities & Config
   Entities,
   MerchantConfig,
   Message,
   ConversationState,
-  
+
   // Request & Response
   IncomingMessage,
   BotResponse,
-  
+
   // Product & Order
   Product,
   OrderData
 } from './types.js';
 
 export { MANDATORY_ORDER_FIELDS } from './types.js';
-
-// ==================== PIPELINE ROUTER ====================
-export type { RoutingDecision, PipelineType } from './pipeline-router.js';
 
 // ==================== ERROR HANDLER ====================
 export {

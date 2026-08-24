@@ -3,6 +3,7 @@ import { Check, X, Loader2, ExternalLink, RefreshCw, FileText, Image as ImageIco
 import apiService from '../../services/api';
 import { useAdminNotifications } from './AdminNotificationContext';
 import { logger } from '../../utils/logger';
+import { PaymentMethodLogo } from '../PaymentMethodLogo';
 
 interface PaymentRequest {
   id: string;
@@ -170,7 +171,10 @@ const AdminPaymentRequests: React.FC = () => {
                       {planLabels[req.planKey] || req.planKey}
                     </td>
                     <td className="px-4 py-4 text-slate-300 text-sm">
-                      {methodLabels[req.method] || req.method}
+                      <span className="inline-flex items-center gap-2">
+                        <PaymentMethodLogo methodId={req.method} className="w-7 h-7 rounded-md" />
+                        {methodLabels[req.method] || req.method}
+                      </span>
                     </td>
                     <td className="px-4 py-4 text-white font-bold" dir="ltr">
                       ${req.amount}

@@ -13,6 +13,7 @@ import AdminAlerts from './admin/AdminAlerts';
 import AdminPages from './admin/AdminPages';
 import AdminSupportTickets from './admin/AdminSupportTickets';
 import AdminPaymentRequests from './admin/AdminPaymentRequests';
+import AdminContentPublishing from './admin/AdminContentPublishing';
 import NotificationContainer from './Notification';
 import { AdminNotificationProvider, useAdminNotifications } from './admin/AdminNotificationContext';
 
@@ -69,6 +70,8 @@ const AdminDashboardContent: React.FC<AdminDashboardProps> = ({ currentView, onC
         return <AdminSupportTickets />;
       case AdminView.PAYMENT_REQUESTS:
         return <AdminPaymentRequests />;
+      case AdminView.CONTENT_PUBLISHING:
+        return <AdminContentPublishing />;
       default:
         return <AdminOverview />;
     }

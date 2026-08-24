@@ -97,7 +97,7 @@ export interface MerchantConfig {
   returnPolicy?: string;
   additionalNotes?: string;
   systemPrompt?: string;
-  use_full_ai_mode?: boolean; // Enable full AI orchestration with strict guardrails
+  use_full_ai_mode?: boolean; // Always true for merchant bot (SalesGPT-only pipeline)
   store_name?: string; // For AI orchestrator
   currency?: string; // For AI orchestrator
 }
@@ -134,6 +134,30 @@ export interface ChannelBinding {
   platform?: string;
 }
 
+/**
+ * Locked cart line — written by code only (never by the model).
+ * Price is snapshotted at add time so checkout totals stay stable.
+ */
+export interface CartItem {
+  productId: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  currency: string;
+  color?: string;
+  size?: string;
+  addedAt: string;
+}
+
+export type CartStatus = 'building' | 'checking_out';
+
+/** Deterministic shopping cart beside the single-product conversation draft */
+export interface ConversationCart {
+  items: CartItem[];
+  status: CartStatus;
+  updatedAt?: string;
+}
+
 export interface ConversationState {
   last_intent?: Intent;
   current_stage?: Stage;
@@ -150,6 +174,11 @@ export interface ConversationState {
   last_order?: LastOrderSummary; // Triggers fresh-start greeting on next message
   /** True while fields are complete and we are waiting for an explicit customer yes */
   awaiting_order_confirmation?: boolean;
+  /**
+   * Multi-item cart (source of truth for ORDER_DATA).
+   * Draft product lives in extracted_entities until locked into cart.items.
+   */
+  cart?: ConversationCart;
   abandoned_checkout?: AbandonedCheckoutState;
   channel_binding?: ChannelBinding;
 }

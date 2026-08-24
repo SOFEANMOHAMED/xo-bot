@@ -4,13 +4,50 @@ import { createError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
 import { z } from 'zod';
 import { notifyMerchantNewOrderAsync } from '../services/notifyMerchantNewOrder.js';
+import { formatOrderNotesForMerchant } from '../orders/merchantOrderNotes.js';
+import type { Pool, PoolClient } from 'pg';
+
+async function orderItemsHaveVariantColumns(db: Pool | PoolClient): Promise<boolean> {
+  const check = await db.query(
+    `SELECT column_name
+     FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name = 'order_items'
+       AND column_name IN ('color', 'size')`
+  );
+  return check.rows.length >= 2;
+}
+
+function mapOrderItemRow(item: {
+  id: string;
+  product_id: string | null;
+  product_name: string;
+  quantity: number;
+  price: string | number;
+  currency: string;
+  color?: string | null;
+  size?: string | null;
+}) {
+  return {
+    id: item.id,
+    productId: item.product_id,
+    productName: item.product_name,
+    quantity: item.quantity,
+    price: parseFloat(String(item.price)),
+    currency: item.currency,
+    color: item.color || null,
+    size: item.size || null,
+  };
+}
 
 const orderItemSchema = z.object({
   productId: z.string().uuid().optional(),
   productName: z.string(),
   quantity: z.number().int().positive(),
   price: z.number().positive(),
-  currency: z.string().default('USD')
+  currency: z.string().default('USD'),
+  color: z.string().max(100).optional(),
+  size: z.string().max(100).optional(),
 });
 
 const orderSchema = z.object({
@@ -55,6 +92,10 @@ export const getOrders = async (
       AND column_name = 'delivery_time'
     `);
     const hasDeliveryTimeColumn = deliveryTimeColumnCheck.rows.length > 0;
+    const hasVariantColumns = await orderItemsHaveVariantColumns(pool);
+    const itemColumns = hasVariantColumns
+      ? 'id, product_id, product_name, quantity, price, currency, color, size'
+      : 'id, product_id, product_name, quantity, price, currency';
 
     let query = `
       SELECT o.id, o.external_id, o.customer_name, o.customer_email, 
@@ -89,7 +130,7 @@ export const getOrders = async (
     const orders = await Promise.all(
       ordersResult.rows.map(async (orderRow) => {
         const itemsResult = await pool.query(
-          `SELECT id, product_id, product_name, quantity, price, currency
+          `SELECT ${itemColumns}
            FROM order_items
            WHERE order_id = $1`,
           [orderRow.id]
@@ -107,16 +148,9 @@ export const getOrders = async (
           currency: orderRow.currency,
           status: orderRow.status,
           source: orderRow.source,
-          notes: orderRow.notes,
+          notes: formatOrderNotesForMerchant(orderRow.notes) || null,
           viewedAt: hasViewedAtColumn ? orderRow.viewed_at : null,
-          items: itemsResult.rows.map(item => ({
-            id: item.id,
-            productId: item.product_id,
-            productName: item.product_name,
-            quantity: item.quantity,
-            price: parseFloat(item.price),
-            currency: item.currency
-          })),
+          items: itemsResult.rows.map(mapOrderItemRow),
           date: orderRow.created_at,
           createdAt: orderRow.created_at,
           updatedAt: orderRow.updated_at
@@ -160,6 +194,10 @@ export const getOrder = async (
       AND column_name = 'delivery_time'
     `);
     const hasDeliveryTimeColumn = deliveryTimeColumnCheck.rows.length > 0;
+    const hasVariantColumns = await orderItemsHaveVariantColumns(pool);
+    const itemColumns = hasVariantColumns
+      ? 'id, product_id, product_name, quantity, price, currency, color, size'
+      : 'id, product_id, product_name, quantity, price, currency';
 
     let query = `
       SELECT id, external_id, customer_name, customer_email, customer_phone,
@@ -188,7 +226,7 @@ export const getOrder = async (
     const orderRow = orderResult.rows[0];
 
     const itemsResult = await pool.query(
-      `SELECT id, product_id, product_name, quantity, price, currency
+      `SELECT ${itemColumns}
        FROM order_items
        WHERE order_id = $1`,
       [id]
@@ -206,16 +244,9 @@ export const getOrder = async (
       currency: orderRow.currency,
       status: orderRow.status,
       source: orderRow.source,
-      notes: orderRow.notes,
+      notes: formatOrderNotesForMerchant(orderRow.notes) || null,
       viewedAt: hasViewedAtColumn ? orderRow.viewed_at : null,
-      items: itemsResult.rows.map(item => ({
-        id: item.id,
-        productId: item.product_id,
-        productName: item.product_name,
-        quantity: item.quantity,
-        price: parseFloat(item.price),
-        currency: item.currency
-      })),
+      items: itemsResult.rows.map(mapOrderItemRow),
       date: orderRow.created_at,
       createdAt: orderRow.created_at,
       updatedAt: orderRow.updated_at
@@ -252,6 +283,7 @@ export const createOrder = async (
         AND column_name = 'delivery_time'
       `);
       const hasDeliveryTimeColumn = deliveryTimeColumnCheck.rows.length > 0;
+      const hasVariantColumns = await orderItemsHaveVariantColumns(client);
 
       const orderInsertQuery = hasDeliveryTimeColumn
         ? `INSERT INTO orders (
@@ -307,28 +339,38 @@ export const createOrder = async (
       // Create order items
       const items = [];
       for (const item of validated.items) {
-        const itemResult = await client.query(
-          `INSERT INTO order_items (
-            order_id, product_id, product_name, quantity, price, currency
-          ) VALUES ($1, $2, $3, $4, $5, $6)
-          RETURNING id, product_id, product_name, quantity, price, currency`,
-          [
-            orderRow.id,
-            item.productId || null,
-            item.productName,
-            item.quantity,
-            item.price,
-            item.currency
-          ]
-        );
-        items.push({
-          id: itemResult.rows[0].id,
-          productId: itemResult.rows[0].product_id,
-          productName: itemResult.rows[0].product_name,
-          quantity: itemResult.rows[0].quantity,
-          price: parseFloat(itemResult.rows[0].price),
-          currency: itemResult.rows[0].currency
-        });
+        const itemResult = hasVariantColumns
+          ? await client.query(
+              `INSERT INTO order_items (
+                order_id, product_id, product_name, quantity, price, currency, color, size
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+              RETURNING id, product_id, product_name, quantity, price, currency, color, size`,
+              [
+                orderRow.id,
+                item.productId || null,
+                item.productName,
+                item.quantity,
+                item.price,
+                item.currency,
+                item.color?.trim() || null,
+                item.size?.trim() || null,
+              ]
+            )
+          : await client.query(
+              `INSERT INTO order_items (
+                order_id, product_id, product_name, quantity, price, currency
+              ) VALUES ($1, $2, $3, $4, $5, $6)
+              RETURNING id, product_id, product_name, quantity, price, currency`,
+              [
+                orderRow.id,
+                item.productId || null,
+                item.productName,
+                item.quantity,
+                item.price,
+                item.currency
+              ]
+            );
+        items.push(mapOrderItemRow(itemResult.rows[0]));
       }
 
       await client.query('COMMIT');
@@ -345,7 +387,7 @@ export const createOrder = async (
         currency: orderRow.currency,
         status: orderRow.status,
         source: orderRow.source,
-        notes: orderRow.notes,
+        notes: formatOrderNotesForMerchant(orderRow.notes) || null,
         items,
         date: orderRow.created_at,
         createdAt: orderRow.created_at,
@@ -368,6 +410,8 @@ export const createOrder = async (
           productName: item.productName,
           quantity: item.quantity,
           price: item.price,
+          color: item.color,
+          size: item.size,
         })),
       });
 

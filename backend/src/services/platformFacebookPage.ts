@@ -12,6 +12,8 @@ export interface PlatformFacebookPage {
   page_name: string | null;
   access_token: string;
   linked_by_merchant_id: string | null;
+  ig_user_id: string | null;
+  ig_username: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -90,7 +92,64 @@ export async function ensurePlatformFacebookTables(): Promise<void> {
       ON platform_messages(conversation_id, created_at)
   `);
 
+  await pool.query(`
+    ALTER TABLE platform_facebook_pages
+      ADD COLUMN IF NOT EXISTS ig_user_id VARCHAR(255)
+  `);
+  await pool.query(`
+    ALTER TABLE platform_facebook_pages
+      ADD COLUMN IF NOT EXISTS ig_username VARCHAR(255)
+  `);
+
   tablesEnsured = true;
+}
+
+const PAGE_SELECT = `id, page_id, page_name, access_token, linked_by_merchant_id,
+  ig_user_id, ig_username, created_at, updated_at`;
+
+const GRAPH_VERSION = process.env.FACEBOOK_GRAPH_VERSION || 'v21.0';
+
+export async function fetchLinkedInstagramBusinessAccount(params: {
+  pageId: string;
+  accessToken: string;
+}): Promise<{ igUserId: string; igUsername: string | null } | null> {
+  try {
+    const url =
+      `https://graph.facebook.com/${GRAPH_VERSION}/${encodeURIComponent(params.pageId)}` +
+      `?fields=instagram_business_account{id,username}` +
+      `&access_token=${encodeURIComponent(params.accessToken)}`;
+    const response = await fetch(url);
+    const data = (await response.json()) as {
+      instagram_business_account?: { id?: string; username?: string };
+      error?: { message?: string };
+    };
+    if (data.instagram_business_account?.id) {
+      return {
+        igUserId: data.instagram_business_account.id,
+        igUsername: data.instagram_business_account.username || null,
+      };
+    }
+  } catch (err) {
+    logger.warn('Failed to resolve Instagram business account for official page', {
+      pageId: params.pageId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  return null;
+}
+
+export async function persistPlatformInstagramAccount(params: {
+  pageId: string;
+  igUserId: string | null;
+  igUsername: string | null;
+}): Promise<void> {
+  await ensurePlatformFacebookTables();
+  await pool.query(
+    `UPDATE platform_facebook_pages
+     SET ig_user_id = $2, ig_username = $3, updated_at = CURRENT_TIMESTAMP
+     WHERE page_id = $1`,
+    [params.pageId, params.igUserId, params.igUsername]
+  );
 }
 
 export async function getPlatformFacebookPageByPageId(
@@ -98,7 +157,7 @@ export async function getPlatformFacebookPageByPageId(
 ): Promise<PlatformFacebookPage | null> {
   await ensurePlatformFacebookTables();
   const result = await pool.query(
-    `SELECT id, page_id, page_name, access_token, linked_by_merchant_id, created_at, updated_at
+    `SELECT ${PAGE_SELECT}
      FROM platform_facebook_pages
      WHERE page_id = $1
      LIMIT 1`,
@@ -110,7 +169,7 @@ export async function getPlatformFacebookPageByPageId(
 export async function getLinkedPlatformFacebookPage(): Promise<PlatformFacebookPage | null> {
   await ensurePlatformFacebookTables();
   const result = await pool.query(
-    `SELECT id, page_id, page_name, access_token, linked_by_merchant_id, created_at, updated_at
+    `SELECT ${PAGE_SELECT}
      FROM platform_facebook_pages
      ORDER BY updated_at DESC NULLS LAST, created_at DESC
      LIMIT 1`
@@ -132,6 +191,8 @@ export async function linkPlatformFacebookPage(params: {
   pageName: string;
   accessToken: string;
   linkedByMerchantId: string | null;
+  igUserId?: string | null;
+  igUsername?: string | null;
 }): Promise<PlatformFacebookPage> {
   await ensurePlatformFacebookTables();
 
@@ -153,10 +214,18 @@ export async function linkPlatformFacebookPage(params: {
     }
 
     const inserted = await client.query(
-      `INSERT INTO platform_facebook_pages (page_id, page_name, access_token, linked_by_merchant_id)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, page_id, page_name, access_token, linked_by_merchant_id, created_at, updated_at`,
-      [params.pageId, params.pageName, params.accessToken, params.linkedByMerchantId]
+      `INSERT INTO platform_facebook_pages
+         (page_id, page_name, access_token, linked_by_merchant_id, ig_user_id, ig_username)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING ${PAGE_SELECT}`,
+      [
+        params.pageId,
+        params.pageName,
+        params.accessToken,
+        params.linkedByMerchantId,
+        params.igUserId ?? null,
+        params.igUsername ?? null,
+      ]
     );
 
     await client.query('COMMIT');
@@ -181,5 +250,11 @@ export function toPublicPlatformPage(page: PlatformFacebookPage | null) {
     pageId: page.page_id,
     pageName: page.page_name,
     linkedAt: page.updated_at || page.created_at,
+    instagram: page.ig_user_id
+      ? {
+          igUserId: page.ig_user_id,
+          igUsername: page.ig_username,
+        }
+      : null,
   };
 }

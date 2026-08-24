@@ -12,20 +12,7 @@ import {
   TypingIndicatorParams
 } from './channel.interface.js';
 import { deliverHumanLikeReply } from './replyDelivery.js';
-
-// Extract image URL from response text
-const extractImageUrl = (text: string): { imageUrl: string | null; cleanText: string } => {
-  const imageRegex = /\[IMAGE:\s*([^\]]+)\]/i;
-  const match = text.match(imageRegex);
-  
-  if (match && match[1]) {
-    const imageUrl = match[1].trim();
-    const cleanText = text.replace(imageRegex, '').trim();
-    return { imageUrl, cleanText };
-  }
-  
-  return { imageUrl: null, cleanText: text };
-};
+import { extractImageUrl } from './botTurn.js';
 
 // Send image via Facebook Graph API
 export const sendFacebookImage = async (

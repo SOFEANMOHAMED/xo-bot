@@ -22,7 +22,6 @@ const settingsSchema = z.object({
   autoReplyMessenger: z.boolean().optional(),
   storeCurrency: z.string().optional(),
   botPersona: z.enum(['formal', 'friendly', 'sales', 'fast', 'luxury']).optional(),
-  aiMode: z.enum(['hybrid', 'full']).optional(),
   shippingPolicy: z.string().optional(),
   deliveryTime: z.string().optional(),
   paymentMethods: z.string().optional(),
@@ -451,7 +450,6 @@ function formatSettings(row: any) {
     autoReplyMessenger: row.auto_reply_messenger || false,
     storeCurrency: row.store_currency || 'USD',
     botPersona: row.bot_persona || 'friendly',
-    aiMode: row.ai_mode || 'hybrid',
     storePolicies: {
       shippingPolicy: row.shipping_policy || '',
       deliveryTime: row.delivery_time || '',

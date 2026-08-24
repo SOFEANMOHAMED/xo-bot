@@ -1,8 +1,7 @@
 /**
- * AI Module - OpenAI client and prompt building
+ * AI Module - OpenAI client
  */
 
-// ==================== OPENAI CLIENT ====================
 export {
   getAIClient,
   isAIAvailable,
@@ -20,15 +19,3 @@ export type {
   GenerateResult,
   ChatMessage
 } from './gemini-client.js';
-
-// ==================== PROMPT BUILDER ====================
-export {
-  buildSalesPrompt,
-  buildIntentDetectionPrompt,
-  buildObjectionPrompt
-} from './prompt-builder.js';
-
-export type {
-  PromptContext,
-  ObjectionPromptContext
-} from './prompt-builder.js';

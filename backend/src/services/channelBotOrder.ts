@@ -9,13 +9,54 @@ import { logger } from '../utils/logger.js';
 import { clearAbandonedCheckoutFromState } from './abandonedCheckout/index.js';
 import { notifyMerchantNewOrderAsync } from './notifyMerchantNewOrder.js';
 import { resolveOrderChannelSource } from '../utils/orderSource.js';
+import { applyFreshConversationStage } from './salesgpt/conversationStateSync.js';
+import { buildMerchantOrderNotes } from '../orders/merchantOrderNotes.js';
+
+/**
+ * Full conversation reset after a confirmed order (single source of truth).
+ * Mutates `updatedState` in place — used by all channels via persistBotChannelOrder.
+ */
+export function resetConversationAfterOrder(
+  updatedState: ConversationState,
+  orderData: {
+    products?: Array<{ productName?: string }>;
+  },
+  orderId: string
+): void {
+  const cartNames = (updatedState.cart?.items || [])
+    .map((i) => i.productName)
+    .filter(Boolean) as string[];
+  const entities = (updatedState.extracted_entities || {}) as Partial<Entities>;
+  const confirmedProductName =
+    (cartNames.length > 1 ? cartNames.join(' + ') : cartNames[0]) ||
+    entities.product_query ||
+    orderData.products?.[0]?.productName ||
+    'المنتج';
+  const confirmedCustomerName = entities.name || '';
+
+  updatedState.last_order = {
+    orderId,
+    productName: confirmedProductName,
+    customerName: confirmedCustomerName,
+    confirmedAt: new Date().toISOString(),
+  };
+
+  updatedState.extracted_entities = {};
+  updatedState.last_recommended_products = [];
+  delete updatedState.cart;
+  applyFreshConversationStage(updatedState);
+  updatedState.last_intent = 'greeting';
+  updatedState.message_count = 0;
+  updatedState.awaiting_order_confirmation = false;
+  clearAbandonedCheckoutFromState(updatedState);
+}
 
 export type ChannelOrderSettings = {
   store_currency: string;
 };
 
 export type ChannelOrderLabels = {
-  /** When orderData.notes is empty */
+  /** Fallback text for inferring orders.source when platform is missing. Not stored on the order. */
   defaultBaseNotes: string;
   customerTags: string[];
   interactionTitle: string;
@@ -93,8 +134,19 @@ export async function persistBotChannelOrder(
       orderData.customerEmail?.trim() ||
       `${orderData.customerPhone.replace(/\s+/g, '').replace(/[^0-9]/g, '')}@chat-order.com`;
     const deliveryNote = orderData.deliveryTime ? `وقت التوصيل: ${orderData.deliveryTime}` : null;
-    const baseNotes = orderData.notes || defaultBaseNotes;
-    const combinedNotes = deliveryNote ? `${baseNotes} | ${deliveryNote}` : baseNotes;
+    const orderNotes = buildMerchantOrderNotes({
+      notes: orderData.notes,
+      deliveryTime: null,
+    });
+
+    const variantColumnCheck = await client.query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'order_items'
+        AND column_name IN ('color', 'size')
+    `);
+    const hasVariantColumns = variantColumnCheck.rows.length >= 2;
 
     let customerId: string | null = null;
 
@@ -149,7 +201,7 @@ export async function persistBotChannelOrder(
           orderData.customerAddress,
           'new',
           'active',
-          combinedNotes,
+          deliveryNote,
           customerTags
         ]
       );
@@ -185,6 +237,11 @@ export async function persistBotChannelOrder(
       `);
       const hasDeliveryTimeColumn = deliveryTimeColumnCheck.rows.length > 0;
 
+      const storedNotes = buildMerchantOrderNotes({
+        notes: orderData.notes,
+        deliveryTime: hasDeliveryTimeColumn ? null : orderData.deliveryTime,
+      });
+
       const orderInsertQuery = hasDeliveryTimeColumn
         ? `INSERT INTO orders (
             merchant_id, customer_name, customer_email, 
@@ -211,7 +268,7 @@ export async function persistBotChannelOrder(
             settings.store_currency || 'USD',
             'pending',
             orderSource,
-            combinedNotes
+            storedNotes
           ]
         : [
             merchantId,
@@ -223,7 +280,7 @@ export async function persistBotChannelOrder(
             settings.store_currency || 'USD',
             'pending',
             orderSource,
-            combinedNotes
+            storedNotes
           ];
 
       const orderResult = await client.query(orderInsertQuery, orderInsertParams);
@@ -232,6 +289,8 @@ export async function persistBotChannelOrder(
 
     for (const item of orderData.products) {
       const sanitizedProductId = sanitizeUUID(item.productId);
+      const itemColor = (item.variant?.color || item.color || '').trim() || null;
+      const itemSize = (item.variant?.size || item.size || '').trim() || null;
 
       if (item.productId && !sanitizedProductId) {
         console.warn(`[${logPrefix}] Invalid productId detected and sanitized:`, {
@@ -242,10 +301,26 @@ export async function persistBotChannelOrder(
       }
 
       if (isDuplicateOrder) {
-        const existingItemCheck = await client.query(
-          `SELECT id, quantity FROM order_items WHERE order_id = $1 AND (product_id = $2 OR product_name = $3) LIMIT 1`,
-          [orderId, sanitizedProductId, item.productName || 'Unknown Product']
-        );
+        const existingItemCheck = hasVariantColumns
+          ? await client.query(
+              `SELECT id, quantity FROM order_items
+               WHERE order_id = $1
+                 AND (product_id = $2 OR product_name = $3)
+                 AND COALESCE(color, '') = COALESCE($4, '')
+                 AND COALESCE(size, '') = COALESCE($5, '')
+               LIMIT 1`,
+              [
+                orderId,
+                sanitizedProductId,
+                item.productName || 'Unknown Product',
+                itemColor,
+                itemSize,
+              ]
+            )
+          : await client.query(
+              `SELECT id, quantity FROM order_items WHERE order_id = $1 AND (product_id = $2 OR product_name = $3) LIMIT 1`,
+              [orderId, sanitizedProductId, item.productName || 'Unknown Product']
+            );
 
         if (existingItemCheck.rows.length > 0) {
           const existingQty = existingItemCheck.rows[0].quantity || 1;
@@ -270,19 +345,37 @@ export async function persistBotChannelOrder(
         }
       }
 
-      await client.query(
-        `INSERT INTO order_items (
-          order_id, product_id, product_name, quantity, price, currency
-        ) VALUES ($1, $2, $3, $4, $5, $6)`,
-        [
-          orderId,
-          sanitizedProductId,
-          item.productName || 'Unknown Product',
-          item.quantity || 1,
-          item.price || 0,
-          settings.store_currency || 'USD'
-        ]
-      );
+      if (hasVariantColumns) {
+        await client.query(
+          `INSERT INTO order_items (
+            order_id, product_id, product_name, quantity, price, currency, color, size
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [
+            orderId,
+            sanitizedProductId,
+            item.productName || 'Unknown Product',
+            item.quantity || 1,
+            item.price || 0,
+            settings.store_currency || 'USD',
+            itemColor,
+            itemSize,
+          ]
+        );
+      } else {
+        await client.query(
+          `INSERT INTO order_items (
+            order_id, product_id, product_name, quantity, price, currency
+          ) VALUES ($1, $2, $3, $4, $5, $6)`,
+          [
+            orderId,
+            sanitizedProductId,
+            item.productName || 'Unknown Product',
+            item.quantity || 1,
+            item.price || 0,
+            settings.store_currency || 'USD'
+          ]
+        );
+      }
 
       if (isDuplicateOrder) {
         const addedPrice = (item.quantity || 1) * (item.price || 0);
@@ -344,7 +437,7 @@ export async function persistBotChannelOrder(
         customerEmail,
         customerAddress: orderData.customerAddress,
         deliveryTime: orderData.deliveryTime || null,
-        notes: combinedNotes,
+        notes: orderNotes,
         total: orderData.total || 0,
         currency: settings.store_currency || 'USD',
         source: orderSource,
@@ -352,38 +445,18 @@ export async function persistBotChannelOrder(
           productName: p.productName,
           quantity: p.quantity || 1,
           price: p.price || 0,
+          color: p.variant?.color || p.color || null,
+          size: p.variant?.size || p.size || null,
         })),
       });
     }
 
-    // 🧹 FULL RESET: After successful order → restart conversation fresh (same as Telegram/Facebook)
-    const entities = (updatedState.extracted_entities || {}) as Partial<Entities>;
-    const confirmedProductName =
-      entities.product_query ||
-      orderData.products?.[0]?.productName ||
-      'المنتج';
-    const confirmedCustomerName = entities.name || '';
-
-    updatedState.last_order = {
-      orderId,
-      productName: confirmedProductName,
-      customerName: confirmedCustomerName,
-      confirmedAt: new Date().toISOString()
-    };
-
-    updatedState.extracted_entities = {};
-    updatedState.last_recommended_products = [];
-    updatedState.current_stage = 'discover';
-    updatedState.salesgpt_stage_id = '1';
-    updatedState.last_intent = 'greeting';
-    updatedState.message_count = 0;
-    updatedState.awaiting_order_confirmation = false;
-    clearAbandonedCheckoutFromState(updatedState);
+    resetConversationAfterOrder(updatedState, orderData, orderId);
 
     console.log(`[${logPrefix}] Full state reset after order. last_order saved:`, {
       orderId,
-      productName: confirmedProductName,
-      hasCustomerName: Boolean(confirmedCustomerName),
+      productName: updatedState.last_order?.productName,
+      hasCustomerName: Boolean(updatedState.last_order?.customerName),
     });
 
     return true;

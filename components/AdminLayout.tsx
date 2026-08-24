@@ -23,6 +23,7 @@ import {
   Wallet,
   MessageSquareText,
   Megaphone,
+  CalendarClock,
   Inbox
 } from 'lucide-react';
 import ConfirmDialog from './admin/ConfirmDialog';
@@ -80,6 +81,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ currentView, onLogout, childr
     { id: AdminView.PAGES, label: 'إدارة الصفحات', icon: FileTextIcon },
     { id: AdminView.OFFICIAL_PAGE_INBOX, label: 'وارد صفحة XO Bot', icon: Inbox },
     { id: AdminView.OFFICIAL_PAGE_COMMENTS, label: 'تعليقات صفحة XO Bot', icon: MessageSquareText },
+    { id: AdminView.CONTENT_PUBLISHING, label: 'نشر المحتوى', icon: CalendarClock },
     { id: AdminView.SUPPORT_TICKETS, label: 'رسائل الدعم', icon: Headphones },
     { id: AdminView.NOTIFICATIONS, label: 'الإشعارات', icon: Bell },
     { id: AdminView.EMAIL_BROADCAST, label: 'إرسال بريد إلكتروني', icon: Mail },

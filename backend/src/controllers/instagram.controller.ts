@@ -4,19 +4,15 @@ import pool from '../database/connection.js';
 import { createError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
 import { logger } from '../utils/logger.js';
-import {
-  handleIncomingMessage,
-  type Message,
-  type ConversationState,
-  type MerchantConfig
-} from '../bot/index.js';
+import type { Message, ConversationState, MerchantConfig } from '../bot/index.js';
 import { checkRateLimit, getCachedMerchantSettings } from '../services/cacheService.js';
-import { persistBotChannelOrder } from '../services/channelBotOrder.js';
 import {
-  buildMerchantBotConfig,
-  appendOrderDataIfConfirmed
-} from '../services/buildMerchantBotConfig.js';
-import { escalateConversationToHuman } from '../services/escalation.js';
+  extractImageUrl,
+  extractOrderData,
+  persistOrderIfPresent,
+  runSalesBotTurn,
+} from '../services/channels/botTurn.js';
+import { buildMerchantBotConfig } from '../services/buildMerchantBotConfig.js';
 import { stripInternalControlMarkers } from '../response/sanitize-reply.js';
 import {
   deliverHumanLikeReply,
@@ -74,18 +70,6 @@ const isValidUUID = (str: string | null | undefined): boolean => {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
 };
 
-const sanitizeUUID = (str: string | null | undefined): string | null => {
-  if (!str) return null;
-  const cleaned = str
-    .trim()
-    .replace(/--+/g, '-')
-    .replace(/\s+/g, '')
-    .toLowerCase();
-  if (isValidUUID(cleaned)) return cleaned;
-  console.warn('[Instagram UUID] Invalid UUID detected:', { original: str, cleaned });
-  return null;
-};
-
 const verifyInstagramSignature = (req: any, secret: string): boolean => {
   const sig = req.headers['x-hub-signature-256'] || req.headers['x-hub-signature'];
   if (!sig) return false;
@@ -101,62 +85,6 @@ const verifyInstagramSignature = (req: any, secret: string): boolean => {
   const b = Buffer.from(expected, 'utf8');
   if (a.length !== b.length) return false;
   return crypto.timingSafeEqual(a, b);
-};
-
-const extractImageUrl = (text: string): { imageUrl: string | null; cleanText: string } => {
-  const imageRegex = /\[IMAGE:\s*([^\]]+)\]/i;
-  const match = text.match(imageRegex);
-
-  if (match && match[1]) {
-    const imageUrl = match[1].trim();
-    const cleanText = text.replace(imageRegex, '').trim();
-    return { imageUrl, cleanText };
-  }
-
-  return { imageUrl: null, cleanText: text };
-};
-
-const extractOrderData = (text: string): { orderData: any | null; cleanText: string } => {
-  const orderDataRegex = /\[ORDER_DATA\]([\s\S]*?)\[\/ORDER_DATA\]/gi;
-  const altOrderDataRegex = /\[_?\/?ORDER_?DATA_?\]([\s\S]*?)\[\/?\s*_?\/?ORDER_?DATA_?\]/gi;
-  const bracketTagRegex = /\[_\]([\s\S]*?)\[\/\_\]/gi;
-
-  const match = text.match(orderDataRegex) || text.match(altOrderDataRegex) || text.match(bracketTagRegex);
-
-  if (match && match.length > 0) {
-    try {
-      const jsonMatch = match[0].match(/\[(?:ORDER_DATA|_)\]([\s\S]*?)\[\/(?:ORDER_DATA|_)\]/i);
-      if (jsonMatch && jsonMatch[1]) {
-        const orderData = JSON.parse(jsonMatch[1].trim());
-        let cleanText = text.replace(orderDataRegex, '').trim();
-        cleanText = cleanText.replace(altOrderDataRegex, '').trim();
-        cleanText = cleanText.replace(bracketTagRegex, '').trim();
-        cleanText = cleanText.replace(/\{[\s\S]{50,}?\}/g, '').trim();
-        cleanText = cleanText.replace(/\[\s*\/?\s*(?:ORDER_?DATA|_)?\s*\]/gi, '').trim();
-        cleanText = cleanText.replace(/\n{3,}/g, '\n\n').trim();
-
-        logger.info('ORDER_DATA extracted from Instagram reply', {
-          hasName: Boolean(orderData.customerName),
-          hasPhone: Boolean(orderData.customerPhone),
-          productsCount: Array.isArray(orderData.products) ? orderData.products.length : 0,
-        });
-
-        return { orderData, cleanText };
-      }
-    } catch (error) {
-      logger.error('Error parsing ORDER_DATA from Instagram reply', error as Error);
-    }
-  }
-
-  let cleanText = text;
-  cleanText = cleanText.replace(orderDataRegex, '').trim();
-  cleanText = cleanText.replace(altOrderDataRegex, '').trim();
-  cleanText = cleanText.replace(bracketTagRegex, '').trim();
-  cleanText = cleanText.replace(/\{[\s\S]{50,}?\}/g, '').trim();
-  cleanText = cleanText.replace(/\[\s*\/?\s*(?:ORDER_?DATA|_)?\s*\]/gi, '').trim();
-  cleanText = cleanText.replace(/\n{3,}/g, '\n\n').trim();
-
-  return { orderData: null, cleanText };
 };
 
 // ==================== INSTAGRAM GRAPH API HELPERS ====================
@@ -1256,8 +1184,7 @@ const processInstagramDM = async (event: any) => {
     payment_methods: cachedSettings.payment_methods,
     return_policy: cachedSettings.return_policy,
     additional_notes: cachedSettings.additional_notes,
-    enable_ai_injection: cachedSettings.enable_ai_injection,
-    ai_mode: cachedSettings.ai_mode
+    enable_ai_injection: cachedSettings.enable_ai_injection
   };
 
   // ==================== VOICE TRANSCRIPTION (OpenAI STT) ====================
@@ -1530,7 +1457,7 @@ const processInstagramDM = async (event: any) => {
       return;
     }
 
-    let responseText = '';
+    let responseText: string;
     let updatedState: ConversationState = conversationState;
 
     const stopTypingKeepalive = startTypingKeepalive(() =>
@@ -1541,191 +1468,81 @@ const processInstagramDM = async (event: any) => {
       const merchantConfig: Partial<MerchantConfig> = buildMerchantBotConfig({
         merchantId,
         settings,
+        // FB/IG only: acquisition context from ads/organic posts
         systemPromptSuffix: acquisitionNote || '',
       });
 
-      const result = await handleIncomingMessage({
+      const turn = await runSalesBotTurn({
         merchantId,
         platform: 'instagram',
+        escalatePlatform: 'instagram',
         userId: senderId,
         userName: resolvedUserName || userName || 'عميل',
         messageText,
-        externalMessageId,
+        externalMessageId: externalMessageId || '',
         recentMessages,
         conversationState,
-        merchantConfig
-      });
-
-      responseText = result.replyText;
-      updatedState = result.updatedState;
-
-      // Shared gate: ORDER_DATA only when pipeline next_action === confirm_order
-      const entities = updatedState.extracted_entities || {};
-      const products = updatedState.last_recommended_products || [];
-      responseText = appendOrderDataIfConfirmed({
-        responseText,
-        nextAction: result.next_action,
-        entities,
-        productIds: products,
+        merchantConfig,
+        conversationId,
         storeCurrency: settings?.store_currency || 'USD',
-        channelLabel: 'Instagram (Full AI Mode)',
+        channelLabel: 'Instagram',
+        pool,
+        userMessageMetadata: igImageAttachmentUrl
+          ? { type: 'image', imageUrl: igImageAttachmentUrl }
+          : { type: 'text' },
       });
 
-      if (result.next_action === 'confirm_order' && responseText.includes('[ORDER_DATA]')) {
-        console.log('[processInstagramDM] Full AI Mode: Order confirmed, ORDER_DATA attached:', {
-          hasName: Boolean(entities.name),
-          productsCount: products.length,
-          next_action: result.next_action
-        });
-      }
+      responseText = turn.responseText;
+      updatedState = turn.updatedState;
 
-      if (result.shouldEscalate) {
-        await escalateConversationToHuman({
+      if (!turn.failed) {
+        console.log('[processInstagramDM] SalesGPT response generated:', {
+          conversationId,
+          responseLength: responseText.length,
+          pipelineUsed: turn.meta.pipelineUsed,
+          aiCallsCount: turn.meta.aiCallsCount,
+          processingTimeMs: turn.meta.processingTimeMs,
+          intent: turn.meta.intent,
+          stage: turn.meta.stage,
+        });
+        logger.info('Instagram DM processed via SalesGPT', {
           merchantId,
           conversationId,
-          platform: 'instagram',
-          userId: senderId,
-          userName: resolvedUserName || userName || 'عميل',
-          reason: result.next_action === 'handoff' ? 'handoff_action' : 'escalate_marker',
-          replyPreview: responseText,
+          pipelineUsed: turn.meta.pipelineUsed,
+          aiCallsCount: turn.meta.aiCallsCount,
+          processingTimeMs: turn.meta.processingTimeMs,
         });
-      }
-
-      responseText = stripInternalControlMarkers(responseText);
-
-      await pool.query(
-        `INSERT INTO messages (conversation_id, role, content, metadata, intent, entities)
-         VALUES ($1, 'user', $2, $3, $4, $5)`,
-        [
-          conversationId,
-          messageText,
-          JSON.stringify({
-            platform: 'instagram',
-            timestamp: new Date().toISOString(),
-            externalId: externalMessageId || null,
-            ...(igImageAttachmentUrl
-              ? { type: 'image', imageUrl: igImageAttachmentUrl }
-              : { type: 'text' }),
-          }),
-          result.meta.intent,
-          JSON.stringify({})
-        ]
-      );
-
-      await pool.query(
-        `INSERT INTO messages (conversation_id, role, content, metadata, intent, entities)
-         VALUES ($1, 'assistant', $2, $3, $4, $5)`,
-        [
-          conversationId,
-          responseText,
-          JSON.stringify({
-            platform: 'instagram',
-            pipelineUsed: result.meta.pipelineUsed,
-            aiCallsCount: result.meta.aiCallsCount,
-            processingTimeMs: result.meta.processingTimeMs
-          }),
-          result.meta.intent,
-          JSON.stringify({})
-        ]
-      );
-
-      await pool.query(
-        `UPDATE conversations 
-         SET conversation_state = $1,
-             current_intent = $2,
-             stage = $3,
-             last_message_at = CURRENT_TIMESTAMP,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = $4 AND merchant_id = $5`,
-        [
-          JSON.stringify(updatedState),
-          result.meta.intent,
-          result.meta.stage,
-          conversationId,
-          merchantId
-        ]
-      );
-    } catch (orchestratorError: any) {
-      logger.error('Orchestrator failed for Instagram DM', orchestratorError as Error, {
-        merchantId,
-        conversationId,
-        senderId
-      });
-
-      responseText = 'عذراً، حدث خطأ في معالجة رسالتك. يرجى المحاولة مرة أخرى.';
-
-      try {
-        await pool.query(
-          `INSERT INTO messages (conversation_id, role, content)
-           SELECT $1, 'user', $2 FROM conversations WHERE id = $1 AND merchant_id = $3`,
-          [conversationId, messageText, merchantId]
-        );
-
-        await pool.query(
-          `INSERT INTO messages (conversation_id, role, content)
-           SELECT $1, 'assistant', $2 FROM conversations WHERE id = $1 AND merchant_id = $3`,
-          [conversationId, responseText, merchantId]
-        );
-      } catch (saveError) {
-        logger.error('Failed to save Instagram messages after orchestrator failure', saveError as Error);
       }
     } finally {
       stopTypingKeepalive();
     }
 
-    let { orderData, cleanText: responseWithoutOrderData } = extractOrderData(responseText);
+    const { orderData, cleanText: responseWithoutOrderData } = extractOrderData(responseText);
     const { imageUrl, cleanText } = extractImageUrl(responseWithoutOrderData);
 
-    if (
-      orderData &&
-      orderData.customerName &&
-      orderData.customerPhone &&
-      orderData.customerAddress &&
-      orderData.products &&
-      Array.isArray(orderData.products) &&
-      orderData.products.length > 0
-    ) {
+    if (orderData) {
       console.log('[processInstagramDM] ORDER_DATA detected, processing order:', {
         merchantId,
         hasName: Boolean(orderData.customerName),
-        productsCount: orderData.products.length
+        productsCount: orderData.products?.length || 0,
       });
 
-      const orderPersisted = await persistBotChannelOrder(
+      await persistOrderIfPresent({
         pool,
         merchantId,
+        conversationId,
         orderData,
-        { store_currency: settings.store_currency || 'USD' },
-        sanitizeUUID,
-        {
+        settings: { store_currency: settings.store_currency || 'USD' },
+        labels: {
           defaultBaseNotes: 'Order created via Instagram bot',
           customerTags: ['bot-order', 'instagram'],
           interactionTitle: 'Order Created via Instagram Bot',
           interactionDescription: (orderId: string) => `Order #${orderId} created via Instagram bot`,
           interactionPlatform: 'instagram',
-          logPrefix: 'processInstagramDM'
+          logPrefix: 'processInstagramDM',
         },
-        updatedState
-      );
-
-      if (orderPersisted) {
-        await pool.query(
-          `UPDATE conversations 
-           SET conversation_state = $1,
-               current_intent = $2,
-               stage = $3,
-               last_message_at = CURRENT_TIMESTAMP,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $4 AND merchant_id = $5`,
-          [
-            JSON.stringify(updatedState),
-            updatedState.last_intent || 'greeting',
-            updatedState.current_stage || 'discover',
-            conversationId,
-            merchantId
-          ]
-        );
-      }
+        updatedState,
+      });
     }
 
     const finalResponseText = stripInternalControlMarkers(cleanText || responseWithoutOrderData);

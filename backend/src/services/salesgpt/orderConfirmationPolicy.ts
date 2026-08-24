@@ -11,19 +11,36 @@
  */
 
 import type { Language } from '../../core/types.js';
+import {
+  browseMediaCaptionFallback,
+  isBrowseTurnIntent,
+  type TurnIntent,
+} from './turnIntent.js';
 
 export const AWAIT_CONFIRMATION_ACTION = 'await_confirmation';
 export const CONFIRM_ORDER_ACTION = 'confirm_order';
 
-const AFFIRMATIVE_TOKENS = [
+const AFFIRM_ORDER_TOKENS = [
   'نعم', 'أيوا', 'ايوا', 'أي', 'اي', 'تمام', 'موافق', 'ماشي', 'طيب',
   'أكيد', 'اكيد', 'بالتأكيد', 'اوكي', 'اوكيه', 'ممتاز', 'صح', 'صحيح',
   'ok', 'okay', 'yes', 'yep', 'yeah', 'sure', 'agree', 'agreed', 'correct', 'right'
 ];
 
-const NEGATIVE_TOKENS = [
-  'لا', 'لأ', 'مش', 'مو', 'ما بدي', 'لا بدي', 'ارفض', 'إرفض', 'إلغاء', 'الغي',
-  'no', 'not', 'nope', 'cancel', 'reject', 'stop'
+/** Short refusal — valid only when the bot asked to add more items, not to confirm the order. */
+const DECLINE_MORE_TOKENS = [
+  'لا', 'لأ', 'no', 'nope', 'not', 'لا شكرا', 'لا شكراً', 'no thanks', 'no thank you'
+];
+
+/** Explicit order cancellation — never treat as confirm or decline-more. */
+const CANCEL_ORDER_TOKENS = [
+  'إلغاء', 'الغي', 'الغاء', 'ارفض', 'إرفض', 'cancel', 'reject', 'stop',
+  'ما بدي', 'لا بدي', 'ما بدي الطلب', 'لا بدي الطلب', 'cancel order'
+];
+
+const CANCEL_ORDER_PATTERNS: RegExp[] = [
+  /(الغ|الغي|الغاء|إلغاء)\s*(الطلب|طلبي|اوردر|الأوردر)?/i,
+  /(cancel|reject)\s*(the\s+)?(order|my\s+order)?/i,
+  /(ما|لا)\s+بدي\s*(الطلب|طلب|اوردر)?/i,
 ];
 
 const CONFIRM_VERB_PATTERNS: RegExp[] = [
@@ -111,28 +128,39 @@ export function sanitizeProductDescriptionForPrompt(
   return `${cleaned.slice(0, maxChars).trim()}…`;
 }
 
-/** Permissive yes / confirm detection ("اي اكد", "نعم", "ok", …). */
-export function isAffirmativeReply(messageText: string): boolean {
+/** Permissive yes / confirm detection ("اي اكد", "نعم", "ok", …). Bare «لا» is never affirmation. */
+export function customerAffirmsOrder(messageText: string): boolean {
   if (!messageText) return false;
-  if (containsAnyToken(messageText, NEGATIVE_TOKENS)) return false;
-  // "تمام، ممكن معلومات أكثر؟" is politeness + question — not order confirmation.
+  if (customerCancelsOrder(messageText)) return false;
   if (isProductInfoRequest(messageText)) return false;
-  if (containsAnyToken(messageText, AFFIRMATIVE_TOKENS)) return true;
-  return CONFIRM_VERB_PATTERNS.some(p => p.test(messageText));
+  const normalized = normalizeArabic(messageText);
+  if (/^(لا|لأ|no|nope|not)$/i.test(normalized)) return false;
+  if (containsAnyToken(messageText, AFFIRM_ORDER_TOKENS)) return true;
+  return CONFIRM_VERB_PATTERNS.some((p) => p.test(messageText));
 }
 
-/** Permissive no / cancel detection. */
-export function isNegativeReply(messageText: string): boolean {
+/** @deprecated Use customerAffirmsOrder */
+export const isAffirmativeReply = customerAffirmsOrder;
+
+/** Short «no» / decline — only meaningful when bot asked to add more (see resolveOrderNextAction). */
+export function customerDeclinesMoreItems(messageText: string): boolean {
   if (!messageText) return false;
+  if (customerCancelsOrder(messageText)) return false;
   if (isProductInfoRequest(messageText)) return false;
-  if (containsAnyToken(messageText, AFFIRMATIVE_TOKENS)) return false;
-  return containsAnyToken(messageText, NEGATIVE_TOKENS);
+  if (customerAffirmsOrder(messageText)) return false;
+  const normalized = normalizeArabic(messageText);
+  if (/^(لا|لأ|no|nope|not|لا\s*شكرا?|no\s*thanks?)$/i.test(normalized.trim())) {
+    return true;
+  }
+  return containsAnyToken(messageText, DECLINE_MORE_TOKENS);
 }
 
-/** Customer intent to finalize the order on this turn. */
-export function isCustomerFinalizingOrder(messageText: string): boolean {
+/** Explicit order cancellation. */
+export function customerCancelsOrder(messageText: string): boolean {
+  if (!messageText) return false;
   if (isProductInfoRequest(messageText)) return false;
-  return isAffirmativeReply(messageText) || isNegativeReply(messageText);
+  if (CANCEL_ORDER_PATTERNS.some((p) => p.test(messageText))) return true;
+  return containsAnyToken(messageText, CANCEL_ORDER_TOKENS);
 }
 
 export function botReplyAnnouncesConfirmation(text: string): boolean {
@@ -166,6 +194,48 @@ export function botReplyAsksForConfirmation(text: string): boolean {
 
   if (arabicAsk || englishAsk) return true;
   return false;
+}
+
+/** True when the bot asked whether the customer wants to add another product. */
+export function botReplyAsksToAddMore(text: string): boolean {
+  if (!text) return false;
+  const normalized = normalizeArabic(text);
+  const hasQuestionMark = /[؟?]/.test(text);
+
+  const arabicAsk =
+    /(تريد|تحب|ترغب|تود|بدك|تبغى|تبي|حابب|حاب).{0,35}(اضاف|إضاف|اضيف|منتج|شي|شيء|غير|second|another)/i.test(
+      normalized
+    ) ||
+    /(اضيف|أضيف|نضيف).{0,25}(منتج|شي|شيء)/i.test(normalized) ||
+    (hasQuestionMark &&
+      /(منتج|شي|شيء).{0,20}(ثاني|آخر|اخر|غير)/i.test(normalized));
+
+  const englishAsk =
+    /(add|another|anything|something)\s+(else|more|product|item)/i.test(text) ||
+    /would you like (to )?(add|order) (another|more|something else)/i.test(text);
+
+  return arabicAsk || englishAsk;
+}
+
+export function buildAmbiguousNoClarification(language: Language): string {
+  if (language === 'arabic') {
+    return (
+      'تمام 👍 هل تقصد إلغاء الطلب أم تعديل شيء؟\n' +
+      '• اكتب «نعم» أو «أكد» لتثبيت الطلب\n' +
+      '• أو «إلغاء» لإلغاء الطلب'
+    );
+  }
+  return (
+    'Got it 👍 Do you want to cancel the order or change something?\n' +
+    '• Reply "yes" or "confirm" to place the order\n' +
+    '• Or "cancel" to cancel the order'
+  );
+}
+
+export function buildOrderCancelledMessage(language: Language): string {
+  return language === 'arabic'
+    ? 'تمام، تم إلغاء الطلب. إذا حابب تكمّل لاحقاً أنا هون 😊'
+    : 'Okay, the order was cancelled. If you want to continue later, I am here 😊';
 }
 
 export interface OrderCollectedSnapshot {
@@ -303,7 +373,9 @@ export function buildOrderConfirmedMessage(
 
 export function buildAwaitConfirmationMessage(
   language: Language,
-  info: OrderCollectedSnapshot
+  info: OrderCollectedSnapshot,
+  /** Optional multi-line cart summary (already formatted with bullets). */
+  cartLinesSummary?: string
 ): string {
   const snap = sanitizeCollectedSnapshot(info);
   const qty = snap.quantity && snap.quantity > 0 ? snap.quantity : 1;
@@ -313,11 +385,16 @@ export function buildAwaitConfirmationMessage(
     displayCollectedText(snap.size)
   ].filter(Boolean).join(' — ');
 
+  const itemsBlock =
+    cartLinesSummary && cartLinesSummary.trim().length > 0
+      ? cartLinesSummary.trim()
+      : `• ${productLine} × ${qty}`;
+
   if (language === 'arabic') {
     const nameBit = snap.name ? ` يا ${snap.name}` : '';
     return (
       `تمام${nameBit}! طلبك جاهز للتأكيد:\n` +
-      `• ${productLine} × ${qty}\n` +
+      `${itemsBlock}\n` +
       `• الهاتف: ${snap.phone || '—'}\n` +
       `• العنوان: ${snap.address || '—'}\n\n` +
       `اكتب «نعم» أو «أكد» لتثبيت الطلب الآن.`
@@ -327,7 +404,7 @@ export function buildAwaitConfirmationMessage(
   const nameBit = snap.name ? `, ${snap.name}` : '';
   return (
     `Perfect${nameBit}! Your order is ready to confirm:\n` +
-    `• ${productLine} × ${qty}\n` +
+    `${itemsBlock}\n` +
     `• Phone: ${snap.phone || '—'}\n` +
     `• Address: ${snap.address || '—'}\n\n` +
     `Reply "yes" or "confirm" to place the order now.`
@@ -362,6 +439,15 @@ export interface ResolveOrderActionInput {
    * which colour to show). Never treat that as checkout.
    */
   preferSendImage?: boolean;
+  /** Pre-formatted cart lines for multi-item await_confirmation summary. */
+  cartLinesSummary?: string;
+  /**
+   * Deterministic turn intent from turnIntent.ts.
+   * browse_media / product_qa must never be rewritten to collect_info.
+   */
+  turnIntent?: 'browse_media' | 'product_qa' | 'cart_edit' | 'checkout' | 'finalize' | 'other';
+  /** Last assistant message before this user turn — drives yes/no context. */
+  lastBotReply?: string;
 }
 
 export interface ResolveOrderActionResult {
@@ -388,12 +474,50 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
     responseText,
     modelAsksProductInfo,
     missingFields = [],
-    preferSendImage = false
+    preferSendImage = false,
+    cartLinesSummary,
+    turnIntent = 'other',
+    lastBotReply = '',
   } = input;
 
   const safeCollected = sanitizeCollectedSnapshot(collectedInfo);
   const identityComplete = hasRealCustomerIdentity(safeCollected);
   const effectivelyComplete = fieldsComplete && identityComplete;
+  const botAskedAddMore = botReplyAsksToAddMore(lastBotReply);
+  const botAskedConfirm =
+    wasAwaitingConfirmation || botReplyAsksForConfirmation(lastBotReply);
+
+  // ── Browse turns win over checkout rails (photo / product Q&A) ──
+  if (isBrowseTurnIntent(turnIntent as TurnIntent)) {
+    if (turnIntent === 'browse_media') {
+      const keepCaption =
+        responseText.trim().length > 0 &&
+        !isPrematureCheckoutCopy(responseText) &&
+        !/أحتاج|احتاج|اسمك|هاتفك|عنوان/i.test(responseText);
+      return {
+        nextAction: 'send_image',
+        responseText: keepCaption
+          ? responseText
+          : browseMediaCaptionFallback(language),
+        awaitingConfirmation: false,
+        reason: 'turn_intent_browse_media',
+      };
+    }
+    const safeAction =
+      aiNextAction === 'send_image' || aiNextAction === 'end_conversation'
+        ? aiNextAction
+        : 'present_product';
+    return {
+      nextAction: safeAction,
+      responseText: isPrematureCheckoutCopy(responseText)
+        ? (language === 'arabic'
+            ? 'أكيد، شو حابب تعرف عن المنتج؟'
+            : 'Sure — what would you like to know about the product?')
+        : responseText,
+      awaitingConfirmation: false,
+      reason: 'turn_intent_product_qa',
+    };
+  }
 
   // Product Q&A always wins over checkout rails — never inject order summary here.
   // Prefer model classification; heuristic is fallback only when the model omitted the flag.
@@ -415,11 +539,42 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
     };
   }
 
-  const customerFinalizing = isCustomerFinalizingOrder(userMessage);
+  const affirms = customerAffirmsOrder(userMessage);
+  const declinesMore = customerDeclinesMoreItems(userMessage);
+  const cancels = customerCancelsOrder(userMessage);
+
+  if (cancels && effectivelyComplete) {
+    return {
+      nextAction: 'end_conversation',
+      responseText: buildOrderCancelledMessage(language),
+      awaitingConfirmation: false,
+      reason: 'customer_cancelled_order',
+    };
+  }
+
+  // «لا» at confirmation ask → clarify once; never auto-confirm.
+  if (
+    effectivelyComplete &&
+    botAskedConfirm &&
+    !botAskedAddMore &&
+    declinesMore &&
+    !affirms
+  ) {
+    return {
+      nextAction: AWAIT_CONFIRMATION_ACTION,
+      responseText: buildAmbiguousNoClarification(language),
+      awaitingConfirmation: true,
+      reason: 'ambiguous_no_at_confirmation',
+    };
+  }
+
+  const customerWantsFinalize =
+    affirms || (declinesMore && botAskedAddMore);
+
   const allowedToFinalize =
     effectivelyComplete &&
-    customerFinalizing &&
-    (wasAwaitingConfirmation || fieldsWereCompleteBeforeTurn);
+    customerWantsFinalize &&
+    (botAskedConfirm || fieldsWereCompleteBeforeTurn || (declinesMore && botAskedAddMore));
 
   const photoCaptionFallback =
     language === 'arabic'
@@ -485,7 +640,7 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
     aiNextAction === AWAIT_CONFIRMATION_ACTION ||
     aiNextAction === 'close_sale' ||
     aiNextAction === 'collect_info' ||
-    customerFinalizing; // e.g. "تمام" while delivering last field → still ask once
+    affirms; // e.g. "تمام" while delivering last field → still ask once
 
   if (shouldAwait) {
     const keepAsk =
@@ -498,7 +653,7 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
       nextAction: AWAIT_CONFIRMATION_ACTION,
       responseText: keepAsk
         ? responseText
-        : buildAwaitConfirmationMessage(language, safeCollected),
+        : buildAwaitConfirmationMessage(language, safeCollected, cartLinesSummary),
       awaitingConfirmation: true,
       reason: keepAsk ? 'await_keep_model_ask' : 'await_inject_summary_ask'
     };

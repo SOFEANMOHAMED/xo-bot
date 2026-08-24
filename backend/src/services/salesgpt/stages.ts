@@ -39,31 +39,6 @@ export const CONVERSATION_STAGES_EN: Record<string, string> = {
     "9": "End Conversation: End the conversation warmly and invite the customer to return anytime."
 };
 
-// ==================== STAGE ANALYZER PROMPT ====================
-
-export const STAGE_ANALYZER_PROMPT = `أنت مساعد مبيعات ذكي تساعد في تحديد المرحلة الحالية من محادثة البيع.
-
-بداية تاريخ المحادثة:
-===
-{conversation_history}
-===
-نهاية تاريخ المحادثة.
-
-المرحلة الحالية: {current_stage_id}
-
-حدد المرحلة التالية المناسبة من الخيارات التالية:
-{conversation_stages}
-
-القواعد:
-- أعد رقماً واحداً فقط (من 1 إلى 9)
-- إذا كان تاريخ المحادثة فارغاً، ابدأ دائماً بالمرحلة 1 (المقدمة)
-- إذا أظهر العميل رغبة في الشراء، انتقل للمرحلة 6 أو 7
-- إذا لدى العميل اعتراض، انتقل للمرحلة 5
-- إذا قدم العميل معلومات الطلب (اسم/هاتف/عنوان) أو يحتاج اختيار لون/مقاس، انتقل للمرحلة 7 أو 8
-- لا تعد أي شيء آخر غير الرقم
-
-الرقم:`;
-
 /**
  * Get conversation stage description by ID
  */

@@ -189,8 +189,7 @@ export async function findEligibleAbandonedConversations(): Promise<EligibleAban
          AND NULLIF(BTRIM(c.user_id), '') IS NOT NULL
          AND (
            c.conversation_state->>'salesgpt_stage_id' = ANY($2::text[])
-           OR c.conversation_state->>'current_stage' = 'close'
-           OR c.stage = 'close'
+           OR jsonb_array_length(COALESCE(c.conversation_state->'cart'->'items', '[]'::jsonb)) > 0
          )
          AND NULLIF(BTRIM(c.conversation_state->'extracted_entities'->>'name'), '') IS NOT NULL
          AND NULLIF(BTRIM(c.conversation_state->'extracted_entities'->>'phone'), '') IS NOT NULL

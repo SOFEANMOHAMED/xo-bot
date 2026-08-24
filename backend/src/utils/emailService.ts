@@ -13,6 +13,7 @@ import {
   renderInfoBox,
 } from './emailBrand.js';
 import { getOrderSourceLabel } from './orderSource.js';
+import { formatOrderNotesForMerchant, formatVariantCaption } from '../orders/merchantOrderNotes.js';
 
 type MailPayload = {
   from: string;
@@ -457,6 +458,8 @@ export type NewOrderEmailItem = {
   productName: string;
   quantity: number;
   price: number;
+  color?: string | null;
+  size?: string | null;
 };
 
 export type NewOrderEmailPayload = {
@@ -504,9 +507,13 @@ export const sendNewOrderEmail = async (
       ? order.items
           .map((item) => {
             const lineTotal = (item.price || 0) * (item.quantity || 1);
+            const variant = formatVariantCaption(item.color, item.size);
+            const nameHtml = variant
+              ? `${escapeHtml(item.productName || 'منتج')}<div style="font-size:12px;color:${BRAND.muted};font-weight:400;margin-top:2px;">${escapeHtml(variant)}</div>`
+              : escapeHtml(item.productName || 'منتج');
             return `
               <tr>
-                <td style="padding:10px 8px;border-bottom:1px solid ${BRAND.border};">${escapeHtml(item.productName || 'منتج')}</td>
+                <td style="padding:10px 8px;border-bottom:1px solid ${BRAND.border};">${nameHtml}</td>
                 <td style="padding:10px 8px;border-bottom:1px solid ${BRAND.border};text-align:center;">${item.quantity || 1}</td>
                 <td style="padding:10px 8px;border-bottom:1px solid ${BRAND.border};text-align:left;">${escapeHtml(formatMoney(lineTotal, currency))}</td>
               </tr>`;
@@ -522,7 +529,7 @@ export const sendNewOrderEmail = async (
     return `
       <tr>
         <td style="padding:6px 0;color:${BRAND.muted};width:35%;vertical-align:top;">${escapeHtml(label)}</td>
-        <td style="padding:6px 0;color:${BRAND.text};font-weight:600;">${escapeHtml(String(value))}</td>
+        <td style="padding:6px 0;color:${BRAND.text};font-weight:600;white-space:pre-line;">${escapeHtml(String(value))}</td>
       </tr>`;
   };
 
@@ -544,7 +551,7 @@ export const sendNewOrderEmail = async (
       )}
       ${detailRow('العنوان', order.customerAddress)}
       ${detailRow('وقت التوصيل', order.deliveryTime)}
-      ${detailRow('ملاحظات', order.notes)}
+      ${detailRow('ملاحظات', formatOrderNotesForMerchant(order.notes))}
     </table>
     <table style="width:100%;border-collapse:collapse;background:${BRAND.soft};border-radius:12px;overflow:hidden;margin-bottom:16px;">
       <thead>
