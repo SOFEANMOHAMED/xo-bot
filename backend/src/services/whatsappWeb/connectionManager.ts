@@ -4,6 +4,7 @@ import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
+  proto,
   type ConnectionState,
   type WAMessage,
   type WAVersion
@@ -16,6 +17,10 @@ import {
   handleWhatsAppWebCustomerMessage,
   handleWhatsAppWebMerchantPhoneMessage
 } from './inbound.js';
+import {
+  enqueueWhatsAppWebHistoryImport,
+  resetWhatsAppWebHistoryBudget
+} from './historyImport.js';
 import {
   formatDisplayPhone,
   phoneDigitsFromJid
@@ -213,7 +218,9 @@ async function openSocket(merchantId: string, allowQr: boolean): Promise<void> {
       browser: Browsers.ubuntu('Chrome'),
       markOnlineOnConnect: false,
       syncFullHistory: false,
-      shouldSyncHistoryMessage: () => false,
+      shouldSyncHistoryMessage: allowQr
+        ? ({ syncType }) => syncType !== proto.HistorySync.HistorySyncType.FULL
+        : () => false,
       generateHighQualityLinkPreview: false,
       qrTimeout: 60_000
     });
@@ -236,12 +243,24 @@ async function openSocket(merchantId: string, allowQr: boolean): Promise<void> {
 
     sock.ev.on('messages.upsert', ({ messages, type }) => {
       if (generation !== runtime.generation) return;
-      // Live inbound only. `append` is history/sync and must not drive the bot.
-      if (type !== 'notify') return;
-      for (const message of messages) {
-        void dispatchInbound(merchantId, message);
+      if (type === 'notify') {
+        for (const message of messages) {
+          void dispatchInbound(merchantId, message);
+        }
+        return;
+      }
+      // `append` is history/sync — inbox only, never drive the bot.
+      if (allowQr) {
+        enqueueWhatsAppWebHistoryImport(merchantId, messages);
       }
     });
+
+    if (allowQr) {
+      sock.ev.on('messaging-history.set', ({ messages }) => {
+        if (generation !== runtime.generation) return;
+        enqueueWhatsAppWebHistoryImport(merchantId, messages || []);
+      });
+    }
 
     await applyStatus(runtime, 'connecting');
   } catch (error) {
@@ -376,6 +395,7 @@ export async function startWhatsAppWebPairing(merchantId: string): Promise<void>
   const runtime = getOrCreateRuntime(merchantId);
   if (runtime.status === 'connected' && runtime.sock) return;
   runtime.reconnectAttempts = 0;
+  resetWhatsAppWebHistoryBudget(merchantId);
   await openSocket(merchantId, true);
 
   const generation = getOrCreateRuntime(merchantId).generation;
@@ -405,6 +425,7 @@ export async function disconnectWhatsAppWeb(merchantId: string): Promise<void> {
     await endSocket(runtime);
   }
   await deleteWhatsAppWebSession(merchantId);
+  resetWhatsAppWebHistoryBudget(merchantId);
   runtime.qrDataUrl = null;
   runtime.phoneNumber = null;
   runtime.status = 'disconnected';

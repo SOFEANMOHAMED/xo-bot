@@ -259,6 +259,12 @@ const ConversationsInbox: React.FC = () => {
         void apiService.markInboxRead(id).catch(() => undefined);
       }
     } catch (err: any) {
+      if (err?.status === 404) {
+        setSelectedId(null);
+        setThread(null);
+        setThreadError(null);
+        return;
+      }
       logger.error('Failed to load conversation', err);
       setThreadError(err?.message || 'فشل تحميل المحادثة');
       setThread(null);
@@ -281,6 +287,17 @@ const ConversationsInbox: React.FC = () => {
 
   const handleRealtimeEvent = useCallback(
     (event: InboxStreamEvent) => {
+      if (event.type === 'channel_cleared') {
+        if (event.purgedPlatform && event.platform) {
+          const clearedPlatform = String(event.platform);
+          setConversations((prev) => prev.filter((c) => c.platform !== clearedPlatform));
+        }
+        void fetchList({ silent: true });
+        const selected = selectedIdRef.current;
+        if (selected) void fetchThread(selected, { silent: true });
+        return;
+      }
+
       if (event.type === 'typing') {
         const typing = event.typing;
         const convId = typing?.conversationId || event.conversationId;
@@ -428,7 +445,7 @@ const ConversationsInbox: React.FC = () => {
         });
       }
     },
-    [fetchList]
+    [fetchList, fetchThread]
   );
 
   const { connected: realtimeConnected } = useInboxRealtime({

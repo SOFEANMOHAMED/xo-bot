@@ -24,10 +24,11 @@ export type InboxStreamConversation = {
 };
 
 export type InboxStreamEvent = {
-  type: 'message' | 'conversation' | 'heartbeat' | 'connected' | 'typing' | 'read';
+  type: 'message' | 'conversation' | 'heartbeat' | 'connected' | 'typing' | 'read' | 'channel_cleared';
   merchantId: string;
   conversationId?: string;
   platform?: string | null;
+  purgedPlatform?: boolean;
   message?: InboxStreamMessage;
   conversation?: InboxStreamConversation;
   typing?: {

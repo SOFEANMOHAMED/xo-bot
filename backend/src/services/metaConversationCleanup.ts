@@ -1,26 +1,32 @@
 /**
- * Delete channel conversations when a Meta page/account is disconnected.
+ * Delete channel conversations when a merchant unlinks an inbox channel.
  * SaaS-safe: always scoped by merchant_id; never touches other tenants.
  *
  * Messages cascade via FK ON DELETE CASCADE on conversations.
+ * After delete, the merchant inbox is notified so an open UI drops the threads.
  */
 
 import pool from '../database/connection.js';
 import { logger } from '../utils/logger.js';
+import { notifyMerchantInboxChannelCleared } from './inbox/inboxRealtime.js';
 
-export type ChannelConversationPlatform = 'facebook_messenger' | 'instagram';
+export type ChannelConversationPlatform =
+  | 'facebook_messenger'
+  | 'instagram'
+  | 'whatsapp'
+  | 'telegram';
 
 /**
- * Delete Messenger/Instagram conversations for a merchant.
- * - With accountId: only threads bound to that page / IG account.
- * - Without accountId: all threads for the platform.
+ * Delete inbox conversations for a merchant channel.
+ * - With accountId: only threads bound to that page / IG account / Telegram bot.
+ * - Without accountId: all threads for the platform (full unlink).
  * - If accountId is set but the merchant has no remaining accounts for that
  *   channel family, also purge unbound legacy threads of that platform.
  */
 export async function clearMerchantChannelConversations(params: {
   merchantId: string;
   platform: ChannelConversationPlatform;
-  /** Facebook page_id or Instagram ig_user_id / linked page_id */
+  /** Facebook page_id, Instagram ig_user_id, Telegram bot id, WhatsApp account id */
   accountId?: string;
 }): Promise<{ conversationsDeleted: number }> {
   const { merchantId, platform, accountId } = params;
@@ -30,6 +36,7 @@ export async function clearMerchantChannelConversations(params: {
   }
 
   let result;
+  let purgedPlatform = !accountId;
 
   if (accountId) {
     result = await pool.query(
@@ -45,8 +52,6 @@ export async function clearMerchantChannelConversations(params: {
       [merchantId, platform, accountId]
     );
 
-    // If merchant no longer has any linked account for this channel, also
-    // remove legacy threads that were never bound to a page id.
     const stillLinked = await hasRemainingChannelAccount(merchantId, platform);
     if (!stillLinked) {
       const unbound = await pool.query(
@@ -55,16 +60,21 @@ export async function clearMerchantChannelConversations(params: {
            AND platform = $2::text`,
         [merchantId, platform]
       );
-      const deleted =
+      const conversationsDeleted =
         (result.rowCount || 0) + (unbound.rowCount || 0);
       logger.info('Cleared merchant channel conversations on disconnect', {
         merchantId,
         platform,
         accountId,
-        conversationsDeleted: deleted,
+        conversationsDeleted,
         purgedUnbound: true,
       });
-      return { conversationsDeleted: deleted };
+      await notifyMerchantInboxChannelCleared({
+        merchantId,
+        platform,
+        purgedPlatform: true,
+      });
+      return { conversationsDeleted };
     }
   } else {
     result = await pool.query(
@@ -83,10 +93,16 @@ export async function clearMerchantChannelConversations(params: {
     conversationsDeleted,
   });
 
+  await notifyMerchantInboxChannelCleared({
+    merchantId,
+    platform,
+    purgedPlatform,
+  });
+
   return { conversationsDeleted };
 }
 
-async function hasRemainingChannelAccount(
+export async function hasRemainingChannelAccount(
   merchantId: string,
   platform: ChannelConversationPlatform
 ): Promise<boolean> {
@@ -98,8 +114,41 @@ async function hasRemainingChannelAccount(
     return (r.rowCount || 0) > 0;
   }
 
+  if (platform === 'instagram') {
+    const r = await pool.query(
+      `SELECT 1 FROM instagram_accounts WHERE merchant_id = $1::uuid LIMIT 1`,
+      [merchantId]
+    );
+    return (r.rowCount || 0) > 0;
+  }
+
+  if (platform === 'whatsapp') {
+    const r = await pool.query(
+      `SELECT 1
+       FROM (
+         SELECT 1 FROM whatsapp_accounts WHERE merchant_id = $1::uuid
+         UNION ALL
+         SELECT 1 FROM whatsapp_web_sessions
+          WHERE merchant_id = $1::uuid
+            AND status IN ('connected', 'connecting', 'qr')
+       ) linked
+       LIMIT 1`,
+      [merchantId]
+    );
+    return (r.rowCount || 0) > 0;
+  }
+
   const r = await pool.query(
-    `SELECT 1 FROM instagram_accounts WHERE merchant_id = $1::uuid LIMIT 1`,
+    `SELECT 1
+     FROM (
+       SELECT 1 FROM telegram_bots WHERE merchant_id = $1::uuid
+       UNION ALL
+       SELECT 1 FROM merchant_settings
+        WHERE merchant_id = $1::uuid
+          AND telegram_bot_token IS NOT NULL
+          AND btrim(telegram_bot_token) <> ''
+     ) linked
+     LIMIT 1`,
     [merchantId]
   );
   return (r.rowCount || 0) > 0;

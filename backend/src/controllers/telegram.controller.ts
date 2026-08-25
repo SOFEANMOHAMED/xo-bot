@@ -26,6 +26,11 @@ import {
   voiceTranscriptionFallbackMessage
 } from '../services/voiceTranscription.js';
 import { getCurrencyDisplayName } from '../utils/currencyDisplayName.js';
+import { bindConversationChannelAccount } from '../services/socialProfile.js';
+import {
+  clearMerchantChannelConversations,
+  hasRemainingChannelAccount,
+} from '../services/metaConversationCleanup.js';
 
 // Verify Telegram webhook secret (required — empty secret rejects)
 const verifyTelegramSecret = (req: any, secret: string): boolean => {
@@ -391,6 +396,15 @@ const processTelegramMessage = async (update: any) => {
         [merchantId, userId, userName]
       );
       conversationId = newConvResult.rows[0].id;
+    }
+
+    if (botId) {
+      await bindConversationChannelAccount({
+        merchantId,
+        conversationId,
+        platform: 'telegram',
+        accountId: String(botId),
+      });
     }
 
     // Human takeover: skip bot when merchant owns the chat (same as Messenger/IG)
@@ -848,6 +862,16 @@ export const disconnectTelegram = async (
     }
 
     logger.info('Telegram bot disconnected', { merchantId: req.merchantId });
+
+    if (
+      req.merchantId &&
+      !(await hasRemainingChannelAccount(req.merchantId, 'telegram'))
+    ) {
+      await clearMerchantChannelConversations({
+        merchantId: req.merchantId,
+        platform: 'telegram',
+      });
+    }
 
     res.json({
       success: true,
@@ -1460,6 +1484,14 @@ export const deleteTelegramBot = async (
       `DELETE FROM telegram_bots WHERE id = $1 AND merchant_id = $2`,
       [botId, req.merchantId]
     );
+
+    if (req.merchantId) {
+      await clearMerchantChannelConversations({
+        merchantId: req.merchantId,
+        platform: 'telegram',
+        accountId: String(botId),
+      });
+    }
 
     logger.info('Telegram bot deleted', { merchantId: req.merchantId, botId });
 

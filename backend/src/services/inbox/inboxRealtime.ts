@@ -8,10 +8,19 @@ import pool from '../../database/connection.js';
 import { logger } from '../../utils/logger.js';
 
 export type InboxRealtimeEvent = {
-  type: 'message' | 'conversation' | 'heartbeat' | 'connected' | 'typing' | 'read';
+  type:
+    | 'message'
+    | 'conversation'
+    | 'heartbeat'
+    | 'connected'
+    | 'typing'
+    | 'read'
+    | 'channel_cleared';
   merchantId: string;
   conversationId?: string;
   platform?: string | null;
+  /** True when every thread of this platform was removed (full unlink). */
+  purgedPlatform?: boolean;
   message?: {
     id: string;
     role: string;
@@ -89,6 +98,16 @@ function decodeNotifyPayload(raw: string): InboxRealtimeEvent | null {
           readAt: data.readAt || new Date().toISOString(),
           watermark: data.watermark ?? null,
         },
+        at: data.at || new Date().toISOString(),
+      };
+    }
+
+    if (data.type === 'channel_cleared') {
+      return {
+        type: 'channel_cleared',
+        merchantId,
+        platform: data.platform ?? null,
+        purgedPlatform: data.purgedPlatform === true,
         at: data.at || new Date().toISOString(),
       };
     }
@@ -347,9 +366,46 @@ export async function stopInboxRealtime(): Promise<void> {
 }
 
 /**
- * Subscribe to inbox events for one merchant only.
- * Returns unsubscribe function.
+ * Notify this merchant's open inbox that a channel's threads were removed.
  */
+export async function notifyMerchantInboxChannelCleared(params: {
+  merchantId: string;
+  platform: string;
+  purgedPlatform: boolean;
+}): Promise<void> {
+  const { merchantId, platform, purgedPlatform } = params;
+  if (!merchantId || !platform) return;
+
+  const event: InboxRealtimeEvent = {
+    type: 'channel_cleared',
+    merchantId,
+    platform,
+    purgedPlatform,
+    at: new Date().toISOString(),
+  };
+
+  try {
+    await pool.query('SELECT pg_notify($1, $2)', [
+      CHANNEL,
+      JSON.stringify({
+        type: 'channel_cleared',
+        merchantId,
+        platform,
+        purgedPlatform,
+        at: event.at,
+      }),
+    ]);
+  } catch (error) {
+    logger.warn('Failed to notify inbox channel cleared', {
+      merchantId,
+      platform,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    fanOut(event);
+  }
+}
+
+/** Subscribe to inbox events for one merchant only. Returns unsubscribe. */
 export function subscribeMerchantInbox(
   merchantId: string,
   subscriber: Subscriber

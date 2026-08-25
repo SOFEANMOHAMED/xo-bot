@@ -34,6 +34,7 @@ import {
   getWhatsAppWebSession,
   updateWhatsAppWebSettings
 } from '../services/whatsappWeb/index.js';
+import { clearMerchantChannelConversations } from '../services/metaConversationCleanup.js';
 
 // Verify WhatsApp webhook signature (Meta signs the raw body with the App Secret)
 const verifyWhatsAppSignature = (req: any, secret: string): boolean => {
@@ -323,6 +324,10 @@ export const disconnectWhatsApp = async (
       'DELETE FROM whatsapp_accounts WHERE merchant_id = $1',
       [merchantId]
     );
+    await clearMerchantChannelConversations({
+      merchantId,
+      platform: 'whatsapp',
+    });
 
     res.json({
       success: true,
