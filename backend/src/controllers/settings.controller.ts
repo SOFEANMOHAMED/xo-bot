@@ -314,6 +314,15 @@ export const getUserDashboardStats = async (
     );
     const totalQueries = totalQueriesResult.rows[0]?.count || 0;
 
+    const repliedCommentsResult = await pool.query(
+      `SELECT COUNT(*)::int AS count
+       FROM social_comment_actions
+       WHERE merchant_id = $1
+         AND (public_replied = true OR private_replied = true)`,
+      [req.merchantId]
+    );
+    const repliedComments = repliedCommentsResult.rows[0]?.count || 0;
+
     // Get queries per day for last 7 days
     const queries7DaysResult = await pool.query(
       `SELECT 
@@ -407,6 +416,7 @@ export const getUserDashboardStats = async (
       success: true,
       data: {
         totalQueries,
+        repliedComments,
         chartData: {
           '7days': queries7DaysData,
           'month': queriesMonthData.length > 0 ? queriesMonthData : [

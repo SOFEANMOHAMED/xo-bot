@@ -781,6 +781,7 @@ class ApiService {
   async getUserDashboardStats() {
     return this.request<{
       totalQueries: number;
+      repliedComments: number;
       chartData: {
         '7days': Array<{ name: string; queries: number }>;
         'month': Array<{ name: string; queries: number }>;

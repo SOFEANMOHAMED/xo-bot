@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Product } from '../types';
-import { TrendingUp, Users, ShoppingBag, MessageCircle, Loader2 } from 'lucide-react';
+import { TrendingUp, Users, ShoppingBag, MessageCircle, MessageSquare, Loader2 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { apiService } from '../services/api';
 import { logger } from '../utils/logger';
@@ -15,6 +15,7 @@ type TimeRange = '7days' | 'month' | 'year';
 const DashboardStats: React.FC<DashboardStatsProps> = ({ products }) => {
   const [timeRange, setTimeRange] = useState<TimeRange>('7days');
   const [totalQueries, setTotalQueries] = useState(0);
+  const [repliedComments, setRepliedComments] = useState(0);
   const [chartData, setChartData] = useState<Array<{ name: string; queries: number }>>([]);
   const [isLoading, setIsLoading] = useState(true);
   const totalStock = products.reduce((acc, curr) => acc + curr.stock, 0);
@@ -29,6 +30,7 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ products }) => {
         
         if (response && typeof response === 'object') {
           setTotalQueries(response.totalQueries || 0);
+          setRepliedComments(response.repliedComments || 0);
           
           // Set chart data based on current time range
           if (response.chartData && response.chartData[timeRange]) {
@@ -39,6 +41,7 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ products }) => {
         logger.error('Failed to fetch dashboard stats:', error);
         // Fallback to empty data
         setTotalQueries(0);
+        setRepliedComments(0);
         setChartData([]);
       } finally {
         setIsLoading(false);
@@ -80,7 +83,7 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ products }) => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
         <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 flex items-center justify-between transition-colors">
           <div>
             <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">إجمالي المنتجات</p>
@@ -98,6 +101,16 @@ const DashboardStats: React.FC<DashboardStatsProps> = ({ products }) => {
           </div>
           <div className="p-3 bg-brand-50 dark:bg-brand-900/30 text-brand dark:text-brand rounded-full">
             <MessageCircle size={24} />
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 flex items-center justify-between transition-colors">
+          <div>
+            <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">تعليقات رد عليها البوت</p>
+            <h3 className="text-3xl font-bold text-gray-800 dark:text-white">{repliedComments}</h3>
+          </div>
+          <div className="p-3 bg-pink-50 dark:bg-pink-900/30 text-pink-600 dark:text-pink-400 rounded-full">
+            <MessageSquare size={24} />
           </div>
         </div>
 
