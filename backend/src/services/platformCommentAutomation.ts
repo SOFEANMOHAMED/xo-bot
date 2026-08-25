@@ -11,9 +11,14 @@ import {
   clampSocialText,
   DEFAULT_COMMENT_REPLY,
   DEFAULT_DM_AFTER_COMMENT,
-  withPublicCommentMention,
 } from './socialCommentReplies.js';
 import {
+  logMissingPublicMention,
+  resolvePublicCommentMentionIdentity,
+  withPublicCommentMention,
+} from './socialCommentMention.js';
+import {
+  fetchFacebookCommenterProfile,
   sendFacebookCommentReply,
   sendFacebookPrivateReplyAfterComment,
 } from './facebookCommentGraph.js';
@@ -192,26 +197,11 @@ export async function processOfficialPageComment(
   }
 
   if (!commenterId) {
-    try {
-      const GRAPH_VERSION = process.env.FACEBOOK_GRAPH_VERSION || 'v21.0';
-      const url =
-        `https://graph.facebook.com/${GRAPH_VERSION}/${encodeURIComponent(String(commentId))}` +
-        `?fields=from,message&access_token=${encodeURIComponent(page.access_token)}`;
-      const res = await fetch(url);
-      const data = (await res.json()) as {
-        from?: { id?: string; name?: string };
-        message?: string;
-        error?: unknown;
-      };
-      if (!data.error && data.from?.id) {
-        commenterId = data.from.id;
-        if (data.from.name) commenterName = data.from.name;
-        if (data.message && !commentText) commentText = data.message;
-      }
-    } catch (err) {
-      logger.warn('Official page comment enrich failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
+    const profile = await fetchFacebookCommenterProfile(String(commentId), page.access_token);
+    if (profile?.fromId) {
+      commenterId = profile.fromId;
+      if (profile.fromName) commenterName = profile.fromName;
+      if (profile.message && !commentText) commentText = profile.message;
     }
   }
 
@@ -242,6 +232,19 @@ export async function processOfficialPageComment(
     return;
   }
 
+  const mention = await resolvePublicCommentMentionIdentity({
+    platform: 'facebook',
+    commentId: String(commentId),
+    accessToken: page.access_token,
+    commenterId,
+    commenterName,
+    commenterUsername: null,
+  });
+  const displayName =
+    mention.commenterName?.trim() || commenterName || 'صديقنا';
+  if (mention.commenterId) commenterId = mention.commenterId;
+  if (mention.commenterName) commenterName = mention.commenterName;
+
   const match = await findMatchingRule({
     pageId: page.page_id,
     accountRef: page.page_id,
@@ -263,7 +266,7 @@ export async function processOfficialPageComment(
         applyCommentTemplate(
           match.rule.public_reply_text,
           post.public_reply_text || DEFAULT_COMMENT_REPLY,
-          { comment: commentText, name: commenterName }
+          { comment: commentText, name: displayName }
         ).replace(/\{\{keyword\}\}/gi, match.matchedKeyword)
       );
     }
@@ -273,7 +276,7 @@ export async function processOfficialPageComment(
         applyCommentTemplate(
           match.rule.private_reply_text,
           post.private_reply_text || DEFAULT_DM_AFTER_COMMENT,
-          { comment: commentText, name: commenterName }
+          { comment: commentText, name: displayName }
         ).replace(/\{\{keyword\}\}/gi, match.matchedKeyword)
       );
     }
@@ -281,7 +284,7 @@ export async function processOfficialPageComment(
     publicText = clampSocialText(
       applyCommentTemplate(post.public_reply_text, DEFAULT_COMMENT_REPLY, {
         comment: commentText,
-        name: commenterName,
+        name: displayName,
       })
     );
     sendPrivate = post.send_dm_on_comment === true;
@@ -289,7 +292,7 @@ export async function processOfficialPageComment(
       privateText = clampSocialText(
         applyCommentTemplate(post.private_reply_text, DEFAULT_DM_AFTER_COMMENT, {
           comment: commentText,
-          name: commenterName,
+          name: displayName,
         })
       );
     }
@@ -297,13 +300,8 @@ export async function processOfficialPageComment(
 
   let publicReplied = false;
   if (publicText) {
-    const mentioned = clampSocialText(
-      withPublicCommentMention(publicText, {
-        platform: 'facebook',
-        commenterId,
-        commenterUsername: null,
-      })
-    );
+    logMissingPublicMention(mention, { commentId: String(commentId) });
+    const mentioned = clampSocialText(withPublicCommentMention(publicText, mention));
     publicReplied = await sendFacebookCommentReply(
       String(commentId),
       mentioned,

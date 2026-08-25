@@ -17,9 +17,13 @@ import {
   applyCommentTemplate,
   clampSocialText,
   DEFAULT_COMMENT_REPLY,
-  DEFAULT_DM_AFTER_COMMENT,
-  withPublicCommentMention
+  DEFAULT_DM_AFTER_COMMENT
 } from './socialCommentReplies.js';
+import {
+  logMissingPublicMention,
+  resolvePublicCommentMentionIdentity,
+  withPublicCommentMention
+} from './socialCommentMention.js';
 import type { ConversationState } from '../core/types.js';
 
 export type CommentAutomationAccount = {
@@ -178,6 +182,20 @@ export async function runCommentAutomation(input: CommentAutomationInput): Promi
     return;
   }
 
+  const mention = await resolvePublicCommentMentionIdentity({
+    platform,
+    commentId,
+    accessToken: account.access_token,
+    commenterId,
+    commenterName,
+    commenterUsername
+  });
+  const displayName =
+    mention.commenterName?.trim() ||
+    mention.commenterUsername?.trim() ||
+    commenterName ||
+    'صديقنا';
+
   const match = await findMatchingKeywordRule({
     merchantId,
     platform,
@@ -200,7 +218,7 @@ export async function runCommentAutomation(input: CommentAutomationInput): Promi
       publicText = clampSocialText(
         applyCommentTemplate(match.rule.public_reply_text, post.public_reply_text || DEFAULT_COMMENT_REPLY, {
           comment: commentText,
-          name: commenterName
+          name: displayName
         }).replace(/\{\{keyword\}\}/gi, match.matchedKeyword)
       );
     }
@@ -210,7 +228,7 @@ export async function runCommentAutomation(input: CommentAutomationInput): Promi
         applyCommentTemplate(
           match.rule.private_reply_text,
           post.private_reply_text || DEFAULT_DM_AFTER_COMMENT,
-          { comment: commentText, name: commenterName }
+          { comment: commentText, name: displayName }
         ).replace(/\{\{keyword\}\}/gi, match.matchedKeyword)
       );
     }
@@ -219,7 +237,7 @@ export async function runCommentAutomation(input: CommentAutomationInput): Promi
     publicText = clampSocialText(
       applyCommentTemplate(post.public_reply_text, DEFAULT_COMMENT_REPLY, {
         comment: commentText,
-        name: commenterName
+        name: displayName
       })
     );
     sendPrivate = post.send_dm_on_comment === true;
@@ -227,7 +245,7 @@ export async function runCommentAutomation(input: CommentAutomationInput): Promi
       privateText = clampSocialText(
         applyCommentTemplate(post.private_reply_text, DEFAULT_DM_AFTER_COMMENT, {
           comment: commentText,
-          name: commenterName
+          name: displayName
         })
       );
     }
@@ -235,13 +253,8 @@ export async function runCommentAutomation(input: CommentAutomationInput): Promi
 
   let publicReplied = false;
   if (publicText) {
-    const mentionedPublicText = clampSocialText(
-      withPublicCommentMention(publicText, {
-        platform,
-        commenterId,
-        commenterUsername
-      })
-    );
+    logMissingPublicMention(mention, { commentId, merchantId });
+    const mentionedPublicText = clampSocialText(withPublicCommentMention(publicText, mention));
     publicReplied = await input.sendPublicReply(
       commentId,
       mentionedPublicText,
@@ -273,7 +286,7 @@ export async function runCommentAutomation(input: CommentAutomationInput): Promi
     };
 
     const convPlatform = platform === 'facebook' ? 'facebook_messenger' : 'instagram';
-    const userId = commenterId || `comment:${commentId}`;
+    const userId = mention.commenterId || commenterId || `comment:${commentId}`;
 
     const existing = await pool.query(
       `SELECT id, conversation_state FROM conversations
@@ -290,7 +303,7 @@ export async function runCommentAutomation(input: CommentAutomationInput): Promi
       const created = await pool.query(
         `INSERT INTO conversations (merchant_id, platform, user_id, user_name)
          VALUES ($1, $2, $3, $4) RETURNING id`,
-        [merchantId, convPlatform, userId, commenterName || 'Social User']
+        [merchantId, convPlatform, userId, displayName || 'Social User']
       );
       conversationId = created.rows[0].id;
     }

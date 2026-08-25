@@ -47,6 +47,7 @@ import {
 } from '../services/socialCommentReplies.js';
 import { normalizePageFeedCommentValue, isPageFeedCommentEvent } from '../services/pageFeedCommentPayload.js';
 import { runCommentAutomation } from '../services/socialCommentAutomation.js';
+import { sendInstagramCommentReply } from '../services/instagramCommentGraph.js';
 import {
   applyAcquisitionToConversation,
   buildAcquisitionContextNote,
@@ -171,60 +172,6 @@ const resolveLinkedInstagramBusinessAccount = async (
     edgeCount: edgeData.data?.length ?? 0
   });
   return null;
-};
-
-const sendInstagramComment = async (
-  commentId: string,
-  message: string,
-  accessToken: string
-): Promise<boolean> => {
-  try {
-    const url = `https://graph.facebook.com/${INSTAGRAM_GRAPH_VERSION}/${encodeURIComponent(commentId)}/replies?access_token=${encodeURIComponent(accessToken)}`;
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message })
-    });
-    const data = await resp.json() as any;
-    if (!resp.ok) {
-      logger.error('Instagram comment reply failed', new Error(JSON.stringify(data)), { commentId });
-      return false;
-    }
-    return true;
-  } catch (error) {
-    logger.error('Error sending Instagram comment reply', error as Error, { commentId });
-    return false;
-  }
-};
-
-/** Resolve Instagram username for @mention when webhook omits `from.username`. */
-const fetchInstagramCommentUsername = async (
-  commentId: string,
-  accessToken: string
-): Promise<string | null> => {
-  try {
-    const url =
-      `https://graph.facebook.com/${INSTAGRAM_GRAPH_VERSION}/${encodeURIComponent(commentId)}` +
-      `?fields=username,from{username}&access_token=${encodeURIComponent(accessToken)}`;
-    const resp = await fetch(url);
-    const data = (await resp.json()) as {
-      username?: string;
-      from?: { username?: string };
-      error?: { message?: string };
-    };
-    if (!resp.ok || data.error) {
-      logger.warn('IG comment username lookup failed', {
-        commentId,
-        err: data.error?.message
-      });
-      return null;
-    }
-    const username = data.username || data.from?.username;
-    return username && String(username).trim() ? String(username).trim().replace(/^@+/, '') : null;
-  } catch (error) {
-    logger.error('IG comment username lookup error', error as Error, { commentId });
-    return null;
-  }
 };
 
 /**
@@ -837,10 +784,7 @@ export const processInstagramCommentFromPageFeed = async (pageId: string, value:
   }
 
   const commenterName = n.fromName || n.fromUsername || 'صديقنا';
-  let commenterUsername = n.fromUsername?.trim().replace(/^@+/, '') || null;
-  if (!commenterUsername && ig.access_token) {
-    commenterUsername = await fetchInstagramCommentUsername(String(commentId), ig.access_token);
-  }
+  const commenterUsername = n.fromUsername?.trim().replace(/^@+/, '') || null;
 
   await runCommentAutomation({
     platform: 'instagram',
@@ -853,7 +797,7 @@ export const processInstagramCommentFromPageFeed = async (pageId: string, value:
     commenterName,
     commenterUsername,
     account: ig,
-    sendPublicReply: sendInstagramComment,
+    sendPublicReply: sendInstagramCommentReply,
     sendPrivateReply: sendInstagramPrivateReplyAfterComment
   });
 };
@@ -992,7 +936,7 @@ const processInstagramCommentWebhook = async (value: any, entryInstagramAccountI
     commenterName,
     commenterUsername,
     account: ig,
-    sendPublicReply: sendInstagramComment,
+    sendPublicReply: sendInstagramCommentReply,
     sendPrivateReply: sendInstagramPrivateReplyAfterComment
   });
 };

@@ -32,16 +32,16 @@ import {
   voiceTranscriptionFallbackMessage
 } from '../services/voiceTranscription.js';
 import { getCurrencyDisplayName } from '../utils/currencyDisplayName.js';
-import {
-  applyCommentTemplate,
-  clampSocialText,
-  DEFAULT_COMMENT_REPLY,
-  DEFAULT_DM_AFTER_COMMENT
-} from '../services/socialCommentReplies.js';
+import { applyCommentTemplate, clampSocialText, DEFAULT_COMMENT_REPLY, DEFAULT_DM_AFTER_COMMENT } from '../services/socialCommentReplies.js';
 import { normalizePageFeedCommentValue, isPageFeedCommentEvent } from '../services/pageFeedCommentPayload.js';
 import { processInstagramCommentFromPageFeed } from './instagram.controller.js';
 import { getMerchantPlanLimits, getFacebookPagesCount } from '../utils/planLimits.js';
 import { runCommentAutomation } from '../services/socialCommentAutomation.js';
+import {
+  fetchFacebookCommenterProfile,
+  sendFacebookCommentReply,
+  sendFacebookPrivateReplyAfterComment,
+} from '../services/facebookCommentGraph.js';
 import {
   applyAcquisitionToConversation,
   buildAcquisitionContextNote,
@@ -241,101 +241,6 @@ const sendFacebookMessage = async (pageId: string, recipientId: string, message:
   }
 };
 
-/**
- * أول رسالة خاصة بعد تعليق على منشور الصفحة — يجب استخدام comment_id (Private Replies).
- * إرسال recipient.id فقط لا يفتح المحادثة من تعليق.
- * @see https://developers.facebook.com/docs/messenger-platform/discovery/private-replies/
- */
-const sendFacebookPrivateReplyAfterComment = async (
-  pageId: string,
-  commentId: string,
-  message: string,
-  accessToken: string
-): Promise<boolean> => {
-  try {
-    const url =
-      `https://graph.facebook.com/v21.0/${encodeURIComponent(pageId)}/messages` +
-      `?access_token=${encodeURIComponent(accessToken)}`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        recipient: { comment_id: commentId },
-        message: { text: message }
-      })
-    });
-    const data = await response.json() as { error?: { message?: string; code?: number } };
-    if (!response.ok) {
-      logger.error(
-        'Facebook private reply after comment failed',
-        new Error(JSON.stringify(data)),
-        { pageId, commentId, graphCode: data?.error?.code }
-      );
-      return false;
-    }
-    return true;
-  } catch (error) {
-    logger.error('Error sending Facebook private reply', error as Error, { pageId, commentId });
-    return false;
-  }
-};
-
-const sendFacebookCommentReply = async (
-  commentId: string,
-  message: string,
-  accessToken: string
-): Promise<boolean> => {
-  try {
-    const url = `https://graph.facebook.com/v21.0/${encodeURIComponent(commentId)}/comments?access_token=${encodeURIComponent(accessToken)}`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message })
-    });
-    const data = (await response.json()) as { id?: string; error?: { message?: string; code?: number } };
-    if (!response.ok) {
-      logger.error(
-        'Facebook comment reply failed',
-        new Error(data?.error?.message || JSON.stringify(data)),
-        { commentId, graphCode: data?.error?.code }
-      );
-      return false;
-    }
-    return true;
-  } catch (error) {
-    logger.error('Error sending Facebook comment reply', error as Error, { commentId });
-    return false;
-  }
-};
-
-/** When webhook omits `from` (privacy), fetch comment author + text via Graph API. */
-const fetchFacebookCommentDetails = async (
-  commentId: string,
-  accessToken: string
-): Promise<{ fromId?: string; message: string; fromName?: string } | null> => {
-  try {
-    const url = `https://graph.facebook.com/v21.0/${encodeURIComponent(commentId)}?fields=from,message&access_token=${encodeURIComponent(accessToken)}`;
-    const r = await fetch(url);
-    const data = (await r.json()) as {
-      from?: { id?: string; name?: string };
-      message?: string;
-      error?: { message?: string };
-    };
-    if (!r.ok || data.error) {
-      logger.warn('Facebook comment Graph lookup failed', { commentId, err: data.error?.message });
-      return null;
-    }
-    return {
-      fromId: data.from?.id != null ? String(data.from.id) : undefined,
-      message: data.message != null ? String(data.message) : '',
-      fromName: data.from?.name
-    };
-  } catch (e) {
-    logger.error('Facebook comment Graph lookup error', e as Error, { commentId });
-    return null;
-  }
-};
-
 const buildFbCommentTemplateReply = (
   row: { comment_reply_template?: string | null; comment_dm_template?: string | null },
   context: 'comment' | 'dm_after_comment',
@@ -394,7 +299,7 @@ const processFacebookComment = async (pageId: string, value: any) => {
   const accessToken = row.access_token as string;
 
   if (!commenterId) {
-    const enriched = await fetchFacebookCommentDetails(commentId, accessToken);
+    const enriched = await fetchFacebookCommenterProfile(commentId, accessToken);
     if (enriched?.fromId) {
       commenterId = enriched.fromId;
       if (enriched.fromName) commenterName = enriched.fromName;
