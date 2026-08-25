@@ -31,6 +31,7 @@ import type {
   ContentPublishAccount,
   PublicationStatus,
 } from '../../types/contentPublishing';
+import { defaultScheduleValue, ScheduleDateTimePicker } from '../ScheduleDateTimePicker';
 
 type TargetKey = `${ContentPlatform}:${string}`;
 
@@ -53,17 +54,6 @@ const STATUS_STYLE: Record<PublicationStatus, string> = {
   failed: 'bg-red-900/40 text-red-200',
   cancelled: 'bg-slate-700 text-slate-400',
 };
-
-function toLocalInputValue(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function defaultScheduleValue(): string {
-  const d = new Date(Date.now() + 60 * 60 * 1000);
-  d.setSeconds(0, 0);
-  return toLocalInputValue(d);
-}
 
 function formatDate(value: string | null): string {
   if (!value) return '—';
@@ -516,15 +506,11 @@ const AdminContentPublishing: React.FC = () => {
             </div>
 
             {scheduleMode === 'later' && (
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-2">وقت النشر</label>
-                <input
-                  type="datetime-local"
-                  value={scheduledAt}
-                  onChange={(e) => setScheduledAt(e.target.value)}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-900 text-white px-3 py-2.5 text-sm"
-                />
-              </div>
+              <ScheduleDateTimePicker
+                value={scheduledAt}
+                onChange={setScheduledAt}
+                variant="admin"
+              />
             )}
 
             <div className="flex items-center justify-end gap-2 pt-1">
