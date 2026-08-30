@@ -1333,19 +1333,39 @@ class ApiService {
     );
   }
 
+  async syncSocialStories(platform?: 'facebook' | 'instagram') {
+    return this.request<{
+      message: string;
+      results: Array<{ synced: number; pruned?: number; platform: string; accountRef: string }>;
+    }>(
+      '/integrations/social/stories/sync',
+      {
+        method: 'POST',
+        body: JSON.stringify(platform ? { platform } : {}),
+      }
+    );
+  }
+
   async getSocialPosts(params?: {
     platform?: 'facebook' | 'instagram';
     accountRef?: string;
+    contentKind?: 'post' | 'story';
     limit?: number;
     offset?: number;
   }) {
     const q = new URLSearchParams();
     if (params?.platform) q.set('platform', params.platform);
     if (params?.accountRef) q.set('accountRef', params.accountRef);
+    if (params?.contentKind) q.set('contentKind', params.contentKind);
     if (params?.limit) q.set('limit', String(params.limit));
     if (params?.offset) q.set('offset', String(params.offset));
     const qs = q.toString();
     return this.request<{ posts: any[] }>(`/integrations/social/posts${qs ? `?${qs}` : ''}`);
+  }
+
+  socialPostThumbnailUrl(socialPostId: string, cacheKey?: string | null) {
+    const q = cacheKey ? `?v=${encodeURIComponent(cacheKey)}` : '';
+    return `${this.baseURL}/integrations/social/posts/${encodeURIComponent(socialPostId)}/thumbnail${q}`;
   }
 
   async linkSocialPostProduct(socialPostId: string, productId: string | null) {

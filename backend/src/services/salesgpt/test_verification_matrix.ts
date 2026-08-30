@@ -655,6 +655,7 @@ function runGoldenSuites(): { name: string; ok: boolean; detail?: string }[] {
     { name: 'test-turn-intent-golden', script: 'test-turn-intent-golden' },
     { name: 'test-salesgpt-golden', script: 'test-salesgpt-golden' },
     { name: 'test-conversation-cart', script: 'test-conversation-cart' },
+    { name: 'test-social-acquisition', script: 'test-social-acquisition' },
   ];
   return suites.map(({ name, script }) => {
     try {
@@ -693,6 +694,7 @@ function main(): void {
     'H03 — محادثة كاملة حتى confirm_order → ظهور طلب في لوحة التاجر',
     'H04 — merchant_id isolation: محادثتان لتاجرين → لا تسرّب بيانات',
     'H05 — acquisitionNote على IG/FB من إعلان → سياق المنتج في الرد',
+    'H06 — رد على ستوري إنستغرام مربوط بمنتج → البوت يبدأ بذلك المنتج',
   ];
   for (const h of manual) console.log(`  ⏸  ${h}`);
 

@@ -5,8 +5,13 @@ import { AuthRequest } from '../middleware/auth.js';
 import { logger } from '../utils/logger.js';
 import {
   listMerchantSocialPosts,
-  syncMerchantSocialPosts
+  syncMerchantSocialPosts,
+  syncMerchantSocialStories,
+  reconcileMerchantSocialStoryPresence,
+  ensureSocialStorySchema,
+  type SocialContentKind,
 } from '../services/socialPostsSync.js';
+import { loadMerchantStoryPreviewImage } from '../services/socialStoryMedia.js';
 
 function requireMerchant(req: AuthRequest): string {
   if (!req.merchantId) throw createError('Unauthorized', 401);
@@ -24,16 +29,44 @@ export const syncSocialPosts = async (req: AuthRequest, res: Response, next: Nex
   }
 };
 
+export const syncSocialStories = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const merchantId = requireMerchant(req);
+    const platform = req.body?.platform as 'facebook' | 'instagram' | undefined;
+    const results = await syncMerchantSocialStories(merchantId, platform);
+    res.json({ message: 'تمت مزامنة الستوري', results });
+  } catch (e) {
+    next(e);
+  }
+};
+
+function parseContentKind(raw: unknown): SocialContentKind {
+  return raw === 'story' ? 'story' : 'post';
+}
+
 export const getSocialPosts = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const merchantId = requireMerchant(req);
     const platform = req.query.platform as 'facebook' | 'instagram' | undefined;
     const accountRef = req.query.accountRef as string | undefined;
+    const contentKind = parseContentKind(req.query.contentKind);
     const limit = req.query.limit ? Number(req.query.limit) : 50;
     const offset = req.query.offset ? Number(req.query.offset) : 0;
+    if (contentKind === 'story') {
+      try {
+        await reconcileMerchantSocialStoryPresence(merchantId, platform);
+      } catch (e) {
+        logger.warn('Story presence reconcile failed', {
+          merchantId,
+          platform: platform || null,
+          error: e instanceof Error ? e.message : String(e)
+        });
+      }
+    }
     const rows = await listMerchantSocialPosts(merchantId, {
       platform,
       accountRef,
+      contentKind,
       limit,
       offset
     });
@@ -48,13 +81,16 @@ export const linkSocialPostProduct = async (req: AuthRequest, res: Response, nex
     const merchantId = requireMerchant(req);
     const { socialPostId, productId } = req.body || {};
     if (!socialPostId) throw createError('socialPostId مطلوب', 400);
+    await ensureSocialStorySchema();
 
     const post = await pool.query(
-      `SELECT id, platform, external_post_id FROM social_posts
+      `SELECT id, platform, external_post_id, COALESCE(content_kind, 'post') AS content_kind
+       FROM social_posts
        WHERE id = $1 AND merchant_id = $2`,
       [socialPostId, merchantId]
     );
     if (post.rows.length === 0) throw createError('المنشور غير موجود', 404);
+    const contentType = post.rows[0].content_kind === 'story' ? 'story' : 'post';
 
     if (productId) {
       const product = await pool.query(
@@ -79,18 +115,22 @@ export const linkSocialPostProduct = async (req: AuthRequest, res: Response, nex
     const inserted = await pool.query(
       `INSERT INTO social_content_links (
          merchant_id, platform, content_type, external_id, social_post_id, product_id, is_active
-       ) VALUES ($1, $2, 'post', $3, $4, $5, true)
+       ) VALUES ($1, $2, $3, $4, $5, $6, true)
        RETURNING id, product_id`,
       [
         merchantId,
         post.rows[0].platform,
+        contentType,
         post.rows[0].external_post_id,
         socialPostId,
         productId
       ]
     );
 
-    res.json({ message: 'تم ربط المنتج بالمنشور (مستحسن)', link: inserted.rows[0] });
+    res.json({
+      message: contentType === 'story' ? 'تم ربط المنتج بالستوري (مستحسن)' : 'تم ربط المنتج بالمنشور (مستحسن)',
+      link: inserted.rows[0]
+    });
   } catch (e) {
     next(e);
   }
@@ -343,6 +383,31 @@ export const updateCommentAutomationMode = async (
     );
     if (result.rows.length === 0) throw createError('لا يوجد حساب إنستغرام مربوط', 404);
     res.json({ message: 'تم تحديث وضع أتمتة التعليقات', accounts: result.rows });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const getSocialPostThumbnail = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const merchantId = requireMerchant(req);
+    const socialPostId = String(req.params.id || '').trim();
+    if (!socialPostId) throw createError('المنشور غير موجود', 404);
+
+    const image = await loadMerchantStoryPreviewImage({
+      merchantId,
+      socialPostId
+    });
+    if (!image) throw createError('تعذر تحميل صورة الستوري', 404);
+
+    res.setHeader('Content-Type', image.contentType);
+    res.setHeader('Cache-Control', 'private, max-age=120');
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
+    res.send(image.body);
   } catch (e) {
     next(e);
   }

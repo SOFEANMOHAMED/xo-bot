@@ -26,6 +26,8 @@ function sourceLabel(source: string | null | undefined): string {
   switch ((source || '').toLowerCase()) {
     case 'comment':
       return 'من تعليق على منشور';
+    case 'story':
+      return 'من ستوري';
     case 'ads':
       return 'من إعلان';
     case 'post':
@@ -65,7 +67,12 @@ async function loadSocialPost(params: {
   let sql = `
     SELECT caption, thumbnail_url, permalink, platform
     FROM social_posts
-    WHERE merchant_id = $1 AND external_post_id = $2`;
+    WHERE merchant_id = $1
+      AND (
+        external_post_id = $2
+        OR metadata->>'media_id' = $2
+        OR metadata->>'post_id' = $2
+      )`;
   if (params.platform) {
     values.push(params.platform);
     sql += ` AND platform = $3`;

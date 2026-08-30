@@ -38,7 +38,9 @@
     "test-turn-intent-golden": "tsx src/services/salesgpt/test_turn_intent_golden.ts",
     "test-verification-matrix": "tsx src/services/salesgpt/test_verification_matrix.ts",
     "test-conversation-cart": "tsx src/services/salesgpt/test_conversation_cart.ts",
+    "migrate-social-story-content": "tsx src/database/migrations/run_social_story_content_migration.ts",
     "test-social-comment-mention": "tsx src/services/test_socialCommentMention.ts",
+    "test-social-acquisition": "tsx src/services/test_socialAcquisition.ts",
     "test-whatsapp-history-import": "tsx src/services/test_whatsappHistoryImport.ts"
   },
   "keywords": [

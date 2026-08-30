@@ -14,7 +14,9 @@ import {
 } from '../controllers/integration.controller.js';
 import {
   syncSocialPosts,
+  syncSocialStories,
   getSocialPosts,
+  getSocialPostThumbnail,
   linkSocialPostProduct,
   updateSocialPostCommentSettings,
   listKeywordRules,
@@ -85,7 +87,9 @@ router.delete('/instagram/disconnect', disconnectInstagram);
 
 // Social posts + keyword rules (FB/IG)
 router.post('/social/posts/sync', syncSocialPosts);
+router.post('/social/stories/sync', syncSocialStories);
 router.get('/social/posts', getSocialPosts);
+router.get('/social/posts/:id/thumbnail', getSocialPostThumbnail);
 router.put('/social/posts/link-product', linkSocialPostProduct);
 router.put('/social/posts/comment-settings', updateSocialPostCommentSettings);
 router.get('/social/keyword-rules', listKeywordRules);

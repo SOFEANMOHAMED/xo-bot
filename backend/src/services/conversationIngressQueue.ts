@@ -129,6 +129,15 @@ export function mergeMessengerStylePayloads<T extends Record<string, any>>(
     (latest as any).message.attachments = attachments;
   }
 
+  const storyPart = parts.find((p) => (p.payload as any)?.message?.reply_to?.story?.id);
+  if (storyPart) {
+    const story = structuredClone((storyPart.payload as any).message.reply_to.story);
+    (latest as any).message.reply_to = {
+      ...((latest as any).message.reply_to || {}),
+      story,
+    };
+  }
+
   // Prefer last mid for channel APIs that key off message id; keep all mids on a side field
   const mids = parts.map((p) => p.externalMessageId).filter(Boolean) as string[];
   if (mids.length > 0) {

@@ -3,6 +3,7 @@ import { Link2, MessageCircle, MessageSquare } from 'lucide-react';
 import { apiService } from '../services/api';
 import { MerchantSettings } from '../types';
 import SocialAutomationPanel from './SocialAutomationPanel';
+import SocialStoriesPanel from './SocialStoriesPanel';
 
 interface SocialAutomationPageProps {
   settings: MerchantSettings;
@@ -93,7 +94,7 @@ const SocialAutomationPage: React.FC<SocialAutomationPageProps> = ({
       <div>
         <h1 className="text-xl font-bold text-gray-900 dark:text-white">أتمتة المنشورات والتعليقات</h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          فعّل الردود على منشورات محددة، أضف قواعد كلمات مفتاحية، واربط منتجاً ليكون البوت على علم به في المحادثة الخاصة.
+          فعّل الردود على منشورات محددة، واربط الستوري أو المنشور بمنتج ليبدأ البوت منه عندما يراسل العميل.
         </p>
       </div>
 
@@ -155,6 +156,12 @@ const SocialAutomationPage: React.FC<SocialAutomationPageProps> = ({
           </>
         )}
       </div>
+
+      <SocialStoriesPanel
+        facebookConnected={facebookConnected}
+        instagramConnected={instagramConnected}
+        showNotification={showNotification}
+      />
 
       <SocialAutomationPanel
         facebookConnected={facebookConnected}

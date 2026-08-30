@@ -13,6 +13,10 @@ import {
 } from './channel.interface.js';
 import { deliverHumanLikeReply } from './replyDelivery.js';
 import { extractImageUrl } from './botTurn.js';
+import {
+  isStoryReplyMessagingEvent,
+  resolveInboundMessagingText,
+} from '../socialAcquisition.js';
 
 // Send image via Facebook Graph API
 export const sendFacebookImage = async (
@@ -140,7 +144,7 @@ export class FacebookAdapter implements ChannelAdapter {
     try {
       const pageId = rawEvent.recipient?.id;
       const senderId = rawEvent.sender?.id;
-      const messageText = rawEvent.message?.text || '';
+      const messageText = resolveInboundMessagingText(rawEvent, rawEvent.message?.text || '');
 
       // Extract image / audio attachments if present
       let imageAttachmentUrl: string | undefined;
@@ -162,7 +166,11 @@ export class FacebookAdapter implements ChannelAdapter {
         }
       }
 
-      if (!pageId || !senderId || (!messageText && !imageAttachmentUrl && !audioAttachmentUrl)) {
+      if (
+        !pageId ||
+        !senderId ||
+        (!messageText && !imageAttachmentUrl && !audioAttachmentUrl && !isStoryReplyMessagingEvent(rawEvent))
+      ) {
         logger.warn('Invalid Facebook message event', { event: rawEvent });
         return null;
       }

@@ -43,13 +43,8 @@ import {
   sendFacebookPrivateReplyAfterComment,
 } from '../services/facebookCommentGraph.js';
 import {
-  applyAcquisitionToConversation,
-  buildAcquisitionContextNote,
-  extractReferralFromMessagingEvent,
-  resolveProductForExternalContent,
-  type AcquisitionContext
+  applyMessagingAcquisition,
 } from '../services/socialAcquisition.js';
-import { getProductById } from '../catalog/product-search.js';
 import { withOAuthCodeDedup } from '../utils/oauthCodeDedup.js';
 import {
   resolveManagedFacebookPages,
@@ -515,51 +510,19 @@ const processFacebookMessage = async (event: any) => {
       });
     }
 
-    // ==================== ACQUISITION (ad / post / ref) ====================
-    const referralInfo = extractReferralFromMessagingEvent(event);
+    // ==================== ACQUISITION (ad / post / ref / story) ====================
     let acquisitionNote = '';
-    if (referralInfo && (referralInfo.ref || referralInfo.adId || referralInfo.postId)) {
-      const resolved = await resolveProductForExternalContent({
-        merchantId,
-        platform: 'facebook',
-        externalPostId: referralInfo.postId,
-        adId: referralInfo.adId,
-        refCode: referralInfo.ref
-      });
-      const acquisition: AcquisitionContext = {
-        source:
-          referralInfo.source === 'ADS'
-            ? 'ADS'
-            : referralInfo.ref
-              ? 'SHORTLINK'
-              : 'POST',
-        post_id: referralInfo.postId || null,
-        ad_id: referralInfo.adId || null,
-        ref: referralInfo.ref || null,
-        product_id: resolved.productId,
-        linked_recommended: resolved.linkedRecommended,
-        platform: 'facebook',
-        account_ref: pageId || null,
-        captured_at: new Date().toISOString()
-      };
-      conversationState = await applyAcquisitionToConversation({
-        conversationId,
-        merchantId,
-        acquisition,
-        conversationState
-      });
-      let productName: string | null = null;
-      if (resolved.productId) {
-        const p = await getProductById(merchantId, resolved.productId);
-        productName = p?.name || null;
-      }
-      acquisitionNote = buildAcquisitionContextNote(acquisition, productName);
-      logger.info('Facebook acquisition context applied', {
+    {
+      const seeded = await applyMessagingAcquisition({
+        event,
         merchantId,
         conversationId,
-        productId: resolved.productId,
-        source: acquisition.source
+        conversationState,
+        platform: 'facebook',
+        accountRef: pageId || null,
       });
+      conversationState = seeded.conversationState;
+      acquisitionNote = seeded.acquisitionNote;
     }
 
     // ✅ فحص حالة المحادثة لمنع التضارب

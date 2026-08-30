@@ -8,6 +8,7 @@
 import pool from '../database/connection.js';
 import { logger } from '../utils/logger.js';
 import { findMatchingKeywordRule } from './socialKeywordMatcher.js';
+import { ensureSocialStorySchema } from './socialPostsSync.js';
 import {
   applyAcquisitionToConversation,
   resolveProductForExternalContent,
@@ -131,6 +132,7 @@ async function loadEnabledPost(params: {
        AND platform = $2
        AND external_post_id = $3
        AND comment_reply_enabled = true
+       AND COALESCE(content_kind, 'post') <> 'story'
      LIMIT 1`,
     [params.merchantId, params.platform, params.externalPostId]
   );
@@ -152,6 +154,8 @@ export async function runCommentAutomation(input: CommentAutomationInput): Promi
   } = input;
 
   const merchantId = account.merchant_id;
+
+  await ensureSocialStorySchema();
 
   if (await alreadyHandled(merchantId, platform, commentId)) {
     logger.debug('Comment already handled', { merchantId, commentId, platform });

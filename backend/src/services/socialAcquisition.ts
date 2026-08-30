@@ -1,5 +1,5 @@
 /**
- * Acquisition context: seed conversation with optional product from post/ad/referral.
+ * Acquisition context: seed conversation with optional product from post/ad/referral/story.
  * Product link is recommended, never required. AI may still browse other products.
  */
 
@@ -12,6 +12,7 @@ export type AcquisitionSource =
   | 'comment'
   | 'ADS'
   | 'POST'
+  | 'STORY'
   | 'SHORTLINK'
   | 'POSTBACK'
   | null;
@@ -33,6 +34,104 @@ export type AcquisitionContext = {
   post_permalink?: string | null;
   product_name?: string | null;
 };
+
+export type MessagingAcquisitionSignals = {
+  ref?: string;
+  adId?: string;
+  source?: string;
+  type?: string;
+  postId?: string;
+  storyId?: string;
+  storyUrl?: string | null;
+};
+
+export const STORY_REPLY_PLACEHOLDER = 'رد العميل على الستوري';
+export const STORY_REACTION_PLACEHOLDER = 'تفاعل العميل مع الستوري';
+
+const STORY_REACTION_ATTACHMENT_TYPES = new Set([
+  'like_heart',
+  'like',
+  'reaction',
+  'sticker',
+  'animated_image',
+]);
+
+function asNonEmptyString(value: unknown): string | undefined {
+  if (value == null) return undefined;
+  const s = String(value).trim();
+  return s ? s : undefined;
+}
+
+/**
+ * Story reply on the merchant's own story (IG reply_to.story / some FB story taps).
+ * STORY_MENTION is the customer's story mentioning the business — not a product link.
+ */
+export function extractStoryReplyFromMessagingEvent(event: any): {
+  storyId: string;
+  storyUrl: string | null;
+} | null {
+  const replyStory = event?.message?.reply_to?.story;
+  const replyStoryId = asNonEmptyString(replyStory?.id);
+  if (replyStoryId) {
+    return {
+      storyId: replyStoryId,
+      storyUrl: asNonEmptyString(replyStory?.url) || null
+    };
+  }
+
+  const referral = event?.referral || event?.postback?.referral || event?.message?.referral;
+  const source = String(referral?.source || '').toUpperCase();
+  if (source === 'STORY_MENTION') return null;
+
+  const referralStoryId = asNonEmptyString(referral?.story?.id);
+  if (referralStoryId) {
+    return {
+      storyId: referralStoryId,
+      storyUrl: asNonEmptyString(referral?.story?.url) || null
+    };
+  }
+
+  if (source === 'STORY' || source === 'STORIES') {
+    const id =
+      asNonEmptyString(referral?.story?.id) ||
+      asNonEmptyString(referral?.post_id) ||
+      asNonEmptyString(referral?.ads_context_data?.post_id);
+    if (id) {
+      return { storyId: id, storyUrl: asNonEmptyString(referral?.story?.url) || null };
+    }
+  }
+
+  return null;
+}
+
+export function isStoryReplyMessagingEvent(event: any): boolean {
+  return extractStoryReplyFromMessagingEvent(event) != null;
+}
+
+function isStoryReactionAttachment(event: any): boolean {
+  const attachments = event?.message?.attachments;
+  if (!Array.isArray(attachments) || attachments.length === 0) return false;
+  return attachments.some((a: any) =>
+    STORY_REACTION_ATTACHMENT_TYPES.has(String(a?.type || '').toLowerCase())
+  );
+}
+
+/** Text for the bot turn when the inbound payload is a story reply with little/no copy. */
+export function resolveInboundMessagingText(event: any, existingText?: string | null): string {
+  const text = String(existingText ?? event?.message?.text ?? '').trim();
+  if (text) return text;
+  if (!isStoryReplyMessagingEvent(event)) return '';
+  return isStoryReactionAttachment(event)
+    ? STORY_REACTION_PLACEHOLDER
+    : STORY_REPLY_PLACEHOLDER;
+}
+
+function acquisitionSourceFromSignals(signals: MessagingAcquisitionSignals): AcquisitionSource {
+  if (signals.storyId) return 'STORY';
+  if (String(signals.source || '').toUpperCase() === 'ADS') return 'ADS';
+  if (signals.ref) return 'SHORTLINK';
+  return 'POST';
+}
 
 export async function resolveProductForExternalContent(params: {
   merchantId: string;
@@ -79,6 +178,8 @@ export async function resolveProductForExternalContent(params: {
          AND (
            scl.external_id = $3
            OR sp.external_post_id = $3
+           OR sp.metadata->>'media_id' = $3
+           OR sp.metadata->>'post_id' = $3
          )
        LIMIT 1`,
       [merchantId, platform, externalPostId]
@@ -95,9 +196,14 @@ export function buildAcquisitionContextNote(
   acquisition: AcquisitionContext,
   productName?: string | null
 ): string {
+  const isStory = acquisition.source === 'STORY';
   const productPart = productName
-    ? `المنتج المرتبط بالمنشور/الإعلان (مستحسن للبدء): «${productName}». ابدأ بالحديث عنه إذا ناسب سؤال العميل، ويمكنك اقتراح منتجات أخرى من الكتالوج عند الحاجة.`
-    : 'دخل العميل من منشور/إعلان دون ربط منتج محدد — تصرّف كالمعتاد مع الكتالوج.';
+    ? isStory
+      ? `المنتج المرتبط بالستوري (مستحسن للبدء): «${productName}». ابدأ بالحديث عنه إذا ناسب سؤال العميل، ويمكنك اقتراح منتجات أخرى من الكتالوج عند الحاجة.`
+      : `المنتج المرتبط بالمنشور/الإعلان (مستحسن للبدء): «${productName}». ابدأ بالحديث عنه إذا ناسب سؤال العميل، ويمكنك اقتراح منتجات أخرى من الكتالوج عند الحاجة.`
+    : isStory
+      ? 'دخل العميل من رد على ستوري دون ربط منتج محدد — تصرّف كالمعتاد مع الكتالوج.'
+      : 'دخل العميل من منشور/إعلان دون ربط منتج محدد — تصرّف كالمعتاد مع الكتالوج.';
 
   return `[سياق الدخول: المصدر=${acquisition.source || 'unknown'}، منشور=${acquisition.post_id || '-'}، إعلان=${acquisition.ad_id || '-'}، ref=${acquisition.ref || '-'}]. ${productPart}`;
 }
@@ -135,7 +241,11 @@ export async function applyAcquisitionToConversation(params: {
         `SELECT caption, thumbnail_url, permalink, platform
          FROM social_posts
          WHERE merchant_id = $1
-           AND external_post_id = $2
+           AND (
+             external_post_id = $2
+             OR metadata->>'media_id' = $2
+             OR metadata->>'post_id' = $2
+           )
            AND ($3::text IS NULL OR platform = $3)
          LIMIT 1`,
         [
@@ -193,17 +303,12 @@ export async function applyAcquisitionToConversation(params: {
   return state;
 }
 
-export function extractReferralFromMessagingEvent(event: any): {
-  ref?: string;
-  adId?: string;
-  source?: string;
-  type?: string;
-  postId?: string;
-} | null {
+export function extractReferralFromMessagingEvent(event: any): MessagingAcquisitionSignals | null {
   const referral = event?.referral || event?.postback?.referral || event?.message?.referral;
   const postback = event?.postback;
+  const story = extractStoryReplyFromMessagingEvent(event);
 
-  if (!referral && !postback) return null;
+  if (!referral && !postback && !story) return null;
 
   const ref =
     (referral?.ref != null ? String(referral.ref) : undefined) ||
@@ -219,11 +324,102 @@ export function extractReferralFromMessagingEvent(event: any): {
   return {
     ref,
     adId,
-    source: referral?.source != null ? String(referral.source) : undefined,
+    source: referral?.source != null ? String(referral.source) : story ? 'STORY' : undefined,
     type: referral?.type != null ? String(referral.type) : undefined,
     postId:
       referral?.ads_context_data?.post_id != null
         ? String(referral.ads_context_data.post_id)
-        : undefined
+        : undefined,
+    storyId: story?.storyId,
+    storyUrl: story?.storyUrl ?? null
+  };
+}
+
+/**
+ * Shared FB/IG path: story reply, ad, post, or ref → seed product + acquisition note.
+ * Does not run on WhatsApp / Telegram / playground.
+ */
+export async function applyMessagingAcquisition(params: {
+  event: any;
+  merchantId: string;
+  conversationId: string;
+  conversationState: ConversationState;
+  platform: 'facebook' | 'instagram';
+  accountRef?: string | null;
+}): Promise<{ conversationState: ConversationState; acquisitionNote: string }> {
+  const signals = extractReferralFromMessagingEvent(params.event);
+  if (!signals) {
+    return { conversationState: params.conversationState, acquisitionNote: '' };
+  }
+
+  const storyId = asNonEmptyString(signals.storyId);
+  const postId = asNonEmptyString(signals.postId);
+  const adId = asNonEmptyString(signals.adId);
+  const refCode = asNonEmptyString(signals.ref);
+  if (!storyId && !postId && !adId && !refCode) {
+    return { conversationState: params.conversationState, acquisitionNote: '' };
+  }
+
+  let resolved: { productId: string | null; linkedRecommended: boolean } = {
+    productId: null,
+    linkedRecommended: false
+  };
+
+  if (storyId) {
+    resolved = await resolveProductForExternalContent({
+      merchantId: params.merchantId,
+      platform: params.platform,
+      externalPostId: storyId
+    });
+  }
+
+  if (!resolved.productId) {
+    resolved = await resolveProductForExternalContent({
+      merchantId: params.merchantId,
+      platform: params.platform,
+      externalPostId: postId,
+      adId,
+      refCode
+    });
+  }
+
+  const contentId = storyId || postId || null;
+  const acquisition: AcquisitionContext = {
+    source: acquisitionSourceFromSignals(signals),
+    post_id: contentId,
+    ad_id: adId || null,
+    ref: refCode || null,
+    product_id: resolved.productId,
+    linked_recommended: resolved.linkedRecommended,
+    platform: params.platform,
+    account_ref: params.accountRef || undefined,
+    captured_at: new Date().toISOString(),
+    post_thumbnail_url: signals.storyUrl || null
+  };
+
+  if (resolved.productId) {
+    const product = await getProductById(params.merchantId, resolved.productId);
+    acquisition.product_name = product?.name || null;
+  }
+
+  const conversationState = await applyAcquisitionToConversation({
+    conversationId: params.conversationId,
+    merchantId: params.merchantId,
+    acquisition,
+    conversationState: params.conversationState
+  });
+
+  logger.info('Messaging acquisition context applied', {
+    merchantId: params.merchantId,
+    conversationId: params.conversationId,
+    platform: params.platform,
+    productId: resolved.productId,
+    source: acquisition.source,
+    storyId: storyId || null
+  });
+
+  return {
+    conversationState,
+    acquisitionNote: buildAcquisitionContextNote(acquisition, acquisition.product_name)
   };
 }

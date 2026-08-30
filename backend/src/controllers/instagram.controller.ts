@@ -49,13 +49,10 @@ import { normalizePageFeedCommentValue, isPageFeedCommentEvent } from '../servic
 import { runCommentAutomation } from '../services/socialCommentAutomation.js';
 import { sendInstagramCommentReply } from '../services/instagramCommentGraph.js';
 import {
-  applyAcquisitionToConversation,
-  buildAcquisitionContextNote,
-  extractReferralFromMessagingEvent,
-  resolveProductForExternalContent,
-  type AcquisitionContext
+  applyMessagingAcquisition,
+  isStoryReplyMessagingEvent,
+  resolveInboundMessagingText,
 } from '../services/socialAcquisition.js';
-import { getProductById } from '../catalog/product-search.js';
 import { clearMerchantSocialPosts } from '../services/socialPostsSync.js';
 import {
   FACEBOOK_PAGE_SUBSCRIBED_FIELDS,
@@ -1091,9 +1088,15 @@ const processInstagramDM = async (event: any) => {
     }
   }
 
-  if (!senderId || !recipientId || (!rawText && !igImageAttachmentUrl && !igAudioAttachmentUrl)) return;
+  if (
+    !senderId ||
+    !recipientId ||
+    (!rawText && !igImageAttachmentUrl && !igAudioAttachmentUrl && !isStoryReplyMessagingEvent(event))
+  ) {
+    return;
+  }
 
-  let messageText = (rawText || '').trim();
+  let messageText = resolveInboundMessagingText(event, rawText);
   if (messageText.length < 1 && !igImageAttachmentUrl && !igAudioAttachmentUrl) return;
 
   const igResult = await pool.query(
@@ -1328,43 +1331,17 @@ const processInstagramDM = async (event: any) => {
     }
 
     let acquisitionNote = '';
-    const referralInfo = extractReferralFromMessagingEvent(event);
-    if (referralInfo && (referralInfo.ref || referralInfo.adId || referralInfo.postId)) {
-      const resolved = await resolveProductForExternalContent({
+    {
+      const seeded = await applyMessagingAcquisition({
+        event,
         merchantId,
-        platform: 'instagram',
-        externalPostId: referralInfo.postId,
-        adId: referralInfo.adId,
-        refCode: referralInfo.ref
-      });
-      const acquisition: AcquisitionContext = {
-        source:
-          referralInfo.source === 'ADS'
-            ? 'ADS'
-            : referralInfo.ref
-              ? 'SHORTLINK'
-              : 'POST',
-        post_id: referralInfo.postId || null,
-        ad_id: referralInfo.adId || null,
-        ref: referralInfo.ref || null,
-        product_id: resolved.productId,
-        linked_recommended: resolved.linkedRecommended,
-        platform: 'instagram',
-        account_ref: recipientId,
-        captured_at: new Date().toISOString()
-      };
-      conversationState = await applyAcquisitionToConversation({
         conversationId,
-        merchantId,
-        acquisition,
-        conversationState
+        conversationState,
+        platform: 'instagram',
+        accountRef: recipientId,
       });
-      let productName: string | null = null;
-      if (resolved.productId) {
-        const p = await getProductById(merchantId, resolved.productId);
-        productName = p?.name || null;
-      }
-      acquisitionNote = buildAcquisitionContextNote(acquisition, productName);
+      conversationState = seeded.conversationState;
+      acquisitionNote = seeded.acquisitionNote;
     }
 
     const recentMessagesResult = await pool.query(
