@@ -52,6 +52,8 @@ import {
   restoreConnectedWhatsAppSessions,
   shutdownWhatsAppWebSessions
 } from './services/whatsappWeb/index.js';
+import { restorePlatformWhatsAppSession } from './services/platformOtpWhatsapp/index.js';
+import geoRoutes from './routes/geo.routes.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -162,6 +164,7 @@ app.use(
     filter: (req, res) => {
       if (req.path.includes('/conversations/stream')) return false;
       if (req.path.includes('/whatsapp/web/events')) return false;
+      if (req.path.includes('/otp/whatsapp/events')) return false;
       return compression.filter(req, res);
     },
   })
@@ -271,6 +274,7 @@ app.get('/api', (req, res) => {
 });
 
 // API Routes
+app.use('/api/geo', geoRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/orders', orderRoutes);
@@ -434,6 +438,12 @@ async function startServer() {
         .then(() => console.log('📱 WhatsApp Web sessions restore started'))
         .catch((error) => {
           logger.error('WhatsApp Web session restore failed', error as Error);
+        });
+
+      void restorePlatformWhatsAppSession()
+        .then(() => console.log('📱 Platform OTP WhatsApp session restore started'))
+        .catch((error) => {
+          logger.error('Platform OTP WhatsApp session restore failed', error as Error);
         });
     });
   } catch (error) {

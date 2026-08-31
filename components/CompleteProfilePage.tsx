@@ -8,6 +8,9 @@ import apiService from '../services/api';
 import AuthLayout from './AuthLayout';
 import BrandLogo from './BrandLogo';
 import { captureAndPersistAttribution, getAttributionForApi } from '../utils/marketingAttribution';
+import OtpVerificationStep from './OtpVerificationStep';
+import { DEFAULT_DIAL_CODE } from '../constants/countries';
+import { useVisitorCountryDialCode } from '../hooks/useVisitorCountryDialCode';
 
 interface CompleteProfilePageProps {
   onComplete: () => void;
@@ -17,13 +20,21 @@ const CompleteProfilePage: React.FC<CompleteProfilePageProps> = ({ onComplete })
   const [formData, setFormData] = useState({
     password: '',
     phone: '',
-    countryCode: '+966',
+    countryCode: DEFAULT_DIAL_CODE,
     referralCode: ''
   });
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [signupOtpEnabled, setSignupOtpEnabled] = useState(false);
+  const [otpStep, setOtpStep] = useState(false);
+  const [challengeId, setChallengeId] = useState('');
+  const [resendAfterSeconds, setResendAfterSeconds] = useState(90);
   const { refreshUser } = useAuth();
+
+  const { markUserPicked: markCountryUserPicked } = useVisitorCountryDialCode((dialCode) => {
+    setFormData((prev) => ({ ...prev, countryCode: dialCode }));
+  });
 
   useEffect(() => {
     const attr = captureAndPersistAttribution();
@@ -33,6 +44,9 @@ const CompleteProfilePage: React.FC<CompleteProfilePageProps> = ({ onComplete })
       const cleanRefCode = refCode.toUpperCase().replace(/[^A-Z0-9\-_]/g, '');
       setFormData((prev) => ({ ...prev, referralCode: cleanRefCode }));
     }
+    apiService.getSignupOtpConfig()
+      .then((cfg) => setSignupOtpEnabled(cfg.signupOtpEnabled))
+      .catch(() => setSignupOtpEnabled(false));
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -52,12 +66,22 @@ const CompleteProfilePage: React.FC<CompleteProfilePageProps> = ({ onComplete })
     setIsLoading(true);
 
     try {
-      await apiService.completeProfile({
+      const payload = {
         password: formData.password,
         phone: fullPhoneNumber,
         referralCode: formData.referralCode.trim() || undefined,
         acquisition: getAttributionForApi()
-      });
+      };
+
+      if (signupOtpEnabled) {
+        const start = await apiService.completeProfileStart(payload);
+        setChallengeId(start.challengeId);
+        setResendAfterSeconds(start.resendAfterSeconds);
+        setOtpStep(true);
+        return;
+      }
+
+      await apiService.completeProfile(payload);
       await refreshUser();
       onComplete();
     } catch (err: any) {
@@ -67,8 +91,35 @@ const CompleteProfilePage: React.FC<CompleteProfilePageProps> = ({ onComplete })
     }
   };
 
+  const handleOtpVerify = async (code: string) => {
+    setError(null);
+    setIsLoading(true);
+    try {
+      await apiService.completeProfileVerify(challengeId, code);
+      await refreshUser();
+      onComplete();
+    } catch (err: any) {
+      setError(handleApiError(err));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleOtpResend = async () => {
+    setError(null);
+    try {
+      const result = await apiService.registerResend(challengeId);
+      setChallengeId(result.challengeId);
+      setResendAfterSeconds(result.resendAfterSeconds);
+    } catch (err: any) {
+      setError(handleApiError(err));
+    }
+  };
+
   const inputClass =
     'w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-xl py-3 pr-10 pl-4 focus:ring-2 focus:ring-brand/40 focus:border-brand outline-none transition-all placeholder-slate-400';
+
+  const fullPhoneDisplay = `${formData.countryCode}${formData.phone || ''}`;
 
   return (
     <AuthLayout showNavLinks={false}>
@@ -80,12 +131,28 @@ const CompleteProfilePage: React.FC<CompleteProfilePageProps> = ({ onComplete })
         <p className="text-slate-500">يرجى إكمال معلوماتك لإتمام عملية التسجيل</p>
       </div>
 
-      {error && (
+      {error && !otpStep && (
         <div id="complete-profile-error" className="mb-4 p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm" role="alert" aria-live="polite">
           {error}
         </div>
       )}
 
+      {otpStep ? (
+        <OtpVerificationStep
+          phoneDisplay={fullPhoneDisplay}
+          challengeId={challengeId}
+          resendAfterSeconds={resendAfterSeconds}
+          isLoading={isLoading}
+          error={error}
+          onVerify={handleOtpVerify}
+          onResend={handleOtpResend}
+          onBack={() => {
+            setOtpStep(false);
+            setError(null);
+          }}
+          submitLabel="إكمال التسجيل"
+        />
+      ) : (
       <form onSubmit={handleSubmit} className="space-y-4" aria-label="نموذج إكمال الملف الشخصي">
         <div>
           <label htmlFor="complete-password" className="block text-sm font-medium text-slate-600 mb-1.5">
@@ -130,7 +197,10 @@ const CompleteProfilePage: React.FC<CompleteProfilePageProps> = ({ onComplete })
           <div className="flex gap-2">
             <CountryCodeSelector
               value={formData.countryCode}
-              onChange={(dialCode) => setFormData({ ...formData, countryCode: dialCode })}
+              onChange={(dialCode) => {
+                markCountryUserPicked();
+                setFormData({ ...formData, countryCode: dialCode });
+              }}
               className="flex-shrink-0"
             />
             <div className="relative flex-1">
@@ -190,6 +260,7 @@ const CompleteProfilePage: React.FC<CompleteProfilePageProps> = ({ onComplete })
           )}
         </button>
       </form>
+      )}
     </AuthLayout>
   );
 };

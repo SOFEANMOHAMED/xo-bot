@@ -17,8 +17,9 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import apiService from '../services/api';
+import { COUNTRIES, DEFAULT_DIAL_CODE, extractCountryFromPhone } from '../constants/countries';
+import { useVisitorCountryDialCode } from '../hooks/useVisitorCountryDialCode';
 
-// Country codes list
 interface Country {
   code: string;
   dialCode: string;
@@ -27,66 +28,10 @@ interface Country {
   flag: string;
 }
 
-const COUNTRIES: Country[] = [
-  { code: 'SA', dialCode: '+966', name: 'Saudi Arabia', nameAr: 'السعودية', flag: '🇸🇦' },
-  { code: 'AE', dialCode: '+971', name: 'United Arab Emirates', nameAr: 'الإمارات', flag: '🇦🇪' },
-  { code: 'KW', dialCode: '+965', name: 'Kuwait', nameAr: 'الكويت', flag: '🇰🇼' },
-  { code: 'QA', dialCode: '+974', name: 'Qatar', nameAr: 'قطر', flag: '🇶🇦' },
-  { code: 'BH', dialCode: '+973', name: 'Bahrain', nameAr: 'البحرين', flag: '🇧🇭' },
-  { code: 'OM', dialCode: '+968', name: 'Oman', nameAr: 'عمان', flag: '🇴🇲' },
-  { code: 'JO', dialCode: '+962', name: 'Jordan', nameAr: 'الأردن', flag: '🇯🇴' },
-  { code: 'LB', dialCode: '+961', name: 'Lebanon', nameAr: 'لبنان', flag: '🇱🇧' },
-  { code: 'IQ', dialCode: '+964', name: 'Iraq', nameAr: 'العراق', flag: '🇮🇶' },
-  { code: 'EG', dialCode: '+20', name: 'Egypt', nameAr: 'مصر', flag: '🇪🇬' },
-  { code: 'MA', dialCode: '+212', name: 'Morocco', nameAr: 'المغرب', flag: '🇲🇦' },
-  { code: 'DZ', dialCode: '+213', name: 'Algeria', nameAr: 'الجزائر', flag: '🇩🇿' },
-  { code: 'TN', dialCode: '+216', name: 'Tunisia', nameAr: 'تونس', flag: '🇹🇳' },
-  { code: 'LY', dialCode: '+218', name: 'Libya', nameAr: 'ليبيا', flag: '🇱🇾' },
-  { code: 'SD', dialCode: '+249', name: 'Sudan', nameAr: 'السودان', flag: '🇸🇩' },
-  { code: 'YE', dialCode: '+967', name: 'Yemen', nameAr: 'اليمن', flag: '🇾🇪' },
-  { code: 'SY', dialCode: '+963', name: 'Syria', nameAr: 'سوريا', flag: '🇸🇾' },
-  { code: 'PS', dialCode: '+970', name: 'Palestine', nameAr: 'فلسطين', flag: '🇵🇸' },
-  { code: 'IL', dialCode: '+972', name: 'Israel', nameAr: 'إسرائيل', flag: '🇮🇱' },
-  { code: 'US', dialCode: '+1', name: 'United States', nameAr: 'الولايات المتحدة', flag: '🇺🇸' },
-  { code: 'GB', dialCode: '+44', name: 'United Kingdom', nameAr: 'المملكة المتحدة', flag: '🇬🇧' },
-  { code: 'FR', dialCode: '+33', name: 'France', nameAr: 'فرنسا', flag: '🇫🇷' },
-  { code: 'DE', dialCode: '+49', name: 'Germany', nameAr: 'ألمانيا', flag: '🇩🇪' },
-  { code: 'IT', dialCode: '+39', name: 'Italy', nameAr: 'إيطاليا', flag: '🇮🇹' },
-  { code: 'ES', dialCode: '+34', name: 'Spain', nameAr: 'إسبانيا', flag: '🇪🇸' },
-  { code: 'TR', dialCode: '+90', name: 'Turkey', nameAr: 'تركيا', flag: '🇹🇷' },
-  { code: 'IN', dialCode: '+91', name: 'India', nameAr: 'الهند', flag: '🇮🇳' },
-  { code: 'PK', dialCode: '+92', name: 'Pakistan', nameAr: 'باكستان', flag: '🇵🇰' },
-  { code: 'BD', dialCode: '+880', name: 'Bangladesh', nameAr: 'بنغلاديش', flag: '🇧🇩' },
-  { code: 'CN', dialCode: '+86', name: 'China', nameAr: 'الصين', flag: '🇨🇳' },
-  { code: 'JP', dialCode: '+81', name: 'Japan', nameAr: 'اليابان', flag: '🇯🇵' },
-  { code: 'KR', dialCode: '+82', name: 'South Korea', nameAr: 'كوريا الجنوبية', flag: '🇰🇷' },
-  { code: 'AU', dialCode: '+61', name: 'Australia', nameAr: 'أستراليا', flag: '🇦🇺' },
-  { code: 'CA', dialCode: '+1', name: 'Canada', nameAr: 'كندا', flag: '🇨🇦' },
-  { code: 'BR', dialCode: '+55', name: 'Brazil', nameAr: 'البرازيل', flag: '🇧🇷' },
-  { code: 'MX', dialCode: '+52', name: 'Mexico', nameAr: 'المكسيك', flag: '🇲🇽' },
-  { code: 'RU', dialCode: '+7', name: 'Russia', nameAr: 'روسيا', flag: '🇷🇺' },
-  { code: 'ZA', dialCode: '+27', name: 'South Africa', nameAr: 'جنوب أفريقيا', flag: '🇿🇦' },
-  { code: 'NG', dialCode: '+234', name: 'Nigeria', nameAr: 'نيجيريا', flag: '🇳🇬' },
-  { code: 'KE', dialCode: '+254', name: 'Kenya', nameAr: 'كينيا', flag: '🇰🇪' },
-];
+// Profile uses inline country picker — list from shared constants
+const PROFILE_COUNTRIES: Country[] = COUNTRIES;
 
-// Extract country code from full phone number
-const extractCountryCode = (fullPhone: string): { countryCode: string; phone: string } => {
-  if (!fullPhone) return { countryCode: '+966', phone: '' };
-  
-  // Try to match country codes (longest first)
-  const sortedCountries = [...COUNTRIES].sort((a, b) => b.dialCode.length - a.dialCode.length);
-  for (const country of sortedCountries) {
-    if (fullPhone.startsWith(country.dialCode)) {
-      return {
-        countryCode: country.dialCode,
-        phone: fullPhone.slice(country.dialCode.length).trim()
-      };
-    }
-  }
-  
-  return { countryCode: '+966', phone: fullPhone };
-};
+const extractCountryCode = extractCountryFromPhone;
 
 interface ProfilePageProps {
   showNotification: (message: string, type: 'success' | 'error' | 'info' | 'warning') => void;
@@ -98,7 +43,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ showNotification }) => {
   // Profile form state
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [countryCode, setCountryCode] = useState('+966');
+  const [countryCode, setCountryCode] = useState(DEFAULT_DIAL_CODE);
   const [phone, setPhone] = useState('');
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
   
@@ -116,6 +61,11 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ showNotification }) => {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
+
+  const { markUserPicked: markCountryUserPicked } = useVisitorCountryDialCode(
+    (dialCode) => setCountryCode(dialCode),
+    Boolean(user && !(user as { phone?: string }).phone)
+  );
   
   // Load user data
   useEffect(() => {
@@ -147,10 +97,10 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ showNotification }) => {
   }, [isCountryOpen]);
 
   // Get selected country
-  const selectedCountry = COUNTRIES.find(c => c.dialCode === countryCode) || COUNTRIES[0];
+  const selectedCountry = PROFILE_COUNTRIES.find(c => c.dialCode === countryCode) || PROFILE_COUNTRIES[0];
 
   // Filter countries based on search
-  const filteredCountries = COUNTRIES.filter(country =>
+  const filteredCountries = PROFILE_COUNTRIES.filter(country =>
     country.nameAr.toLowerCase().includes(countrySearch.toLowerCase()) ||
     country.name.toLowerCase().includes(countrySearch.toLowerCase()) ||
     country.dialCode.includes(countrySearch) ||
@@ -158,6 +108,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ showNotification }) => {
   );
 
   const handleSelectCountry = (country: Country) => {
+    markCountryUserPicked();
     setCountryCode(country.dialCode);
     setIsCountryOpen(false);
     setCountrySearch('');

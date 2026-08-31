@@ -267,14 +267,78 @@ class ApiService {
     }
   }
 
-  // Auth endpoints
+  async getSignupOtpConfig() {
+    return this.request<{ signupOtpEnabled: boolean }>('/auth/signup-otp/config', {}, false);
+  }
+
+  async getVisitorCountryDialCode() {
+    return this.request<{
+      countryIso: string | null;
+      dialCode: string;
+      source: string;
+    }>('/geo/visitor-country', {}, false);
+  }
+
+  async registerStart(data: {
+    email: string;
+    password: string;
+    name?: string;
+    storeName?: string;
+    phone: string;
+    referralCode?: string;
+    acquisition?: Record<string, unknown>;
+  }) {
+    return this.request<{
+      challengeId: string;
+      expiresAt: string;
+      resendAfterSeconds: number;
+      requiresOtp: boolean;
+    }>('/auth/register/start', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }, false);
+  }
+
+  async registerVerify(challengeId: string, code: string) {
+    const response = await this.request<{
+      user: {
+        id: string;
+        email: string;
+        name: string | null;
+        subscriptionPlan: string;
+        subscriptionStatus?: string;
+        trialEndsAt?: string | null;
+        subscriptionEndsAt?: string | null;
+        createdAt?: string;
+      };
+      token: string;
+    }>('/auth/register/verify', {
+      method: 'POST',
+      body: JSON.stringify({ challengeId, code }),
+    }, false);
+    this.setToken(response.token);
+    return response;
+  }
+
+  async registerResend(challengeId: string) {
+    return this.request<{
+      challengeId: string;
+      expiresAt: string;
+      resendAfterSeconds: number;
+    }>('/auth/register/resend', {
+      method: 'POST',
+      body: JSON.stringify({ challengeId }),
+    }, false);
+  }
+
   async register(
     email: string,
     password: string,
     name?: string,
     referralCode?: string,
     phone?: string,
-    acquisition?: Record<string, unknown>
+    acquisition?: Record<string, unknown>,
+    storeName?: string
   ) {
     const response = await this.request<{
       user: {
@@ -290,7 +354,7 @@ class ApiService {
       token: string;
     }>('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password, name, referralCode, phone, acquisition }),
+      body: JSON.stringify({ email, password, name, referralCode, phone, acquisition, storeName }),
     }, false);
     
     this.setToken(response.token);
@@ -388,6 +452,33 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify({ currentPassword, newPassword }),
     });
+  }
+
+  async completeProfileStart(data: {
+    password: string;
+    phone: string;
+    referralCode?: string;
+    acquisition?: Record<string, unknown>;
+  }) {
+    return this.request<{
+      challengeId: string;
+      expiresAt: string;
+      resendAfterSeconds: number;
+      requiresOtp: boolean;
+    }>('/auth/complete-profile/start', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async completeProfileVerify(challengeId: string, code: string) {
+    return this.request<{ message: string; data: { user: { id: string; email: string } } }>(
+      '/auth/complete-profile/verify',
+      {
+        method: 'POST',
+        body: JSON.stringify({ challengeId, code }),
+      }
+    );
   }
 
   async completeProfile(data: {
@@ -2239,6 +2330,36 @@ class ApiService {
     return this.request<{ message: string }>('/admin/settings', {
       method: 'PUT',
       body: JSON.stringify(settings),
+    });
+  }
+
+  async getAdminOtpStatus() {
+    return this.request<{
+      connected: boolean;
+      status: string;
+      phoneNumber: string | null;
+      signupOtpEnabled: boolean;
+    }>('/admin/otp/status');
+  }
+
+  async startAdminOtpWhatsAppPairing() {
+    return this.request<{
+      status: string;
+      phoneNumber: string | null;
+      alreadyConnected: boolean;
+    }>('/admin/otp/whatsapp/pair', { method: 'POST' });
+  }
+
+  async disconnectAdminOtpWhatsApp() {
+    return this.request<{ message: string }>('/admin/otp/whatsapp/disconnect', {
+      method: 'POST',
+    });
+  }
+
+  async updateAdminOtpSettings(enabled: boolean) {
+    return this.request<{ signupOtpEnabled: boolean }>('/admin/otp/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
     });
   }
 

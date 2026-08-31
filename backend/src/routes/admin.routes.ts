@@ -71,6 +71,13 @@ import {
   scheduleOfficialContentPublication,
   cancelOfficialContentPublication,
 } from '../controllers/adminOfficialContent.controller.js';
+import {
+  getAdminOtpStatus,
+  startAdminOtpWhatsAppPairing,
+  streamAdminOtpWhatsAppEvents,
+  disconnectAdminOtpWhatsApp,
+  updateAdminOtpSettings
+} from '../controllers/adminOtp.controller.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { requireAdminGate } from '../middleware/adminGate.js';
 
@@ -106,6 +113,13 @@ router.delete('/users/:id', deleteAdminUser);
 router.get('/logs', getSystemLogs);
 router.get('/settings', getGlobalSettings);
 router.put('/settings', updateGlobalSettings);
+
+// Signup OTP via platform WhatsApp
+router.get('/otp/status', getAdminOtpStatus);
+router.post('/otp/whatsapp/pair', startAdminOtpWhatsAppPairing);
+router.get('/otp/whatsapp/events', streamAdminOtpWhatsAppEvents);
+router.post('/otp/whatsapp/disconnect', disconnectAdminOtpWhatsApp);
+router.put('/otp/settings', updateAdminOtpSettings);
 
 // Official XO Bot Facebook page (platform bot — not merchant-scoped)
 router.get('/facebook/official/status', getOfficialFacebookStatus);

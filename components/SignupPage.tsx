@@ -12,6 +12,10 @@ import {
   getAttributionForApi,
   buildGoogleAuthQuery,
 } from '../utils/marketingAttribution';
+import apiService from '../services/api';
+import OtpVerificationStep from './OtpVerificationStep';
+import { DEFAULT_DIAL_CODE } from '../constants/countries';
+import { useVisitorCountryDialCode } from '../hooks/useVisitorCountryDialCode';
 
 interface SignupPageProps {
   onSignupSuccess: () => void;
@@ -27,14 +31,28 @@ const SignupPage: React.FC<SignupPageProps> = ({ onSignupSuccess, onNavigateToLo
     email: '',
     password: '',
     phone: '',
-    countryCode: '+966',
+    countryCode: DEFAULT_DIAL_CODE,
     referralCode: ''
   });
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [signupOtpEnabled, setSignupOtpEnabled] = useState(false);
+  const [otpStep, setOtpStep] = useState(false);
+  const [challengeId, setChallengeId] = useState('');
+  const [resendAfterSeconds, setResendAfterSeconds] = useState(90);
   const { register } = useAuth();
+
+  const { markUserPicked: markCountryUserPicked } = useVisitorCountryDialCode((dialCode) => {
+    setFormData((prev) => ({ ...prev, countryCode: dialCode }));
+  });
+
+  useEffect(() => {
+    apiService.getSignupOtpConfig()
+      .then((cfg) => setSignupOtpEnabled(cfg.signupOtpEnabled))
+      .catch(() => setSignupOtpEnabled(false));
+  }, []);
 
   useEffect(() => {
     const attr = captureAndPersistAttribution();
@@ -43,10 +61,8 @@ const SignupPage: React.FC<SignupPageProps> = ({ onSignupSuccess, onNavigateToLo
     if (refCode) {
       const cleanRefCode = refCode.toUpperCase().replace(/[^A-Z0-9\-_]/g, '');
       setFormData(prev => ({ ...prev, referralCode: cleanRefCode }));
-      import('../services/api').then(({ apiService }) => {
-        apiService.trackAffiliateClick(cleanRefCode).catch((err) => {
-          console.warn('Failed to track affiliate click:', err);
-        });
+      apiService.trackAffiliateClick(cleanRefCode).catch((err) => {
+        console.warn('Failed to track affiliate click:', err);
       });
     }
   }, []);
@@ -75,13 +91,32 @@ const SignupPage: React.FC<SignupPageProps> = ({ onSignupSuccess, onNavigateToLo
     setIsLoading(true);
     try {
       const acquisition = getAttributionForApi();
+      const fullPhoneNumber = formData.countryCode + formData.phone.replace(/^\+?/, '');
+
+      if (signupOtpEnabled) {
+        const start = await apiService.registerStart({
+          email: formData.email,
+          password: formData.password,
+          name: formData.fullName,
+          storeName: formData.storeName,
+          phone: fullPhoneNumber.trim(),
+          referralCode: formData.referralCode.trim() || undefined,
+          acquisition,
+        });
+        setChallengeId(start.challengeId);
+        setResendAfterSeconds(start.resendAfterSeconds);
+        setOtpStep(true);
+        return;
+      }
+
       await register(
         formData.email,
         formData.password,
         formData.fullName,
         formData.referralCode.trim() || undefined,
         fullPhoneNumber.trim() || undefined,
-        acquisition
+        acquisition,
+        formData.storeName
       );
       onSignupSuccess();
     } catch (err: any) {
@@ -90,6 +125,32 @@ const SignupPage: React.FC<SignupPageProps> = ({ onSignupSuccess, onNavigateToLo
       setIsLoading(false);
     }
   };
+
+  const handleOtpVerify = async (code: string) => {
+    setError(null);
+    setIsLoading(true);
+    try {
+      await apiService.registerVerify(challengeId, code);
+      onSignupSuccess();
+    } catch (err: any) {
+      setError(handleApiError(err));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleOtpResend = async () => {
+    setError(null);
+    try {
+      const result = await apiService.registerResend(challengeId);
+      setChallengeId(result.challengeId);
+      setResendAfterSeconds(result.resendAfterSeconds);
+    } catch (err: any) {
+      setError(handleApiError(err));
+    }
+  };
+
+  const fullPhoneDisplay = `${formData.countryCode}${formData.phone || ''}`;
 
   const handleGoogleSignup = () => {
     const apiUrl = import.meta.env.VITE_API_URL || 'https://xo-bot.com/api';
@@ -129,12 +190,28 @@ const SignupPage: React.FC<SignupPageProps> = ({ onSignupSuccess, onNavigateToLo
         <p className="text-slate-500">ابدأ رحلتك مع Xo Bot وجرب الخدمة مجاناً لمدة 7 أيام</p>
       </div>
 
-      {error && (
+      {error && !otpStep && (
         <div id="signup-error" className="mb-4 p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm" role="alert" aria-live="polite">
           {error}
         </div>
       )}
 
+      {otpStep ? (
+        <OtpVerificationStep
+          phoneDisplay={fullPhoneDisplay}
+          challengeId={challengeId}
+          resendAfterSeconds={resendAfterSeconds}
+          isLoading={isLoading}
+          error={error}
+          onVerify={handleOtpVerify}
+          onResend={handleOtpResend}
+          onBack={() => {
+            setOtpStep(false);
+            setError(null);
+          }}
+          submitLabel="إنشاء الحساب"
+        />
+      ) : (
       <form onSubmit={handleSubmit} className="space-y-4" aria-label="نموذج التسجيل">
         <div>
           <label htmlFor="signup-fullname" className="block text-sm font-medium text-slate-600 mb-1.5">الاسم الكامل</label>
@@ -200,7 +277,10 @@ const SignupPage: React.FC<SignupPageProps> = ({ onSignupSuccess, onNavigateToLo
           <div className="flex gap-2">
             <CountryCodeSelector
               value={formData.countryCode}
-              onChange={(dialCode) => setFormData({ ...formData, countryCode: dialCode })}
+              onChange={(dialCode) => {
+                markCountryUserPicked();
+                setFormData({ ...formData, countryCode: dialCode });
+              }}
               className="flex-shrink-0"
             />
             <div className="relative flex-1">
@@ -312,7 +392,10 @@ const SignupPage: React.FC<SignupPageProps> = ({ onSignupSuccess, onNavigateToLo
           )}
         </button>
       </form>
+      )}
 
+      {!otpStep && (
+      <>
       <div className="relative my-6">
         <div className="absolute inset-0 flex items-center">
           <div className="w-full border-t border-slate-200" />
@@ -330,6 +413,8 @@ const SignupPage: React.FC<SignupPageProps> = ({ onSignupSuccess, onNavigateToLo
         <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="w-5 h-5" alt="Google" />
         <span className="text-sm font-medium">Google</span>
       </button>
+      </>
+      )}
 
       <p className="mt-8 text-center text-slate-500 text-sm">
         لديك حساب بالفعل؟{' '}

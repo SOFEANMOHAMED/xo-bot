@@ -8,7 +8,6 @@ import { createError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
 import { z } from 'zod';
 import { sendPasswordResetEmail } from '../utils/emailService.js';
-import { sendAndTrackWelcomeEmail } from '../services/lifecycleEmails/index.js';
 import { logger } from '../utils/logger.js';
 import {
   linkMerchantToAffiliateReferrer,
@@ -25,6 +24,18 @@ import {
   ensureSubscriptionEndsAtColumn,
   enforceMerchantSubscriptionExpiry
 } from '../services/subscriptionExpiry/index.js';
+import {
+  createMerchantAccount,
+  completeGoogleMerchantProfile,
+  normalizeMerchantEmail as normalizeEmailForSignup
+} from '../services/merchantOnboarding.js';
+import {
+  isSignupOtpEnabled,
+  createSignupOtpChallenge,
+  resendSignupOtpChallenge,
+  verifySignupOtpChallenge,
+  normalizeSignupPhone
+} from '../services/signupOtp/index.js';
 import '../config/passport.js'; // Initialize passport
 
 /** تطبيع البريد: المقارنة في قاعدة البيانات حساسة لحالة الأحرف بدون هذا. */
@@ -97,9 +108,33 @@ const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
   name: z.string().optional(),
+  storeName: z.string().optional(),
   referralCode: z.string().optional(),
-  phone: z.string().optional(),
+  phone: z.string().min(8),
   acquisition: acquisitionBodySchema
+});
+
+const registerStartSchema = registerSchema;
+
+const registerVerifySchema = z.object({
+  challengeId: z.string().uuid(),
+  code: z.string().min(6).max(6)
+});
+
+const registerResendSchema = z.object({
+  challengeId: z.string().uuid()
+});
+
+const completeProfileStartSchema = z.object({
+  password: z.string().min(6),
+  phone: z.string().min(8),
+  referralCode: z.string().optional(),
+  acquisition: acquisitionBodySchema
+});
+
+const completeProfileVerifySchema = z.object({
+  challengeId: z.string().uuid(),
+  code: z.string().min(6).max(6)
 });
 
 const loginSchema = z.object({
@@ -107,163 +142,191 @@ const loginSchema = z.object({
   password: z.string()
 });
 
+function parseAcquisitionFromBody(
+  acquisition: z.infer<typeof acquisitionBodySchema>,
+  referralCode?: string
+): MerchantAcquisitionInput | null {
+  return normalizeAcquisitionInput({
+    ...(acquisition || {}),
+    ref: acquisition?.ref || referralCode || undefined,
+    acq: acquisition?.acq || acquisition?.acqCode || undefined
+  } as Record<string, unknown>);
+}
+
+/** Public: is signup OTP required? */
+export const getSignupOtpConfig = async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const enabled = await isSignupOtpEnabled();
+    res.json({
+      success: true,
+      data: { signupOtpEnabled: enabled }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const registerStart = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    if (!(await isSignupOtpEnabled())) {
+      return next(createError('التحقق عبر واتساب غير مفعّل. استخدم التسجيل المباشر.', 400));
+    }
+
+    const validated = registerStartSchema.parse(req.body);
+    const email = normalizeEmailForSignup(validated.email);
+    const existingUser = await pool.query(
+      'SELECT id FROM merchants WHERE LOWER(TRIM(email)) = $1',
+      [email]
+    );
+    if (existingUser.rows.length > 0) {
+      return next(createError('Email already registered', 400));
+    }
+
+    const { phone } = normalizeSignupPhone(validated.phone);
+    const passwordHash = await bcrypt.hash(validated.password, 10);
+    const acquisitionInput = parseAcquisitionFromBody(
+      validated.acquisition,
+      validated.referralCode
+    );
+
+    const challenge = await createSignupOtpChallenge({
+      purpose: 'email_signup',
+      email,
+      phone,
+      passwordHash,
+      payload: {
+        name: validated.name || null,
+        storeName: validated.storeName || null,
+        referralCode: validated.referralCode?.trim() || null,
+        acquisition: acquisitionInput
+      }
+    });
+
+    res.json({
+      success: true,
+      data: {
+        challengeId: challenge.challengeId,
+        expiresAt: challenge.expiresAt,
+        resendAfterSeconds: challenge.resendAfterSeconds,
+        requiresOtp: true
+      }
+    });
+  } catch (error: unknown) {
+    if (error instanceof z.ZodError) {
+      return next(createError(error.errors[0].message, 400));
+    }
+    next(error);
+  }
+};
+
+export const registerVerify = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const validated = registerVerifySchema.parse(req.body);
+    const row = await verifySignupOtpChallenge(validated.challengeId, validated.code);
+
+    if (row.purpose !== 'email_signup' || !row.email || !row.password_hash) {
+      return next(createError('طلب التحقق غير صالح', 400));
+    }
+
+    const payload = row.payload || {};
+    const merchant = await createMerchantAccount({
+      email: row.email,
+      passwordHash: row.password_hash,
+      name: (payload.name as string) || null,
+      storeName: (payload.storeName as string) || null,
+      phone: row.phone,
+      referralCode: (payload.referralCode as string) || null,
+      acquisition: (payload.acquisition as MerchantAcquisitionInput) || null,
+      authProvider: 'email'
+    });
+
+    const role = merchant.role || 'user';
+    const token = generateToken(merchant.id, merchant.id, role);
+    setAuthCookie(res, token);
+    const user = await buildPublicMerchantUser(merchant);
+
+    res.status(201).json({
+      success: true,
+      data: { user, token }
+    });
+  } catch (error: unknown) {
+    if (error instanceof z.ZodError) {
+      return next(createError(error.errors[0].message, 400));
+    }
+    next(error);
+  }
+};
+
+export const registerResend = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const validated = registerResendSchema.parse(req.body);
+    const result = await resendSignupOtpChallenge(validated.challengeId);
+    res.json({ success: true, data: result });
+  } catch (error: unknown) {
+    if (error instanceof z.ZodError) {
+      return next(createError(error.errors[0].message, 400));
+    }
+    next(error);
+  }
+};
+
 export const register = async (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
   try {
-    const validated = registerSchema.parse(req.body);
-    const email = normalizeMerchantEmail(validated.email);
-    const { password, name, referralCode: inputReferralCode, phone } = validated;
-    const acquisitionInput: MerchantAcquisitionInput | null = normalizeAcquisitionInput({
-      ...(validated.acquisition || {}),
-      ref: validated.acquisition?.ref || inputReferralCode || undefined,
-      acq: validated.acquisition?.acq || validated.acquisition?.acqCode || undefined
-    } as Record<string, unknown>);
-
-    // Check if user exists
-    const existingUser = await pool.query(
-      'SELECT id FROM merchants WHERE LOWER(TRIM(email)) = $1',
-      [email]
-    );
-
-    if (existingUser.rows.length > 0) {
-      return next(createError('Email already registered', 400));
-    }
-
-    // Hash password
-    const saltRounds = 10;
-    const passwordHash = await bcrypt.hash(password, saltRounds);
-
-    // Ensure referral_code column exists
-    try {
-      await pool.query(`
-        DO $$ 
-        BEGIN
-          IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                        WHERE table_name='merchants' AND column_name='referral_code') THEN
-            ALTER TABLE merchants ADD COLUMN referral_code VARCHAR(100) UNIQUE;
-          END IF;
-        END $$;
-      `);
-    } catch (err: any) {
-      console.warn('Error ensuring referral_code column exists:', err.message);
-    }
-
-    // Generate unique referral code for the new user
-    let newUserReferralCode: string = '';
-    let isUnique = false;
-    let attempts = 0;
-    while (!isUnique && attempts < 20) {
-      // Generate code: first 3 letters of email + random 5 digits
-      const emailPrefix = email.substring(0, 3).toUpperCase().replace(/[^A-Z]/g, '') || 'REF';
-      const randomNum = Math.floor(10000 + Math.random() * 90000); // 5 digits
-      newUserReferralCode = `${emailPrefix}${randomNum}`;
-
-      // Check if code is unique
-      const checkResult = await pool.query(
-        'SELECT id FROM merchants WHERE referral_code = $1',
-        [newUserReferralCode]
+    if (await isSignupOtpEnabled()) {
+      return next(
+        createError(
+          'يجب التحقق من رقم الهاتف عبر واتساب لإتمام التسجيل.',
+          400
+        )
       );
-
-      if (checkResult.rows.length === 0) {
-        isUnique = true;
-      } else {
-        attempts++;
-        // If still not unique after many attempts, use UUID-based code
-        if (attempts >= 15) {
-          newUserReferralCode = `REF${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-          const finalCheck = await pool.query(
-            'SELECT id FROM merchants WHERE referral_code = $1',
-            [newUserReferralCode]
-          );
-          if (finalCheck.rows.length === 0) {
-            isUnique = true;
-          }
-        }
-      }
     }
 
-    // Ensure phone column exists
-    try {
-      await pool.query(`
-        DO $$ 
-        BEGIN
-          IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                        WHERE table_name='merchants' AND column_name='phone') THEN
-            ALTER TABLE merchants ADD COLUMN phone VARCHAR(20);
-          END IF;
-        END $$;
-      `);
-    } catch (err: any) {
-      console.warn('Error ensuring phone column exists:', err.message);
-    }
-
-    // Create user with referral code (default role is 'user')
-    const result = await pool.query(
-      `INSERT INTO merchants (email, password_hash, name, role, subscription_plan, trial_ends_at, referral_code, phone)
-       VALUES ($1, $2, $3, 'user', 'trial', NOW() + INTERVAL '7 days', $4, $5)
-       RETURNING id, email, name, role, subscription_plan, subscription_status, trial_ends_at, created_at, referral_code`,
-      [email, passwordHash, name || null, newUserReferralCode, phone || null]
+    const validated = registerSchema.parse(req.body);
+    const acquisitionInput = parseAcquisitionFromBody(
+      validated.acquisition,
+      validated.referralCode
     );
 
-    const merchant = result.rows[0];
+    const merchant = await createMerchantAccount({
+      email: validated.email,
+      password: validated.password,
+      name: validated.name,
+      storeName: validated.storeName,
+      phone: validated.phone,
+      referralCode: validated.referralCode,
+      acquisition: acquisitionInput,
+      authProvider: 'email'
+    });
 
-    // Create default settings
-    await pool.query(
-      `INSERT INTO merchant_settings (merchant_id, store_name, welcome_message, store_currency)
-       VALUES ($1, $2, $3, $4)`,
-      [
-        merchant.id,
-        name || 'متجر جديد',
-        'أهلاً بك في متجرنا! كيف يمكنني مساعدتك اليوم؟',
-        'USD'
-      ]
-    );
-
-    const trimmedRef = inputReferralCode?.trim();
-    if (trimmedRef) {
-      try {
-        await linkMerchantToAffiliateReferrer(pool, merchant.id, trimmedRef);
-      } catch (refError: unknown) {
-        console.warn(
-          'Error processing referral code:',
-          refError instanceof Error ? refError.message : refError
-        );
-      }
-    }
-
-    try {
-      await applyMerchantAcquisition(merchant.id, acquisitionInput);
-    } catch (acqErr: unknown) {
-      logger.warn('Failed to apply merchant acquisition on register', {
-        merchantId: merchant.id,
-        error: acqErr instanceof Error ? acqErr.message : String(acqErr)
-      });
-    }
-
-    // Get role from database (default to 'user' if not set)
     const role = merchant.role || 'user';
-
-    // Welcome email (tracked — also used for Google OAuth)
-    void sendAndTrackWelcomeEmail(merchant.id, merchant.email, merchant.name);
-
-    // Generate JWT
     const token = generateToken(merchant.id, merchant.id, role);
     setAuthCookie(res, token);
-
     const user = await buildPublicMerchantUser(merchant);
 
     res.status(201).json({
       success: true,
       data: {
         user,
-        // Token also returned for transitional clients; prefer HttpOnly cookie.
         token
       }
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error instanceof z.ZodError) {
       return next(createError(error.errors[0].message, 400));
     }
@@ -937,6 +1000,124 @@ export const changePassword = async (
 };
 
 // Complete profile for Google OAuth users
+export const completeProfileStart = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const merchantId = req.merchantId;
+    if (!merchantId) {
+      return next(createError('Unauthorized', 401));
+    }
+
+    if (!(await isSignupOtpEnabled())) {
+      return next(createError('التحقق عبر واتساب غير مفعّل', 400));
+    }
+
+    const userResult = await pool.query(
+      'SELECT id, auth_provider, password_hash, phone FROM merchants WHERE id = $1',
+      [merchantId]
+    );
+    if (userResult.rows.length === 0) {
+      return next(createError('المستخدم غير موجود', 404));
+    }
+    const user = userResult.rows[0];
+    if (user.auth_provider !== 'google') {
+      return next(createError('هذه العملية متاحة فقط لمستخدمي Google', 400));
+    }
+    if (user.password_hash && user.phone) {
+      return next(createError('الملف الشخصي مكتمل مسبقاً', 400));
+    }
+
+    const validated = completeProfileStartSchema.parse(req.body);
+    const { phone } = normalizeSignupPhone(validated.phone);
+    const passwordHash = await bcrypt.hash(validated.password, 10);
+    const acquisitionInput = parseAcquisitionFromBody(
+      validated.acquisition,
+      validated.referralCode
+    );
+
+    const challenge = await createSignupOtpChallenge({
+      purpose: 'google_complete_profile',
+      merchantId,
+      phone,
+      passwordHash,
+      payload: {
+        referralCode: validated.referralCode?.trim() || null,
+        acquisition: acquisitionInput
+      }
+    });
+
+    res.json({
+      success: true,
+      data: {
+        challengeId: challenge.challengeId,
+        expiresAt: challenge.expiresAt,
+        resendAfterSeconds: challenge.resendAfterSeconds,
+        requiresOtp: true
+      }
+    });
+  } catch (error: unknown) {
+    if (error instanceof z.ZodError) {
+      return next(createError(error.errors[0].message, 400));
+    }
+    next(error);
+  }
+};
+
+export const completeProfileVerify = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const merchantId = req.merchantId;
+    if (!merchantId) {
+      return next(createError('Unauthorized', 401));
+    }
+
+    const validated = completeProfileVerifySchema.parse(req.body);
+    const row = await verifySignupOtpChallenge(validated.challengeId, validated.code);
+
+    if (
+      row.purpose !== 'google_complete_profile' ||
+      row.merchant_id !== merchantId ||
+      !row.password_hash
+    ) {
+      return next(createError('طلب التحقق غير صالح', 400));
+    }
+
+    const payload = row.payload || {};
+    const user = await completeGoogleMerchantProfile({
+      merchantId,
+      passwordHash: row.password_hash,
+      phone: row.phone,
+      referralCode: (payload.referralCode as string) || null,
+      acquisition: (payload.acquisition as MerchantAcquisitionInput) || null
+    });
+
+    logger.info('Profile completed successfully (OTP)', { merchantId });
+
+    res.json({
+      success: true,
+      message: 'تم إكمال الملف الشخصي بنجاح',
+      data: {
+        user: {
+          id: user.id,
+          email: user.email
+        }
+      }
+    });
+  } catch (error: unknown) {
+    if (error instanceof z.ZodError) {
+      return next(createError(error.errors[0].message, 400));
+    }
+    logger.error('Error completing profile (OTP)', error as Error);
+    next(error);
+  }
+};
+
 export const completeProfile = async (
   req: AuthRequest,
   res: Response,
@@ -946,6 +1127,12 @@ export const completeProfile = async (
     const merchantId = req.merchantId;
     if (!merchantId) {
       return next(createError('Unauthorized', 401));
+    }
+
+    if (await isSignupOtpEnabled()) {
+      return next(
+        createError('يجب التحقق من رقم الهاتف عبر واتساب لإتمام التسجيل.', 400)
+      );
     }
 
     const { password, phone, referralCode: inputReferralCode, acquisition } = req.body;
@@ -959,67 +1146,15 @@ export const completeProfile = async (
       return next(createError('كلمة المرور يجب أن تكون 6 أحرف على الأقل', 400));
     }
 
-    // Get current user
-    const userResult = await pool.query(
-      'SELECT id, email, auth_provider, password_hash, phone FROM merchants WHERE id = $1',
-      [merchantId]
-    );
+    const acquisitionInput = parseAcquisitionFromBody(acquisition, inputReferralCode);
 
-    if (userResult.rows.length === 0) {
-      return next(createError('المستخدم غير موجود', 404));
-    }
-
-    const user = userResult.rows[0];
-
-    // Only allow profile completion for Google OAuth users
-    if (user.auth_provider !== 'google') {
-      return next(createError('هذه العملية متاحة فقط لمستخدمي Google', 400));
-    }
-
-    // Hash password
-    const saltRounds = 10;
-    const passwordHash = await bcrypt.hash(password, saltRounds);
-
-    // Update user with password and phone
-    await pool.query(
-      'UPDATE merchants SET password_hash = $1, phone = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
-      [passwordHash, phone, merchantId]
-    );
-
-    const trimmedRef = inputReferralCode?.trim();
-    if (trimmedRef) {
-      try {
-        await linkMerchantToAffiliateReferrer(pool, merchantId, trimmedRef);
-      } catch (refError: unknown) {
-        console.warn(
-          'Error processing referral code:',
-          refError instanceof Error ? refError.message : refError
-        );
-        logger.warn(
-          'Error processing referral code during profile completion',
-          refError instanceof Error ? refError : new Error(String(refError))
-        );
-      }
-    }
-
-    try {
-      const acqInput = normalizeAcquisitionInput({
-        ...(typeof acquisition === 'object' && acquisition ? acquisition : {}),
-        ref:
-          (typeof acquisition === 'object' && acquisition?.ref) ||
-          inputReferralCode ||
-          undefined,
-        acq:
-          (typeof acquisition === 'object' && (acquisition?.acq || acquisition?.acqCode)) ||
-          undefined
-      } as Record<string, unknown>);
-      await applyMerchantAcquisition(merchantId, acqInput);
-    } catch (acqErr: unknown) {
-      logger.warn('Failed to apply merchant acquisition on complete profile', {
-        merchantId,
-        error: acqErr instanceof Error ? acqErr.message : String(acqErr)
-      });
-    }
+    const user = await completeGoogleMerchantProfile({
+      merchantId,
+      password,
+      phone,
+      referralCode: inputReferralCode,
+      acquisition: acquisitionInput
+    });
 
     logger.info('Profile completed successfully', { merchantId });
 

@@ -6,6 +6,7 @@ import { Save, ToggleLeft, ToggleRight, AlertCircle, Info, AlertTriangle, Loader
 import { useAdminNotifications } from './AdminNotificationContext';
 import { logger } from '../../utils/logger';
 import { PATHS } from '../../routes/paths';
+import AdminOtpSetup from './AdminOtpSetup';
 
 interface AdminSystemProps {
   view: 'SETTINGS' | 'LOGS';
@@ -639,6 +640,8 @@ const SettingsView: React.FC = () => {
                         </div>
                     </div>
                 </div>
+
+                <AdminOtpSetup />
 
                 <div className="bg-slate-900/50 rounded-xl p-6 border border-slate-700 space-y-5">
                     <div className="flex items-center justify-between gap-4">

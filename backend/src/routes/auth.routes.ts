@@ -1,5 +1,25 @@
 import express from 'express';
-import { register, login, getProfile, updateProfile, forgotPassword, resetPassword, googleAuth, googleCallback, deleteAccount, changePassword, completeProfile, logout, establishSession } from '../controllers/auth.controller.js';
+import {
+  register,
+  registerStart,
+  registerVerify,
+  registerResend,
+  getSignupOtpConfig,
+  login,
+  getProfile,
+  updateProfile,
+  forgotPassword,
+  resetPassword,
+  googleAuth,
+  googleCallback,
+  deleteAccount,
+  changePassword,
+  completeProfile,
+  completeProfileStart,
+  completeProfileVerify,
+  logout,
+  establishSession
+} from '../controllers/auth.controller.js';
 import { authenticate } from '../middleware/auth.js';
 import { loginRateLimiter, registerRateLimiter, passwordResetRateLimiter } from '../middleware/rateLimiter.js';
 import { unlockAdminGate, lockAdminGate, adminGateStatus } from '../middleware/adminGate.js';
@@ -39,6 +59,10 @@ const router = express.Router();
  *         description: Validation error
  */
 router.post('/register', registerRateLimiter, register);
+router.get('/signup-otp/config', getSignupOtpConfig);
+router.post('/register/start', registerRateLimiter, registerStart);
+router.post('/register/verify', registerRateLimiter, registerVerify);
+router.post('/register/resend', registerRateLimiter, registerResend);
 
 /**
  * @swagger
@@ -310,6 +334,8 @@ router.post('/change-password', authenticate, changePassword);
  *         description: Unauthorized
  */
 router.post('/complete-profile', authenticate, completeProfile);
+router.post('/complete-profile/start', authenticate, completeProfileStart);
+router.post('/complete-profile/verify', authenticate, completeProfileVerify);
 
 export default router;
 
