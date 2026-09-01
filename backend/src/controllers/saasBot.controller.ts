@@ -4,6 +4,7 @@ import { createError } from '../middleware/errorHandler.js';
 import { z } from 'zod';
 import { SAAS_MARKETING_DATA, SAAS_SUPPORT_DATA } from '../constants/saasData.js';
 import { logger } from '../utils/logger.js';
+import { recordOpenAIUsage } from '../services/llmUsage/index.js';
 
 // Ensure API key is present
 const API_KEY = process.env.OPENAI_API_KEY || '';
@@ -151,6 +152,12 @@ export const generateSaaSBotResponse = async (
     if (!response) {
       throw new Error('تم تجاوز الحد المسموح به من الطلبات اليومية. يرجى المحاولة لاحقاً أو ترقية الخطة.');
     }
+
+    recordOpenAIUsage(response.usage, {
+      merchantId: null,
+      purpose: 'saas_bot',
+      model: DEFAULT_MODEL,
+    });
 
     const responseText = response.choices?.[0]?.message?.content || "I didn't understand, could you clarify?";
 

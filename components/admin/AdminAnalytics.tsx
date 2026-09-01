@@ -6,6 +6,7 @@ import apiService from '../../services/api';
 import { useAdminNotifications } from './AdminNotificationContext';
 import EditPlanModal from './EditPlanModal';
 import { logger } from '../../utils/logger';
+import { formatTokenCount, formatUsdCost, normalizeLlmUsage } from '../../utils/formatLlmCost';
 
 interface AdminAnalyticsProps {
   view: 'SUBSCRIPTIONS' | 'USAGE' | 'AFFILIATE_PROGRAM';
@@ -36,7 +37,34 @@ const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ view }) => {
   } | null>(null);
 
   // Usage state
-  const [topUsers, setTopUsers] = useState<Array<{ id: string; name: string; requests: number; cost: 'Low' | 'Medium' | 'High' }>>([]);
+  const [usageUsers, setUsageUsers] = useState<Array<{
+    id: string;
+    name: string;
+    email: string;
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    costUsd: number;
+    tokensThisMonth: number;
+    costUsdThisMonth: number;
+    callCount: number;
+  }>>([]);
+  const [usageTotals, setUsageTotals] = useState<{
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    costUsd: number;
+    tokensThisMonth: number;
+    costUsdThisMonth: number;
+    callCount: number;
+    platformCostUsdThisMonth: number;
+    platformTokensThisMonth: number;
+  } | null>(null);
+  const [usagePricing, setUsagePricing] = useState<{
+    model: string;
+    inputPer1MUsd: number;
+    outputPer1MUsd: number;
+  } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -86,29 +114,30 @@ const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ view }) => {
           setIsLoading(true);
           setError(null);
           const response = await apiService.getAdminUsageStats();
-          logger.log('Usage stats response:', response);
-          // Handle different response formats
-          let users: any[] = [];
-          if (Array.isArray(response)) {
-            users = response;
-          } else if (response && typeof response === 'object') {
-            users = response.data || response.users || [];
-          }
-          
-          // Ensure all users have required fields
-          const validUsers = Array.isArray(users) ? users.map((u: any) => ({
+          const data = (response as any)?.data && !('users' in response) ? (response as any).data : response;
+
+          const usersRaw = Array.isArray(data?.users) ? data.users : [];
+          setUsageUsers(usersRaw.map((u: any) => ({
             id: String(u.id || ''),
-            name: String(u.name || 'مستخدم غير معروف'),
-            requests: typeof u.requests === 'number' ? u.requests : parseInt(String(u.requests || '0'), 10),
-            cost: (u.cost === 'High' || u.cost === 'Medium' || u.cost === 'Low') ? u.cost : 'Low' as const
-          })) : [];
-          
-          logger.log('Valid users:', validUsers);
-          setTopUsers(validUsers);
+            name: String(u.name || u.email || 'مستخدم غير معروف'),
+            email: String(u.email || ''),
+            ...normalizeLlmUsage(u),
+          })));
+          setUsageTotals(data?.totals ? {
+            ...normalizeLlmUsage(data.totals),
+            platformCostUsdThisMonth: Number(data.totals.platformCostUsdThisMonth || 0),
+            platformTokensThisMonth: Number(data.totals.platformTokensThisMonth || 0),
+          } : null);
+          setUsagePricing(data?.pricing && data?.model ? {
+            model: String(data.model),
+            inputPer1MUsd: Number(data.pricing.inputPer1MUsd || 0.15),
+            outputPer1MUsd: Number(data.pricing.outputPer1MUsd || 0.6),
+          } : { model: 'gpt-4o-mini', inputPer1MUsd: 0.15, outputPer1MUsd: 0.6 });
         } catch (err: any) {
           logger.error('Failed to fetch usage stats:', err);
           setError(err.message || 'فشل تحميل بيانات الاستخدام');
-          setTopUsers([]);
+          setUsageUsers([]);
+          setUsageTotals(null);
         } finally {
           setIsLoading(false);
         }
@@ -471,10 +500,9 @@ const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ view }) => {
 
   // --- Usage View ---
   if (view === 'USAGE') {
-
-      // Ensure topUsers is always an array
-      const safeTopUsers = Array.isArray(topUsers) ? topUsers : [];
-      const maxRequests = safeTopUsers.length > 0 ? Math.max(...safeTopUsers.map(u => u.requests), 1) : 1;
+      const maxCost = usageUsers.length > 0
+        ? Math.max(...usageUsers.map(u => u.costUsdThisMonth), 0.0001)
+        : 1;
 
       if (isLoading) {
           return (
@@ -497,40 +525,88 @@ const AdminAnalytics: React.FC<AdminAnalyticsProps> = ({ view }) => {
 
       return (
           <div className="space-y-4 lg:space-y-6 animate-fade-in">
-              <h2 className="text-lg lg:text-xl font-bold text-white mb-4 flex items-center gap-2">
-                  <Activity size={20} className="lg:w-6 lg:h-6 text-indigo-400" />
-                  <span>تحليلات استخدام النظام</span>
-              </h2>
+              <div>
+                <h2 className="text-lg lg:text-xl font-bold text-white mb-1 flex items-center gap-2">
+                    <Activity size={20} className="lg:w-6 lg:h-6 text-indigo-400" />
+                    <span>استهلاك التوكنات والتكلفة</span>
+                </h2>
+                <p className="text-slate-400 text-sm">
+                  نموذج <span className="font-mono text-slate-300" dir="ltr">{usagePricing?.model || 'gpt-4o-mini'}</span>
+                  {' '}· إدخال {usagePricing?.inputPer1MUsd ?? 0.15}$ / مليون توكن
+                  {' '}· إخراج {usagePricing?.outputPer1MUsd ?? 0.6}$ / مليون توكن
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700">
+                  <p className="text-slate-400 text-xs mb-1">تكلفة التجار هذا الشهر</p>
+                  <p className="text-2xl font-bold text-emerald-400" dir="ltr">{formatUsdCost(usageTotals?.costUsdThisMonth)}</p>
+                </div>
+                <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700">
+                  <p className="text-slate-400 text-xs mb-1">توكنات التجار هذا الشهر</p>
+                  <p className="text-2xl font-bold text-white" dir="ltr">{formatTokenCount(usageTotals?.tokensThisMonth)}</p>
+                </div>
+                <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700">
+                  <p className="text-slate-400 text-xs mb-1">التكلفة الإجمالية (كل الفترات)</p>
+                  <p className="text-2xl font-bold text-indigo-300" dir="ltr">{formatUsdCost(usageTotals?.costUsd)}</p>
+                </div>
+                <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700">
+                  <p className="text-slate-400 text-xs mb-1">تكلفة المنصة هذا الشهر</p>
+                  <p className="text-2xl font-bold text-amber-300" dir="ltr">{formatUsdCost(usageTotals?.platformCostUsdThisMonth)}</p>
+                  <p className="text-xs text-slate-500 mt-1">صفحة رسمية / بوتات الهبوط — ليست على تاجر</p>
+                </div>
+              </div>
               
               <div className="bg-slate-800 rounded-2xl p-4 lg:p-6 border border-slate-700">
-                  <h3 className="text-base lg:text-lg font-bold text-white mb-4">أكثر المستخدمين استهلاكاً للموارد (AI Requests)</h3>
-                  {safeTopUsers.length === 0 ? (
+                  <h3 className="text-base lg:text-lg font-bold text-white mb-4">استهلاك كل مستخدم (GPT-4o mini)</h3>
+                  {usageUsers.length === 0 ? (
                       <div className="text-center py-8 lg:py-12 text-slate-400 text-sm lg:text-base">
                           لا توجد بيانات استخدام حالياً
                       </div>
                   ) : (
-                      <div className="space-y-3 lg:space-y-4">
-                          {safeTopUsers.map((u, i) => (
-                              <div key={u.id || i} className="flex items-center gap-2 lg:gap-4">
-                                  <span className="text-slate-500 font-mono text-xs lg:text-sm w-4 lg:w-6 flex-shrink-0">#{i+1}</span>
-                                  <div className="flex-1 min-w-0">
-                                      <div className="flex justify-between items-center mb-1 gap-2">
-                                          <span className="text-white font-medium text-sm lg:text-base truncate">{u.name}</span>
-                                          <span className="text-indigo-300 text-xs lg:text-sm font-bold flex-shrink-0">{u.requests.toLocaleString('en-US')} طلب</span>
-                                      </div>
-                                      <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-                                          <div 
-                                              className={`h-full rounded-full ${
-                                                  u.cost === 'High' ? 'bg-red-500' : 
-                                                  u.cost === 'Medium' ? 'bg-yellow-500' : 
-                                                  'bg-indigo-500'
-                                              }`} 
-                                              style={{ width: `${Math.min((u.requests / maxRequests) * 100, 100)}%` }}
-                                          ></div>
-                                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-right">
+                          <thead className="text-slate-400 text-xs font-bold uppercase">
+                            <tr>
+                              <th className="px-3 py-3">#</th>
+                              <th className="px-3 py-3">المستخدم</th>
+                              <th className="px-3 py-3">توكنات هذا الشهر</th>
+                              <th className="px-3 py-3">تكلفة هذا الشهر</th>
+                              <th className="px-3 py-3">إدخال / إخراج (الإجمالي)</th>
+                              <th className="px-3 py-3">التكلفة الإجمالية</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-700">
+                            {usageUsers.map((u, i) => (
+                              <tr key={u.id || i} className="hover:bg-slate-700/20">
+                                <td className="px-3 py-3 text-slate-500 font-mono text-xs">#{i + 1}</td>
+                                <td className="px-3 py-3">
+                                  <p className="text-white font-medium text-sm truncate">{u.name}</p>
+                                  <p className="text-xs text-slate-500 truncate">{u.email}</p>
+                                  <div className="mt-2 h-1.5 bg-slate-700 rounded-full overflow-hidden max-w-[180px]">
+                                    <div
+                                      className="h-full rounded-full bg-indigo-500"
+                                      style={{ width: `${Math.min((u.costUsdThisMonth / maxCost) * 100, 100)}%` }}
+                                    />
                                   </div>
-                              </div>
-                          ))}
+                                </td>
+                                <td className="px-3 py-3 text-sm text-slate-200 font-mono" dir="ltr">
+                                  {formatTokenCount(u.tokensThisMonth)}
+                                </td>
+                                <td className="px-3 py-3 text-sm font-semibold text-emerald-300" dir="ltr">
+                                  {formatUsdCost(u.costUsdThisMonth)}
+                                </td>
+                                <td className="px-3 py-3 text-xs text-slate-400 font-mono" dir="ltr">
+                                  {formatTokenCount(u.promptTokens)} / {formatTokenCount(u.completionTokens)}
+                                  <span className="block text-slate-500">{formatTokenCount(u.totalTokens)} إجمالي</span>
+                                </td>
+                                <td className="px-3 py-3 text-sm font-semibold text-indigo-300" dir="ltr">
+                                  {formatUsdCost(u.costUsd)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
                   )}
               </div>

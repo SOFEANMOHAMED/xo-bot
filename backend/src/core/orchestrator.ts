@@ -15,6 +15,7 @@ import { handleError, createBotError, logError } from './error-handler.js';
 import { processWithSalesGPT } from '../services/salesgpt/index.js';
 import { resetAICallsCount, getAICallsCount } from '../ai/gemini-client.js';
 import { logger } from '../utils/logger.js';
+import { runWithLlmUsageContext } from '../services/llmUsage/index.js';
 
 // ==================== TYPES ====================
 
@@ -36,6 +37,15 @@ export interface OrchestratorResult {
  * Process incoming message through SalesGPT pipeline.
  */
 export const processMessage = async (
+  input: OrchestratorInput
+): Promise<OrchestratorResult> => {
+  return runWithLlmUsageContext(
+    { merchantId: input.message.merchantId, purpose: 'sales_chat' },
+    () => processMessageInner(input)
+  );
+};
+
+const processMessageInner = async (
   input: OrchestratorInput
 ): Promise<OrchestratorResult> => {
   const {

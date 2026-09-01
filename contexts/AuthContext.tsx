@@ -1,6 +1,13 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import apiService from '../services/api';
 
+interface UserImpersonation {
+  active: boolean;
+  adminId?: string;
+  adminName?: string | null;
+  adminEmail?: string;
+}
+
 interface User {
   id: string;
   email: string;
@@ -11,6 +18,7 @@ interface User {
   subscriptionEndsAt?: string | null;
   createdAt?: string;
   role?: 'owner' | 'admin' | 'user';
+  impersonation?: UserImpersonation;
 }
 
 interface AuthContextType {
@@ -30,6 +38,7 @@ interface AuthContextType {
   refreshUser: () => Promise<void>;
   setToken: (token: string | null) => Promise<void>;
   deleteAccount: () => Promise<void>;
+  exitImpersonation: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -120,6 +129,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const exitImpersonation = async () => {
+    const response = await apiService.exitImpersonation();
+    apiService.setToken(response.token);
+    await apiService.establishSession(response.token);
+    setUser(response.user);
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -132,6 +148,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         refreshUser,
         setToken,
         deleteAccount,
+        exitImpersonation,
       }}
     >
       {children}

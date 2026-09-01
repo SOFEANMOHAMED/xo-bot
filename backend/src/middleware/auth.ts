@@ -7,6 +7,9 @@ export interface AuthRequest extends Request {
   userId?: string;
   merchantId?: string;
   userRole?: string;
+  /** Present when a super-admin is viewing a merchant account for support. */
+  impersonatedBy?: string;
+  impersonatedByRole?: string;
 }
 
 function extractToken(req: AuthRequest): string | null {
@@ -40,11 +43,15 @@ export const authenticate = (
       userId: string;
       merchantId: string;
       role: string;
+      impersonatedBy?: string;
+      impersonatedByRole?: string;
     };
 
     req.userId = decoded.userId;
     req.merchantId = decoded.merchantId;
     req.userRole = decoded.role;
+    req.impersonatedBy = decoded.impersonatedBy;
+    req.impersonatedByRole = decoded.impersonatedByRole;
 
     next();
   } catch (error: any) {

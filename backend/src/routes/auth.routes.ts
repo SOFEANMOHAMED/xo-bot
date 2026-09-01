@@ -18,7 +18,8 @@ import {
   completeProfileStart,
   completeProfileVerify,
   logout,
-  establishSession
+  establishSession,
+  exitImpersonation
 } from '../controllers/auth.controller.js';
 import { authenticate } from '../middleware/auth.js';
 import { loginRateLimiter, registerRateLimiter, passwordResetRateLimiter } from '../middleware/rateLimiter.js';
@@ -109,6 +110,7 @@ router.post('/login', loginRateLimiter, login);
 
 router.post('/logout', logout);
 router.post('/session', establishSession);
+router.post('/impersonation/exit', authenticate, exitImpersonation);
 
 router.post('/admin-gate', loginRateLimiter, unlockAdminGate);
 router.delete('/admin-gate', lockAdminGate);

@@ -8,10 +8,38 @@ import {
   type MerchantNotificationType,
 } from '../services/merchantNotifications.js';
 import { OFFICIAL_PAGE_BOT_DEFAULT_SYSTEM_MESSAGE } from '../services/officialPageBot.js';
+import {
+  EMPTY_MERCHANT_LLM_USAGE,
+  getAdminLlmUsageByUser,
+  getLlmUsageTotalsByMerchantIds,
+  getMerchantLlmUsageTotals,
+  getPlatformLlmUsageTotals,
+  getPublicPricingSnapshot,
+  type MerchantLlmUsageTotals,
+} from '../services/llmUsage/index.js';
+import { generateImpersonationToken } from '../services/authTokens.js';
+import { setAuthCookie } from '../utils/authCookies.js';
+import {
+  ensureSubscriptionEndsAtColumn,
+  enforceMerchantSubscriptionExpiry,
+} from '../services/subscriptionExpiry/index.js';
+import { logger } from '../utils/logger.js';
 // Note: PRODUCT_BOT_SYSTEM_PROMPT and SERVICE_BOT_SYSTEM_PROMPT are now in utils/prompts
 // Legacy prompt helpers removed; orchestrator is the single source of truth.
 const PRODUCT_BOT_SYSTEM_PROMPT = 'You are a helpful product assistant.';
 const SERVICE_BOT_SYSTEM_PROMPT = 'You are a helpful service assistant.';
+
+function serializeLlmUsage(totals: MerchantLlmUsageTotals) {
+  return {
+    promptTokens: totals.promptTokens,
+    completionTokens: totals.completionTokens,
+    totalTokens: totals.totalTokens,
+    costUsd: totals.costUsd,
+    tokensThisMonth: totals.tokensThisMonth,
+    costUsdThisMonth: totals.costUsdThisMonth,
+    callCount: totals.callCount,
+  };
+}
 
 export const getAdminStats = async (
   req: AuthRequest,
@@ -200,6 +228,22 @@ export const getAdminStats = async (
     const churnedUsers = churnedUsersResult.rows[0]?.count || 0;
     const churnRate = paidSubscriptions > 0 ? (churnedUsers / paidSubscriptions) * 100 : 0;
 
+    let llmUsage = {
+      ...serializeLlmUsage(EMPTY_MERCHANT_LLM_USAGE),
+      platformCostUsdThisMonth: 0,
+      platformTokensThisMonth: 0,
+    };
+    try {
+      const { merchants, platform } = await getPlatformLlmUsageTotals();
+      llmUsage = {
+        ...serializeLlmUsage(merchants),
+        platformCostUsdThisMonth: platform.costUsdThisMonth,
+        platformTokensThisMonth: platform.tokensThisMonth,
+      };
+    } catch (err) {
+      console.warn('Could not load LLM usage totals:', err);
+    }
+
     res.json({
       success: true,
       data: {
@@ -215,7 +259,12 @@ export const getAdminStats = async (
         arr: Math.round(arr),
         newUsersToday,
         newUsersThisWeek,
-        newUsersThisMonth
+        newUsersThisMonth,
+        llmTokens: llmUsage.totalTokens,
+        llmCostUsd: llmUsage.costUsd,
+        llmTokensThisMonth: llmUsage.tokensThisMonth,
+        llmCostUsdThisMonth: llmUsage.costUsdThisMonth,
+        llmPlatformCostUsdThisMonth: llmUsage.platformCostUsdThisMonth,
       }
     });
   } catch (error: any) {
@@ -556,49 +605,51 @@ export const getAdminUsageStats = async (
   next: NextFunction
 ) => {
   try {
-    // Get top users by AI requests (from messages table)
-    // Exclude admin/owner accounts
-    const topUsersResult = await pool.query(
-      `SELECT 
-        m.id,
-        m.name,
-        m.email,
-        COALESCE(COUNT(msg.id), 0)::int as requests
-       FROM merchants m
-       LEFT JOIN conversations c ON c.merchant_id = m.id
-       LEFT JOIN messages msg ON msg.conversation_id = c.id AND msg.role = 'assistant'
-       WHERE (m.role NOT IN ('owner', 'admin') OR m.role IS NULL)
-       GROUP BY m.id, m.name, m.email
-       ORDER BY requests DESC
-       LIMIT 10`
-    ).catch((err) => {
-      console.error('Error in usage stats query:', err);
-      // Return empty result on query error
-      return { rows: [] };
-    });
+    const [users, platformTotals] = await Promise.all([
+      getAdminLlmUsageByUser(),
+      getPlatformLlmUsageTotals(),
+    ]);
 
-    const topUsers = topUsersResult.rows.map((row) => {
-      const requests = typeof row.requests === 'number' ? row.requests : parseInt(String(row.requests || '0'), 10);
-      return {
-        id: String(row.id),
-        name: row.name || row.email || 'مستخدم غير معروف',
-        requests: requests,
-        cost: requests > 10000 ? 'High' as const : 
-              requests > 5000 ? 'Medium' as const : 'Low' as const
-      };
-    });
+    const merchantTotals = platformTotals.merchants;
+    const pricing = getPublicPricingSnapshot();
 
     res.json({
       success: true,
-      data: topUsers
+      data: {
+        model: pricing.model,
+        pricing: {
+          inputPer1MUsd: pricing.inputPer1MUsd,
+          cachedInputPer1MUsd: pricing.cachedInputPer1MUsd,
+          outputPer1MUsd: pricing.outputPer1MUsd,
+        },
+        totals: {
+          promptTokens: merchantTotals.promptTokens,
+          completionTokens: merchantTotals.completionTokens,
+          totalTokens: merchantTotals.totalTokens,
+          costUsd: merchantTotals.costUsd,
+          tokensThisMonth: merchantTotals.tokensThisMonth,
+          costUsdThisMonth: merchantTotals.costUsdThisMonth,
+          callCount: merchantTotals.callCount,
+          platformCostUsdThisMonth: platformTotals.platform.costUsdThisMonth,
+          platformTokensThisMonth: platformTotals.platform.tokensThisMonth,
+        },
+        users: users.map((u) => ({
+          id: u.id,
+          name: u.name,
+          email: u.email,
+          promptTokens: u.promptTokens,
+          completionTokens: u.completionTokens,
+          totalTokens: u.totalTokens,
+          costUsd: u.costUsd,
+          tokensThisMonth: u.tokensThisMonth,
+          costUsdThisMonth: u.costUsdThisMonth,
+          callCount: u.callCount,
+        })),
+      }
     });
   } catch (error: any) {
     console.error('Error fetching usage stats:', error);
-    // Return empty array instead of throwing error
-    res.json({
-      success: true,
-      data: []
-    });
+    next(error);
   }
 };
 
@@ -730,8 +781,19 @@ export const getAdminUsers = async (
               row.subscription_status === 'suspended' ? 'suspended' :
               'expired',
       isTrial: row.subscription_plan === 'trial' || row.trial_ends_at !== null,
-      trialEndsAt: row.trial_ends_at ? row.trial_ends_at.toISOString() : undefined
+      trialEndsAt: row.trial_ends_at ? row.trial_ends_at.toISOString() : undefined,
+      llmUsage: serializeLlmUsage(EMPTY_MERCHANT_LLM_USAGE),
     }));
+
+    try {
+      const usageByMerchant = await getLlmUsageTotalsByMerchantIds(users.map((u) => u.id));
+      for (const user of users) {
+        const totals = usageByMerchant.get(user.id);
+        if (totals) user.llmUsage = serializeLlmUsage(totals);
+      }
+    } catch (err) {
+      console.warn('Could not attach LLM usage to admin users:', err);
+    }
 
     res.json({
       success: true,
@@ -771,6 +833,13 @@ export const getAdminUser = async (
     }
 
     const row = result.rows[0];
+    let llmUsage = serializeLlmUsage(EMPTY_MERCHANT_LLM_USAGE);
+    try {
+      llmUsage = serializeLlmUsage(await getMerchantLlmUsageTotals(row.id));
+    } catch (err) {
+      console.warn('Could not load LLM usage for admin user:', err);
+    }
+
     const user = {
       id: row.id,
       email: row.email,
@@ -790,7 +859,8 @@ export const getAdminUser = async (
               row.subscription_status === 'suspended' ? 'suspended' :
               'expired',
       isTrial: row.subscription_plan === 'trial' || row.trial_ends_at !== null,
-      trialEndsAt: row.trial_ends_at ? row.trial_ends_at.toISOString() : undefined
+      trialEndsAt: row.trial_ends_at ? row.trial_ends_at.toISOString() : undefined,
+      llmUsage,
     };
 
     res.json({
@@ -1010,6 +1080,97 @@ export const createAdminUser = async (
     });
   } catch (error: any) {
     console.error('Error creating admin user:', error);
+    next(error);
+  }
+};
+
+export const impersonateAdminUser = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { id: targetId } = req.params;
+    const adminId = req.merchantId;
+    const adminRole = req.userRole;
+
+    if (!adminId || !adminRole || !['owner', 'admin'].includes(adminRole)) {
+      return next(createError('Insufficient permissions', 403));
+    }
+
+    if (targetId === adminId) {
+      return next(createError('لا يمكن الدخول إلى حسابك نفسك', 400));
+    }
+
+    await ensureSubscriptionEndsAtColumn();
+    const result = await pool.query(
+      `SELECT id, email, name, subscription_plan, subscription_status,
+              trial_ends_at, subscription_ends_at, role, created_at
+       FROM merchants
+       WHERE id = $1`,
+      [targetId]
+    );
+
+    if (result.rows.length === 0) {
+      return next(createError('User not found', 404));
+    }
+
+    const target = result.rows[0];
+    const targetRole = target.role || 'user';
+    if (['owner', 'admin'].includes(targetRole)) {
+      return next(createError('لا يمكن الدخول إلى حساب مسؤول آخر', 403));
+    }
+
+    const adminResult = await pool.query(
+      `SELECT id, email, name FROM merchants WHERE id = $1`,
+      [adminId]
+    );
+    const admin = adminResult.rows[0];
+
+    const token = generateImpersonationToken(target.id, adminId, adminRole);
+    setAuthCookie(res, token);
+
+    const enforced = await enforceMerchantSubscriptionExpiry(target.id, {
+      subscription_plan: target.subscription_plan ?? null,
+      subscription_status: target.subscription_status ?? null,
+      subscription_ends_at: target.subscription_ends_at ?? null,
+    });
+
+    logger.info('Support impersonation started', {
+      adminId,
+      adminEmail: admin?.email,
+      targetMerchantId: target.id,
+      targetEmail: target.email,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        token,
+        user: {
+          id: target.id,
+          email: target.email,
+          name: target.name,
+          subscriptionPlan: target.subscription_plan || 'trial',
+          subscriptionStatus: enforced.subscriptionStatus,
+          trialEndsAt: target.trial_ends_at ? target.trial_ends_at.toISOString() : null,
+          subscriptionEndsAt: enforced.subscriptionEndsAt
+            ? new Date(enforced.subscriptionEndsAt).toISOString()
+            : target.subscription_ends_at
+              ? target.subscription_ends_at.toISOString()
+              : null,
+          createdAt: target.created_at ? target.created_at.toISOString() : undefined,
+          role: 'user' as const,
+          impersonation: {
+            active: true,
+            adminId,
+            adminName: admin?.name ?? null,
+            adminEmail: admin?.email ?? '',
+          },
+        },
+      },
+    });
+  } catch (error) {
     next(error);
   }
 };

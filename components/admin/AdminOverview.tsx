@@ -5,6 +5,7 @@ import apiService from '../../services/api';
 import { Users, UserCheck, DollarSign, MessageSquare, TrendingUp, Loader2, TrendingDown, AlertCircle, ArrowUpRight, Calendar } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { logger } from '../../utils/logger';
+import { formatTokenCount, formatUsdCost } from '../../utils/formatLlmCost';
 
 const AdminOverview: React.FC = () => {
   const [stats, setStats] = useState<AdminStats | null>(null);
@@ -40,7 +41,12 @@ const AdminOverview: React.FC = () => {
           arr: statsResponse.arr || 0,
           newUsersToday: statsResponse.newUsersToday || 0,
           newUsersThisWeek: statsResponse.newUsersThisWeek || 0,
-          newUsersThisMonth: statsResponse.newUsersThisMonth || 0
+          newUsersThisMonth: statsResponse.newUsersThisMonth || 0,
+          llmTokens: statsResponse.llmTokens || 0,
+          llmCostUsd: statsResponse.llmCostUsd || 0,
+          llmTokensThisMonth: statsResponse.llmTokensThisMonth || 0,
+          llmCostUsdThisMonth: statsResponse.llmCostUsdThisMonth || 0,
+          llmPlatformCostUsdThisMonth: statsResponse.llmPlatformCostUsdThisMonth || 0
         });
         
         setChartData({
@@ -197,6 +203,24 @@ const AdminOverview: React.FC = () => {
             <Calendar size={16} className="text-indigo-400" />
           </div>
           <h3 className="text-2xl lg:text-3xl font-bold text-white">{stats.newUsersThisMonth}</h3>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">
+        <div className="bg-slate-800 p-4 lg:p-6 rounded-2xl border border-slate-700 shadow-sm">
+          <p className="text-slate-400 text-xs lg:text-sm mb-1">تكلفة GPT-4o mini هذا الشهر</p>
+          <h3 className="text-2xl lg:text-3xl font-bold text-emerald-400" dir="ltr">{formatUsdCost(stats.llmCostUsdThisMonth)}</h3>
+          <p className="text-xs text-slate-500 mt-1">تجار المنصة فقط</p>
+        </div>
+        <div className="bg-slate-800 p-4 lg:p-6 rounded-2xl border border-slate-700 shadow-sm">
+          <p className="text-slate-400 text-xs lg:text-sm mb-1">توكنات التجار هذا الشهر</p>
+          <h3 className="text-2xl lg:text-3xl font-bold text-white" dir="ltr">{formatTokenCount(stats.llmTokensThisMonth)}</h3>
+          <p className="text-xs text-slate-500 mt-1">إجمالي كل الفترات: {formatTokenCount(stats.llmTokens)}</p>
+        </div>
+        <div className="bg-slate-800 p-4 lg:p-6 rounded-2xl border border-slate-700 shadow-sm">
+          <p className="text-slate-400 text-xs lg:text-sm mb-1">التكلفة الإجمالية (كل الفترات)</p>
+          <h3 className="text-2xl lg:text-3xl font-bold text-indigo-300" dir="ltr">{formatUsdCost(stats.llmCostUsd)}</h3>
+          <p className="text-xs text-slate-500 mt-1">منصة هذا الشهر: {formatUsdCost(stats.llmPlatformCostUsdThisMonth)}</p>
         </div>
       </div>
 

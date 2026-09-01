@@ -452,6 +452,7 @@ ${signupUrl}
       systemInstruction,
       temperature: 0.5,
       maxOutputTokens: 600,
+      usage: { merchantId: null, purpose: 'official_page' },
     });
 
     const replyText =

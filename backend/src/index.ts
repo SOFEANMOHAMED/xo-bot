@@ -52,6 +52,7 @@ import {
   restoreConnectedWhatsAppSessions,
   shutdownWhatsAppWebSessions
 } from './services/whatsappWeb/index.js';
+import { ensureLlmUsageSchema } from './services/llmUsage/index.js';
 import { restorePlatformWhatsAppSession } from './services/platformOtpWhatsapp/index.js';
 import geoRoutes from './routes/geo.routes.js';
 
@@ -377,6 +378,14 @@ async function startServer() {
     } catch (error) {
       logger.error('WhatsApp Web schema failed', error as Error);
       console.error('❌ WhatsApp Web schema failed:', error);
+    }
+
+    try {
+      await ensureLlmUsageSchema();
+      console.log('📊 LLM usage ledger schema ready');
+    } catch (error) {
+      logger.error('LLM usage schema failed', error as Error);
+      console.error('❌ LLM usage schema failed:', error);
     }
 
     try {

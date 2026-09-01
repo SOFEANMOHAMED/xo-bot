@@ -6,6 +6,7 @@
 import OpenAI from 'openai';
 import { logger } from '../utils/logger.js';
 import { withRetry, categorizeError } from '../core/error-handler.js';
+import { recordOpenAIUsage, type LlmUsagePurpose } from '../services/llmUsage/index.js';
 
 // ==================== CONFIGURATION ====================
 
@@ -23,6 +24,11 @@ export interface GenerateOptions {
   maxOutputTokens?: number;
   topP?: number;
   topK?: number;
+  /** Optional override; otherwise AsyncLocalStorage (SalesGPT) is used. */
+  usage?: {
+    merchantId?: string | null;
+    purpose?: LlmUsagePurpose;
+  };
 }
 
 export interface GenerateResult {
@@ -125,6 +131,12 @@ export const generateContent = async (
     });
 
     const text = result?.choices?.[0]?.message?.content?.trim() || '';
+
+    recordOpenAIUsage(result?.usage, {
+      merchantId: options.usage?.merchantId,
+      purpose: options.usage?.purpose,
+      model: DEFAULT_MODEL,
+    });
 
     logger.info('AI generation completed', {
       model: DEFAULT_MODEL,

@@ -409,8 +409,28 @@ class ApiService {
         subscriptionEndsAt?: string | null;
         createdAt: string;
         role?: 'owner' | 'admin' | 'user';
+        impersonation?: {
+          active: boolean;
+          adminId?: string;
+          adminName?: string | null;
+          adminEmail?: string;
+        };
       };
     }>('/auth/profile');
+  }
+
+  async exitImpersonation() {
+    return this.request<{
+      token: string;
+      user: {
+        id: string;
+        email: string;
+        name: string | null;
+        subscriptionPlan?: string;
+        subscriptionStatus?: string;
+        role?: 'owner' | 'admin' | 'user';
+      };
+    }>('/auth/impersonation/exit', { method: 'POST' });
   }
 
   async forgotPassword(email: string) {
@@ -1973,6 +1993,11 @@ class ApiService {
       paidSubscriptions: number;
       totalAiResponses: number;
       estimatedMrr: number;
+      llmTokens?: number;
+      llmCostUsd?: number;
+      llmTokensThisMonth?: number;
+      llmCostUsdThisMonth?: number;
+      llmPlatformCostUsdThisMonth?: number;
     }>('/admin/stats');
   }
 
@@ -2055,12 +2080,37 @@ class ApiService {
   }
 
   async getAdminUsageStats() {
-    return this.request<Array<{
-      id: string;
-      name: string;
-      requests: number;
-      cost: 'Low' | 'Medium' | 'High';
-    }>>('/admin/usage');
+    return this.request<{
+      model: string;
+      pricing: {
+        inputPer1MUsd: number;
+        cachedInputPer1MUsd: number;
+        outputPer1MUsd: number;
+      };
+      totals: {
+        promptTokens: number;
+        completionTokens: number;
+        totalTokens: number;
+        costUsd: number;
+        tokensThisMonth: number;
+        costUsdThisMonth: number;
+        callCount: number;
+        platformCostUsdThisMonth: number;
+        platformTokensThisMonth: number;
+      };
+      users: Array<{
+        id: string;
+        name: string;
+        email: string;
+        promptTokens: number;
+        completionTokens: number;
+        totalTokens: number;
+        costUsd: number;
+        tokensThisMonth: number;
+        costUsdThisMonth: number;
+        callCount: number;
+      }>;
+    }>('/admin/usage');
   }
 
   async getAdminChartData() {
@@ -2159,7 +2209,38 @@ class ApiService {
       status: 'active' | 'suspended' | 'expired';
       isTrial: boolean;
       trialEndsAt?: Date;
+      llmUsage?: {
+        promptTokens: number;
+        completionTokens: number;
+        totalTokens: number;
+        costUsd: number;
+        tokensThisMonth: number;
+        costUsdThisMonth: number;
+        callCount: number;
+      };
     }[]>('/admin/users');
+  }
+
+  async impersonateAdminUser(userId: string) {
+    return this.request<{
+      token: string;
+      user: {
+        id: string;
+        email: string;
+        name: string | null;
+        subscriptionPlan: string;
+        subscriptionStatus: string;
+        trialEndsAt: string | null;
+        subscriptionEndsAt?: string | null;
+        role: 'user';
+        impersonation: {
+          active: boolean;
+          adminId: string;
+          adminName: string | null;
+          adminEmail: string;
+        };
+      };
+    }>(`/admin/users/${userId}/impersonate`, { method: 'POST' });
   }
 
   async createAdminUser(data: {

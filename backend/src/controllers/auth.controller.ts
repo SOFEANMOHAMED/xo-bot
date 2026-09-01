@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
-import jwt, { SignOptions } from 'jsonwebtoken';
+import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import passport from 'passport';
 import pool from '../database/connection.js';
@@ -20,6 +20,7 @@ import {
   type MerchantAcquisitionInput
 } from '../services/merchantAcquisition.js';
 import { setAuthCookie, clearAuthCookie } from '../utils/authCookies.js';
+import { generateAuthToken, generateImpersonationToken } from '../services/authTokens.js';
 import {
   ensureSubscriptionEndsAtColumn,
   enforceMerchantSubscriptionExpiry
@@ -48,17 +49,25 @@ function toIsoOrNull(value: Date | string | null | undefined): string | null {
 }
 
 /** Public merchant user payload for auth responses (tenant-safe fields only). */
-async function buildPublicMerchantUser(merchant: {
-  id: string;
-  email: string;
-  name: string | null;
-  subscription_plan?: string | null;
-  subscription_status?: string | null;
-  trial_ends_at?: Date | string | null;
-  subscription_ends_at?: Date | string | null;
-  created_at?: Date | string | null;
-  role?: string | null;
-}) {
+async function buildPublicMerchantUser(
+  merchant: {
+    id: string;
+    email: string;
+    name: string | null;
+    subscription_plan?: string | null;
+    subscription_status?: string | null;
+    trial_ends_at?: Date | string | null;
+    subscription_ends_at?: Date | string | null;
+    created_at?: Date | string | null;
+    role?: string | null;
+  },
+  impersonation?: {
+    active: boolean;
+    adminId: string;
+    adminName: string | null;
+    adminEmail: string;
+  }
+) {
   await ensureSubscriptionEndsAtColumn();
   const enforced = await enforceMerchantSubscriptionExpiry(merchant.id, {
     subscription_plan: merchant.subscription_plan ?? null,
@@ -75,7 +84,8 @@ async function buildPublicMerchantUser(merchant: {
     trialEndsAt: toIsoOrNull(merchant.trial_ends_at),
     subscriptionEndsAt: toIsoOrNull(enforced.subscriptionEndsAt ?? merchant.subscription_ends_at),
     createdAt: toIsoOrNull(merchant.created_at) ?? undefined,
-    role: (merchant.role || 'user') as 'owner' | 'admin' | 'user'
+    role: (merchant.role || 'user') as 'owner' | 'admin' | 'user',
+    ...(impersonation ? { impersonation } : {})
   };
 }
 
@@ -414,10 +424,78 @@ export const getProfile = async (
     }
 
     const merchant = result.rows[0];
-    const user = await buildPublicMerchantUser(merchant);
+    let impersonation:
+      | { active: boolean; adminId: string; adminName: string | null; adminEmail: string }
+      | undefined;
+
+    if (req.impersonatedBy) {
+      const adminResult = await pool.query(
+        `SELECT id, email, name FROM merchants WHERE id = $1`,
+        [req.impersonatedBy]
+      );
+      if (adminResult.rows.length > 0) {
+        const admin = adminResult.rows[0];
+        impersonation = {
+          active: true,
+          adminId: admin.id,
+          adminName: admin.name,
+          adminEmail: admin.email,
+        };
+      }
+    }
+
+    const user = await buildPublicMerchantUser(merchant, impersonation);
     res.json({
       success: true,
       data: { user }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** End support impersonation and restore the super-admin session. */
+export const exitImpersonation = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const adminId = req.impersonatedBy;
+    if (!adminId) {
+      return next(createError('لا توجد جلسة دعم فني نشطة', 400));
+    }
+
+    const adminResult = await pool.query(
+      `SELECT id, email, name, subscription_plan, subscription_status,
+              trial_ends_at, subscription_ends_at, role, created_at
+       FROM merchants
+       WHERE id = $1`,
+      [adminId]
+    );
+
+    if (adminResult.rows.length === 0) {
+      return next(createError('حساب المسؤول غير موجود', 404));
+    }
+
+    const admin = adminResult.rows[0];
+    const adminRole = admin.role || req.impersonatedByRole || 'admin';
+    if (!['owner', 'admin'].includes(adminRole)) {
+      return next(createError('Insufficient permissions', 403));
+    }
+
+    const token = generateToken(admin.id, admin.id, adminRole);
+    setAuthCookie(res, token);
+
+    logger.info('Support impersonation ended', {
+      adminId: admin.id,
+      targetMerchantId: req.merchantId,
+    });
+
+    const user = await buildPublicMerchantUser(admin);
+    res.json({
+      success: true,
+      data: { user, token },
     });
   } catch (error) {
     next(error);
@@ -611,23 +689,7 @@ export const resetPassword = async (
 };
 
 function generateToken(userId: string, merchantId: string, role: string): string {
-  const jwtSecret = process.env.JWT_SECRET;
-  const expiresIn = process.env.JWT_EXPIRES_IN || '7d';
-
-  if (!jwtSecret) {
-    throw createError('JWT secret not configured', 500);
-  }
-
-  // Type assertion for expiresIn to satisfy jsonwebtoken types
-  const options: SignOptions = {
-    expiresIn: expiresIn as any
-  };
-  
-  return jwt.sign(
-    { userId, merchantId, role },
-    jwtSecret as string,
-    options
-  );
+  return generateAuthToken(userId, merchantId, role);
 }
 
 // Google OAuth - Initiate login (optional ?ref= + acquisition via OAuth state)
@@ -873,7 +935,8 @@ export const deleteAccount = async (
         'DELETE FROM facebook_pages WHERE merchant_id = $1',
         'DELETE FROM telegram_bots WHERE merchant_id = $1',
         'DELETE FROM whatsapp_accounts WHERE merchant_id = $1',
-        'DELETE FROM shopify_stores WHERE merchant_id = $1'
+        'DELETE FROM shopify_stores WHERE merchant_id = $1',
+        'DELETE FROM llm_usage_events WHERE merchant_id = $1'
       ];
 
       for (const query of deleteIntegrationQueries) {

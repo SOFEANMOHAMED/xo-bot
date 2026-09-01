@@ -13,6 +13,7 @@ import {
   createAdminUser,
   updateAdminUser,
   deleteAdminUser,
+  impersonateAdminUser,
   getSystemLogs,
   getGlobalSettings,
   updateGlobalSettings,
@@ -105,6 +106,7 @@ router.get('/acquisition', getAdminAcquisitionStatsHandler);
 // Users management
 router.get('/users', getAdminUsers);
 router.post('/users', createAdminUser);
+router.post('/users/:id/impersonate', impersonateAdminUser);
 router.get('/users/:id', getAdminUser);
 router.put('/users/:id', updateAdminUser);
 router.delete('/users/:id', deleteAdminUser);

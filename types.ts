@@ -251,6 +251,16 @@ export enum AdminView {
   ACQUISITION = 'ACQUISITION'
 }
 
+export interface AdminUserLlmUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  costUsd: number;
+  tokensThisMonth: number;
+  costUsdThisMonth: number;
+  callCount: number;
+}
+
 export interface AdminUser {
   id: string;
   name: string;
@@ -261,6 +271,7 @@ export interface AdminUser {
   status: 'active' | 'suspended' | 'expired';
   isTrial: boolean;
   trialEndsAt?: Date;
+  llmUsage?: AdminUserLlmUsage;
 }
 
 export interface AdminStats {
@@ -278,6 +289,11 @@ export interface AdminStats {
   newUsersToday: number;
   newUsersThisWeek: number;
   newUsersThisMonth: number;
+  llmTokens?: number;
+  llmCostUsd?: number;
+  llmTokensThisMonth?: number;
+  llmCostUsdThisMonth?: number;
+  llmPlatformCostUsdThisMonth?: number;
 }
 
 export interface AdminGlobalSettings {

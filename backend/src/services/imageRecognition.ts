@@ -16,6 +16,7 @@ import {
   resolveImageToBuffer
 } from '../catalog/visual-embeddings.js';
 import type { Product } from '../core/types.js';
+import { recordOpenAIUsage } from './llmUsage/index.js';
 
 const API_KEY = process.env.OPENAI_API_KEY || '';
 
@@ -63,6 +64,7 @@ async function dataUrlOrUrlToBuffer(imageDataUrl: string): Promise<Buffer | null
 
 async function describeImageWithVision(
   imageDataUrl: string,
+  merchantId: string,
   userMessage?: string
 ): Promise<{ description: string; searchQuery: string } | null> {
   const ai = getClient();
@@ -92,6 +94,12 @@ Only output the JSON, no markdown fences.`;
     ],
     temperature: 0.3,
     max_tokens: 300
+  });
+
+  recordOpenAIUsage(completion.usage, {
+    merchantId,
+    purpose: 'image_recognition',
+    model: 'gpt-4o-mini',
   });
 
   let raw = completion.choices?.[0]?.message?.content?.trim() || '';
@@ -145,7 +153,7 @@ export async function analyzeImageAndSearch(
         let description = products[0]?.name || 'منتج مشابه';
         let searchQuery = products[0]?.name || description;
         try {
-          const vision = await describeImageWithVision(imageDataUrl, userMessage);
+          const vision = await describeImageWithVision(imageDataUrl, merchantId, userMessage);
           if (vision?.description) description = vision.description;
           if (vision?.searchQuery) searchQuery = vision.searchQuery;
         } catch {
@@ -176,7 +184,7 @@ export async function analyzeImageAndSearch(
     }
 
     // ---------- Fallback: Vision caption + lexical catalog search ----------
-    const vision = await describeImageWithVision(imageDataUrl, userMessage);
+    const vision = await describeImageWithVision(imageDataUrl, merchantId, userMessage);
     if (!vision) {
       logger.warn('imageRecognition: vision fallback unavailable', { merchantId });
       return {

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { AppView, DEFAULT_PLAN_CAPABILITIES, type PlanCapabilities } from '../types';
-import { appPath } from '../routes/paths';
+import { appPath, adminPath } from '../routes/paths';
+import { AppView, AdminView } from '../types';
 import { 
   LayoutDashboard, 
   Package, 
@@ -29,6 +30,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import TrialBanner from './TrialBanner';
+import ImpersonationBanner from './ImpersonationBanner';
 import SubscriptionRenewalBanner from './SubscriptionRenewalBanner';
 import SubscriptionModal from './SubscriptionModal';
 import TrialExpiredBlock from './TrialExpiredBlock';
@@ -68,7 +70,7 @@ const Layout: React.FC<LayoutProps> = ({
     if (onChangeView) onChangeView(view);
     else navigate(appPath(view));
   };
-  const { user } = useAuth();
+  const { user, exitImpersonation } = useAuth();
   const { isRenewalWarning, subscriptionEndsAt } = useSubscriptionCheck();
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
@@ -141,6 +143,11 @@ const Layout: React.FC<LayoutProps> = ({
 
   const handleUpgrade = () => {
     setShowUpgradeModal(true);
+  };
+
+  const handleExitImpersonation = async () => {
+    await exitImpersonation();
+    navigate(adminPath(AdminView.USERS));
   };
 
   // Close sidebar when clicking outside on mobile
@@ -408,6 +415,18 @@ const Layout: React.FC<LayoutProps> = ({
             <span>المساعد الذكي</span>
           </button>
         </div>
+
+        {/* Support impersonation banner */}
+        {user?.impersonation?.active && (
+          <div className="fixed md:sticky top-16 md:top-0 right-0 left-0 w-full z-20">
+            <ImpersonationBanner
+              merchantName={user.name || user.email}
+              merchantEmail={user.email}
+              adminLabel={user.impersonation.adminName || user.impersonation.adminEmail}
+              onExit={handleExitImpersonation}
+            />
+          </div>
+        )}
 
         {/* Trial Banner Sticky Below Header - Only show if user is on trial plan */}
         {user && (user.subscriptionPlan === 'trial' || user.trialEndsAt) && user.subscriptionPlan === 'trial' && (() => {

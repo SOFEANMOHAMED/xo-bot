@@ -1,9 +1,10 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { AdminUser } from '../../types';
+import { useNavigate } from 'react-router-dom';
+import { AdminUser, AppView } from '../../types';
 import apiService from '../../services/api';
-import { Search, MoreHorizontal, CheckCircle, XCircle, Clock, Plus, X, Save, Info, Edit, Trash2, UserX, UserCheck, CreditCard, Eye, EyeOff, Filter, X as XIcon, Download, FileSpreadsheet } from 'lucide-react';
+import { Search, MoreHorizontal, CheckCircle, XCircle, Clock, Plus, X, Save, Info, Edit, Trash2, UserX, UserCheck, CreditCard, Eye, EyeOff, Filter, X as XIcon, Download, FileSpreadsheet, LogIn } from 'lucide-react';
 import { useAdminNotifications } from './AdminNotificationContext';
 import ConfirmDialog from './ConfirmDialog';
 import { logger } from '../../utils/logger';
@@ -12,12 +13,17 @@ import Pagination from '../Pagination';
 import { validateEmail, validatePassword, validateRequired } from '../../utils/validation';
 import { handleApiError } from '../../utils/errorHandler';
 import { downloadRowsAsCsv, downloadRowsAsXlsx } from '../../utils/spreadsheetExport';
+import { formatTokenCount, formatUsdCost, normalizeLlmUsage } from '../../utils/formatLlmCost';
+import { useAuth } from '../../contexts/AuthContext';
+import { appPath } from '../../routes/paths';
 
 interface AdminUsersProps {
   filterByTrial?: boolean;
 }
 
 const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
+  const navigate = useNavigate();
+  const { setToken } = useAuth();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const debouncedSearchTerm = useDebounce(searchTerm, 300);
@@ -185,8 +191,30 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
   };
 
   const handleShowDetails = (user: AdminUser) => {
-      setSelectedUser(user);
-      setShowDetailsModal(true);
+    setSelectedUser(user);
+    setShowDetailsModal(true);
+  };
+
+  const handleImpersonateUser = (user: AdminUser) => {
+    setOpenDropdownId(null);
+    setDropdownPosition(null);
+    setConfirmDialog({
+      isOpen: true,
+      title: 'الدخول لحساب المستخدم',
+      message: `سيتم فتح لوحة تحكم "${user.name}" (${user.email}) لأغراض الدعم الفني. يمكنك العودة للإدارة في أي وقت من الشريط العلوي.`,
+      type: 'info',
+      onConfirm: async () => {
+        try {
+          const response = await apiService.impersonateAdminUser(user.id);
+          await setToken(response.token);
+          showSuccess(`تم الدخول إلى حساب ${user.name}`);
+          navigate(appPath(AppView.DASHBOARD));
+        } catch (err: any) {
+          logger.error('Failed to impersonate user:', err);
+          showError('فشل الدخول للحساب: ' + (err.message || 'خطأ غير معروف'));
+        }
+      },
+    });
   };
 
   const handleExtendTrial = (user: AdminUser) => {
@@ -469,6 +497,10 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
         'البريد الإلكتروني': user.email,
         'رقم الهاتف': user.phone || '-',
         'الباقة': user.plan || 'غير محدد',
+        'توكنات هذا الشهر': normalizeLlmUsage(user.llmUsage).tokensThisMonth,
+        'تكلفة هذا الشهر ($)': normalizeLlmUsage(user.llmUsage).costUsdThisMonth,
+        'التوكنات الإجمالية': normalizeLlmUsage(user.llmUsage).totalTokens,
+        'التكلفة الإجمالية ($)': normalizeLlmUsage(user.llmUsage).costUsd,
         'الحالة': user.status === 'active' ? 'نشط' : user.status === 'suspended' ? 'معلق' : 'منتهي',
         'تجربة مجانية': user.isTrial ? 'نعم' : 'لا',
         'تاريخ انتهاء التجربة': user.trialEndsAt ? user.trialEndsAt.toLocaleDateString('ar-SA-u-nu-latn') : '-',
@@ -702,6 +734,8 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
                       <th className="px-6 py-4">المستخدم</th>
                       <th className="px-6 py-4">رقم الهاتف</th>
                       <th className="px-6 py-4">الباقة الحالية</th>
+                      <th className="px-6 py-4">توكنات هذا الشهر</th>
+                      <th className="px-6 py-4">التكلفة ($)</th>
                       <th className="px-6 py-4">تاريخ التسجيل</th>
                       <th className="px-6 py-4">الحالة</th>
                       {filterByTrial && <th className="px-6 py-4">حالة التجربة</th>}
@@ -728,6 +762,12 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
                             }`}>
                                 {user.plan}
                             </span>
+                         </td>
+                         <td className="px-6 py-4 text-sm text-slate-300 font-mono" dir="ltr">
+                            {formatTokenCount(normalizeLlmUsage(user.llmUsage).tokensThisMonth)}
+                         </td>
+                         <td className="px-6 py-4 text-sm font-semibold text-emerald-300" dir="ltr">
+                            {formatUsdCost(normalizeLlmUsage(user.llmUsage).costUsdThisMonth)}
                          </td>
                          <td className="px-6 py-4 text-sm text-slate-300" dir="ltr">
                             {user.registrationDate.toLocaleDateString('ar-u-nu-latn')}
@@ -772,6 +812,13 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
                                         left: `${dropdownPosition.left}px`
                                       }}
                                     >
+                                      <button
+                                        onClick={() => handleImpersonateUser(user)}
+                                        className="w-full text-right px-4 py-2 text-sm text-amber-300 hover:bg-amber-900/20 hover:text-amber-200 flex items-center gap-2 transition-colors"
+                                      >
+                                        <LogIn size={16} />
+                                        <span>الدخول للحساب (دعم)</span>
+                                      </button>
                                       <button
                                         onClick={() => handleEditUser(user)}
                                         className="w-full text-right px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 hover:text-white flex items-center gap-2 transition-colors"
@@ -819,7 +866,7 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
                    ))}
                    {paginatedUsers.length === 0 && (
                       <tr>
-                         <td colSpan={6} className="px-6 py-12 text-center text-slate-500">
+                         <td colSpan={filterByTrial ? 9 : 8} className="px-6 py-12 text-center text-slate-500">
                              لا توجد نتائج مطابقة
                          </td>
                       </tr>
@@ -1186,11 +1233,35 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
                            <p className="text-white font-medium">{selectedUser.plan}</p>
                        </div>
                        <div>
+                           <label className="text-sm text-slate-400">استهلاك GPT-4o mini هذا الشهر</label>
+                           <p className="text-white font-medium" dir="ltr">
+                             {formatTokenCount(normalizeLlmUsage(selectedUser.llmUsage).tokensThisMonth)} توكن
+                             {' · '}
+                             {formatUsdCost(normalizeLlmUsage(selectedUser.llmUsage).costUsdThisMonth)}
+                           </p>
+                           <p className="text-xs text-slate-500 mt-1" dir="ltr">
+                             إدخال {formatTokenCount(normalizeLlmUsage(selectedUser.llmUsage).promptTokens)}
+                             {' · '}إخراج {formatTokenCount(normalizeLlmUsage(selectedUser.llmUsage).completionTokens)}
+                             {' · '}الإجمالي {formatTokenCount(normalizeLlmUsage(selectedUser.llmUsage).totalTokens)}
+                             {' · '}{formatUsdCost(normalizeLlmUsage(selectedUser.llmUsage).costUsd)}
+                           </p>
+                       </div>
+                       <div>
                            <label className="text-sm text-slate-400">الحالة</label>
                            <div className="mt-1">{getStatusBadge(selectedUser.status)}</div>
                        </div>
                    </div>
-                   <div className="p-6 border-t border-slate-800 flex justify-end">
+                   <div className="p-6 border-t border-slate-800 flex justify-between gap-3">
+                       <button
+                           onClick={() => {
+                               setShowDetailsModal(false);
+                               if (selectedUser) handleImpersonateUser(selectedUser);
+                           }}
+                           className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg transition-colors inline-flex items-center gap-2"
+                       >
+                           <LogIn size={16} />
+                           الدخول للحساب
+                       </button>
                        <button 
                            onClick={() => setShowDetailsModal(false)}
                            className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition-colors"

@@ -22,6 +22,7 @@ import {
 import { getCachedMerchantSettings } from '../services/cacheService.js';
 import { conversationIngressQueue } from '../services/conversationIngressQueue.js';
 import { getAIClient, isAIAvailable } from '../ai/gemini-client.js';
+import { recordOpenAIUsage } from '../services/llmUsage/index.js';
 import { generateImageWithKie, MAX_REFERENCE_IMAGES } from '../ai/kie-client.js';
 import { logger } from '../utils/logger.js';
 import { conversationStageForDb } from '../services/salesgpt/conversationStateSync.js';
@@ -403,6 +404,12 @@ Generate the JSON now.`;
       ],
       temperature: 0.7,
       max_tokens: 900
+    });
+
+    recordOpenAIUsage(completion.usage, {
+      merchantId: req.merchantId,
+      purpose: 'product_description',
+      model: 'gpt-4o-mini',
     });
 
     const raw = completion.choices[0]?.message?.content?.trim();
