@@ -35,6 +35,11 @@ import {
   updateWhatsAppWebSettings
 } from '../services/whatsappWeb/index.js';
 import { clearMerchantChannelConversations } from '../services/metaConversationCleanup.js';
+import { persistImportedChannelMessage } from '../services/inbox/importedConversation.js';
+import {
+  isBeforeChannelLink,
+  parseChannelEventTime,
+} from '../services/inbox/historyImportFlags.js';
 
 // Verify WhatsApp webhook signature (Meta signs the raw body with the App Secret)
 const verifyWhatsAppSignature = (req: any, secret: string): boolean => {
@@ -642,7 +647,7 @@ export const handleWhatsAppWebhook = async (
 
             // Find merchant by phone number ID
             const merchantResult = await pool.query(
-            'SELECT merchant_id, auto_reply_enabled, welcome_message FROM whatsapp_accounts WHERE phone_number_id = $1 AND is_verified = true',
+            'SELECT merchant_id, auto_reply_enabled, welcome_message, created_at FROM whatsapp_accounts WHERE phone_number_id = $1 AND is_verified = true',
             [phoneNumberId]
           );
 
@@ -654,6 +659,30 @@ export const handleWhatsAppWebhook = async (
             const merchantId = merchantResult.rows[0].merchant_id;
             const autoReplyEnabled = merchantResult.rows[0].auto_reply_enabled;
             const welcomeMessage = merchantResult.rows[0].welcome_message;
+
+            const eventTime = parseChannelEventTime(message.timestamp);
+            if (isBeforeChannelLink(eventTime, merchantResult.rows[0].created_at)) {
+              await persistImportedChannelMessage({
+                merchantId,
+                platform: 'whatsapp',
+                userId: String(from),
+                userName: contact.profile?.name || null,
+                externalMessageId: String(messageId || ''),
+                content: messageText || (imageMediaId ? '📷 صورة' : '[رسالة]'),
+                createdAt: eventTime || new Date(),
+                source: 'whatsapp',
+                extraMetadata: {
+                  importSource: 'pre_link_webhook',
+                  platform: 'whatsapp',
+                },
+              });
+              logger.info('Skipping bot for WhatsApp message sent before account link', {
+                merchantId,
+                from,
+                eventTime: eventTime?.toISOString() || null,
+              });
+              continue;
+            }
 
             // ==================== INBOUND IMAGE (persist + visual recognition) ====================
             if (imageMediaId) {

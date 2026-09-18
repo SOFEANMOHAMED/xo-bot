@@ -29,6 +29,7 @@ export interface WhatsAppWebSessionRow {
   last_connected_at: Date | null;
   last_disconnect_at: Date | null;
   last_disconnect_reason: string | null;
+  created_at?: Date | null;
 }
 
 export interface MerchantWaRuntime {
@@ -44,6 +45,8 @@ export interface MerchantWaRuntime {
   starting: boolean;
   /** Outbound ids emitted by this process — skip echo on messages.upsert */
   sentMessageIds: Set<string>;
+  /** Messages older than this (channel first-link) are inbox history, not bot turns. */
+  historyCutoffAt: Date | null;
 }
 
 export interface PersistedAuthBlobs {

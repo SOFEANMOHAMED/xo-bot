@@ -5,6 +5,7 @@ import {
   ZERO_PLAN_LIMITS,
   type PlanLimits
 } from './planDefinitions.js';
+import { isBillableBotResponseSql } from '../services/inbox/historyImportFlags.js';
 
 export type { PlanLimits };
 
@@ -162,12 +163,12 @@ export async function getMonthlyAIResponseCount(merchantId: string): Promise<num
 
     const result = await pool.query(
       `SELECT COUNT(*)::int as count 
-       FROM messages 
-       WHERE conversation_id IN (
+       FROM messages m
+       WHERE m.conversation_id IN (
          SELECT id FROM conversations WHERE merchant_id = $1
        )
-       AND role = 'assistant'
-       AND created_at >= $2`,
+       AND ${isBillableBotResponseSql('m')}
+       AND m.created_at >= $2`,
       [merchantId, startOfMonth]
     );
     return result.rows[0]?.count || 0;

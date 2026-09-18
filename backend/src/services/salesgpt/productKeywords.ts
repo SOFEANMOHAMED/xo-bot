@@ -26,9 +26,26 @@ export function extractProductKeywords(messageText: string): string[] {
   ];
 
   const words = text
-    .replace(/[.,;:!?()]/g, ' ')
+    .replace(/[.,;:!?()؟،؛«»""]/g, ' ')
     .split(/\s+/)
     .filter((w) => w.length >= 2 && !stopWords.includes(w) && !/^\d+$/.test(w));
 
   return [...new Set(words)].slice(0, 5);
+}
+
+/**
+ * True when this user turn names or queries a specific product (not generic browsing).
+ * Shared by SalesGPT product search and catalog no-match grounding.
+ */
+export function hasSpecificProductSearchIntent(opts: {
+  messageText: string;
+  mentionedInMessageCount: number;
+  productQuery?: string | null;
+}): boolean {
+  if (opts.mentionedInMessageCount > 0) return true;
+  if (opts.productQuery && opts.productQuery.trim().length > 0) return true;
+  const meaningfulKeywords = extractProductKeywords(opts.messageText).filter(
+    (k) => k.length >= 3
+  );
+  return meaningfulKeywords.length > 0;
 }

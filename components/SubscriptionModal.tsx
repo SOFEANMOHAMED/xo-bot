@@ -6,6 +6,7 @@ import {
 import { apiService } from '../services/api';
 import { logger } from '../utils/logger';
 import { PaymentMethodLogo, paymentMethodHint } from './PaymentMethodLogo';
+import { useAuth } from '../contexts/AuthContext';
 
 interface SubscriptionModalProps {
   onClose: () => void;
@@ -45,6 +46,7 @@ interface OfflinePaymentMethod {
 type Step = 'plans' | 'payment' | 'success';
 
 const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ onClose }) => {
+  const { user } = useAuth();
   const [plans, setPlans] = useState<DisplayPlan[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [step, setStep] = useState<Step>('plans');
@@ -82,6 +84,10 @@ const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ onClose }) => {
   };
 
   useEffect(() => {
+    if (user?.accountType === 'agency_client' || user?.accountType === 'agency') {
+      setIsLoading(false);
+      return;
+    }
     const fetchPlans = async () => {
       try {
         setIsLoading(true);
@@ -215,6 +221,29 @@ const SubscriptionModal: React.FC<SubscriptionModalProps> = ({ onClose }) => {
     step === 'plans' ? 'اختر الخطة المناسبة ثم أكمل التحويل.' :
     step === 'payment' ? `خطة ${selectedPlan?.name} — ${selectedPlan?.priceLabel} / ${selectedPlan?.period}` :
     'بانتظار تأكيد الدفع من الإدارة';
+
+  if (user?.accountType === 'agency_client') {
+    return (
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="bg-white dark:bg-gray-900 rounded-3xl w-full max-w-md p-6 shadow-2xl relative">
+          <button type="button" onClick={onClose} className="absolute left-4 top-4 text-gray-400 hover:text-gray-600">
+            <X size={20} />
+          </button>
+          <h3 className="font-bold text-lg mb-2">اشتراكك عبر الوكالة</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-300">
+            حسابك يُدار عبر وكالتك. للتجديد أو الترقية تواصل مع وكالتك مباشرة.
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="mt-4 w-full rounded-xl bg-brand text-white py-2.5 font-medium"
+          >
+            حسناً
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in overflow-y-auto">

@@ -3,6 +3,7 @@ import { AuthRequest } from './auth.js';
 import { createError } from './errorHandler.js';
 import pool from '../database/connection.js';
 import { enforceMerchantSubscriptionExpiry, ensureSubscriptionEndsAtColumn } from '../services/subscriptionExpiry/index.js';
+import { ensureAgencySchema } from '../services/agency/index.js';
 
 /** Paths still reachable after trial/paid subscription expiry (renewal + profile). */
 const ALLOWED_WHEN_EXPIRED = [
@@ -21,6 +22,7 @@ function isAllowedExpiredPath(requestPath: string): boolean {
 /**
  * Middleware to check if user's trial / paid subscription has expired.
  * Blocks access if expired (except profile + billing renewal paths).
+ * Agency management accounts are blocked from operational routes entirely.
  */
 export const checkSubscriptionStatus = async (
   req: AuthRequest,
@@ -39,9 +41,11 @@ export const checkSubscriptionStatus = async (
     }
 
     await ensureSubscriptionEndsAtColumn();
+    await ensureAgencySchema();
 
     const result = await pool.query(
-      `SELECT subscription_plan, subscription_status, trial_ends_at, subscription_ends_at
+      `SELECT subscription_plan, subscription_status, trial_ends_at, subscription_ends_at,
+              COALESCE(account_type, 'merchant') as account_type
        FROM merchants
        WHERE id = $1`,
       [merchantId]
@@ -52,9 +56,22 @@ export const checkSubscriptionStatus = async (
     }
 
     const merchant = result.rows[0];
+    const accountType = merchant.account_type || 'merchant';
     const subscriptionPlan = merchant.subscription_plan || 'trial';
     let subscriptionStatus = merchant.subscription_status || 'active';
     const trialEndsAt = merchant.trial_ends_at;
+
+    // Agency accounts are management-only (no channels / ops APIs)
+    if (accountType === 'agency' || subscriptionPlan === 'agency') {
+      return next(
+        createError(
+          'حساب الوكالة مخصص لإدارة المقاعد فقط ولا يمكنه استخدام الأدوات التشغيلية.',
+          403,
+          true,
+          'AGENCY_MANAGEMENT_ONLY'
+        )
+      );
+    }
 
     // Auto-expire paid plans whose period has ended
     const enforced = await enforceMerchantSubscriptionExpiry(merchantId, {

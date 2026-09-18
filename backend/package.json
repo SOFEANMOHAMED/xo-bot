@@ -40,9 +40,12 @@
     "test-conversation-cart": "tsx src/services/salesgpt/test_conversation_cart.ts",
     "migrate-social-story-content": "tsx src/database/migrations/run_social_story_content_migration.ts",
     "migrate-llm-usage": "tsx src/database/migrations/run_llm_usage_migration.ts",
+    "migrate-agency-system": "tsx src/database/migrations/run_agency_system_migration.ts",
+    "migrate-agency-signup-requests": "tsx src/database/migrations/run_agency_signup_requests_migration.ts",
     "test-social-comment-mention": "tsx src/services/test_socialCommentMention.ts",
     "test-social-acquisition": "tsx src/services/test_socialAcquisition.ts",
-    "test-whatsapp-history-import": "tsx src/services/test_whatsappHistoryImport.ts"
+    "test-whatsapp-history-import": "tsx src/services/test_whatsappHistoryImport.ts",
+    "test-history-import-flags": "tsx src/services/test_historyImportFlags.ts"
   },
   "keywords": [
     "saas",

@@ -64,6 +64,11 @@ export async function enforceMerchantSubscriptionExpiry(
     endsAt = result.rows[0].subscription_ends_at;
   }
 
+  // Agency management accounts never auto-expire
+  if (plan === 'agency') {
+    return { subscriptionStatus: status || 'active', didExpire: false, subscriptionEndsAt: null };
+  }
+
   if (status === 'expired' || status === 'suspended') {
     return { subscriptionStatus: status, didExpire: false, subscriptionEndsAt: endsAt };
   }
@@ -81,6 +86,7 @@ export async function enforceMerchantSubscriptionExpiry(
        AND COALESCE(subscription_status, 'active') = 'active'
        AND subscription_plan IS NOT NULL
        AND subscription_plan <> 'trial'
+       AND subscription_plan <> 'agency'
        AND subscription_ends_at IS NOT NULL
        AND subscription_ends_at <= CURRENT_TIMESTAMP
      RETURNING subscription_status, subscription_ends_at`,
@@ -116,6 +122,7 @@ export async function expireDueSubscriptions(): Promise<number> {
      WHERE COALESCE(subscription_status, 'active') = 'active'
        AND subscription_plan IS NOT NULL
        AND subscription_plan <> 'trial'
+       AND subscription_plan <> 'agency'
        AND subscription_ends_at IS NOT NULL
        AND subscription_ends_at <= CURRENT_TIMESTAMP
      RETURNING id`

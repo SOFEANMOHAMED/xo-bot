@@ -35,9 +35,13 @@ export const PATHS = {
   COMPLETE_PROFILE: '/complete-profile',
   ABOUT: '/about',
   WHATSAPP_BOT: '/whatsapp-bot',
+  BECOME_AGENCY: '/become-agency',
   /** Legacy OAuth callback alias → redirects to APP_INTEGRATIONS */
   INTEGRATIONS_LEGACY: '/integrations',
   APP: '/app',
+  AGENCY: '/agency',
+  AGENCY_LOGIN: '/agency/login',
+  AGENCY_REGISTER: '/agency/register',
   /** Obscured super-admin UI base (from env) */
   ADMIN: normalizeAdminBasePath(
     typeof import.meta !== 'undefined'
@@ -92,6 +96,7 @@ export const ADMIN_VIEW_SLUG: Record<AdminView, string> = {
   [AdminView.OFFICIAL_PAGE_COMMENTS]: 'xo-page-comments',
   [AdminView.CONTENT_PUBLISHING]: 'content-publishing',
   [AdminView.ACQUISITION]: 'acquisition',
+  [AdminView.AGENCIES]: 'agencies',
 };
 
 const slugToAppView = Object.fromEntries(
@@ -144,13 +149,15 @@ export const RESERVED_ROOT_SEGMENTS = new Set([
   'complete-profile',
   'integrations',
   'app',
+  'agency',
   'admin',
   adminRootSegment,
   'api',
   'webhooks',
-  'storify',
   'about',
   'whatsapp-bot',
+  'become-agency',
+  'storify',
   'sitemap.xml',
   'robots.txt',
   'llms.txt',

@@ -3,7 +3,7 @@ import {
   Zap, MessageCircle, CheckCircle, Mail, ArrowRight, Shield,
   Plus, Minus, Loader2, TrendingUp, Clock, UserCircle, BarChart2,
   MessageSquare, Database, Cpu, Sparkles, Inbox, Image, Package,
-  Send, Instagram, Facebook, ShoppingCart, Store
+  Send, Instagram, Facebook, ShoppingCart, Store, Handshake
 } from 'lucide-react';
 import LandingChatBot from './LandingChatBot';
 import AntigravityHero from './AntigravityHero';
@@ -205,6 +205,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
             <button onClick={() => scrollToSection('features')} className="hover:text-brand transition-colors">المميزات</button>
             <button onClick={() => scrollToSection('case-studies')} className="hover:text-brand transition-colors">قصص النجاح</button>
             <button onClick={() => scrollToSection('pricing')} className="hover:text-brand transition-colors">الأسعار</button>
+            <a href="/become-agency" className="hover:text-brand transition-colors">كن وكيلاً</a>
             <a href="/storify" className="text-[#8fa82b] hover:text-[#718520] transition-colors flex items-center gap-1 font-bold"><Store size={14} /> شراكة ستوريفاي</a>
           </div>
 
@@ -519,6 +520,44 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
         </div>
       </section>
 
+      {/* Become an agency partner */}
+      <section id="become-agency" className="py-24 relative z-10 overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_80%_0%,rgba(249,115,22,0.14),transparent_50%),linear-gradient(180deg,#ffffff_0%,#fff7ed_50%,#f8fafc_100%)]" />
+        <div className="container mx-auto px-6 relative z-10">
+          <div className="max-w-4xl mx-auto text-center">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white border border-orange-200 text-orange-800 text-sm font-semibold mb-6 shadow-sm">
+              <Handshake size={16} />
+              برنامج الشركاء
+            </div>
+            <h2 className="text-3xl md:text-5xl font-extrabold text-slate-900 mb-4 leading-tight">
+              كن وكيلاً
+            </h2>
+            <p className="text-lg text-slate-600 max-w-2xl mx-auto mb-10 leading-relaxed">
+              وكالات التسويق ومديرو المتاجر المتعددة: قدّموا{' '}
+              <span dir="ltr" className="font-bold">Xo Bot</span> لعملائكم بمقاعد مستقلة
+              وأسعار شراكة مخفّضة متفق عليها.
+            </p>
+            <div className="flex flex-wrap justify-center gap-3">
+              <a
+                href="/become-agency"
+                className="inline-flex items-center gap-2 px-7 py-3.5 rounded-xl bg-slate-900 text-white font-bold hover:bg-slate-800 transition-all shadow-lg"
+              >
+                اعرف المزيد
+                <ArrowRight size={18} className="rotate-180" />
+              </a>
+              <button
+                type="button"
+                onClick={() => scrollToSection('contact')}
+                className="inline-flex items-center gap-2 px-7 py-3.5 rounded-xl bg-brand text-white font-bold hover:bg-brand-600 transition-all shadow-lg shadow-brand/25"
+              >
+                <Mail size={18} />
+                تواصل معنا
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Contact */}
       <section id="contact" className="py-24 relative z-10 overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-b from-white to-brand-50/60" />
@@ -645,6 +684,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin, onNavigate
                   <li><button onClick={() => scrollToSection('pricing')} className="hover:text-brand transition-colors">الأسعار</button></li>
                   <li><a href="/about" className="hover:text-brand transition-colors">عن Xo Bot</a></li>
                   <li><a href="/whatsapp-bot" className="hover:text-brand transition-colors">بوت واتساب</a></li>
+                  <li><a href="/become-agency" className="hover:text-brand transition-colors">كن وكيلاً</a></li>
                   <li><a href="/storify" className="hover:text-brand transition-colors">شراكة ستوريفاي</a></li>
                 </ul>
               </div>

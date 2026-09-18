@@ -16,6 +16,7 @@ import {
 import type { EligibleAbandonedConversation, MerchantReminderSettings } from './types.js';
 import type { ConversationState } from '../../core/types.js';
 import type { AbandonedCheckoutPlatform } from './constants.js';
+import { isLiveCustomerMessageSql } from '../inbox/historyImportFlags.js';
 
 function mapSettings(row: any): MerchantReminderSettings {
   const delay = Number(row.abandoned_reminder_delay_minutes);
@@ -177,7 +178,7 @@ export async function findEligibleAbandonedConversations(): Promise<EligibleAban
          SELECT m.created_at
          FROM messages m
          WHERE m.conversation_id = c.id
-           AND m.role = 'user'
+           AND ${isLiveCustomerMessageSql('m')}
          ORDER BY m.created_at DESC
          LIMIT 1
        ) last_user ON TRUE

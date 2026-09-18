@@ -131,6 +131,18 @@ export const submitPaymentRequest = async (
       return next(createError('Unauthorized', 401));
     }
 
+    const { ensureAgencySchema, getMerchantAccountType } = await import(
+      '../services/agency/index.js'
+    );
+    await ensureAgencySchema();
+    const accountType = await getMerchantAccountType(merchantId);
+    if (accountType === 'agency') {
+      return next(createError('حساب الوكالة يدفع عبر فوترة المقاعد وليس الاشتراك العام', 400));
+    }
+    if (accountType === 'agency_client') {
+      return next(createError('اشتراكك يُدار عبر وكالتك. تواصل معهم للترقية أو التجديد.', 400));
+    }
+
     const { planKey, proofUrl, method: methodId } = req.body;
 
     if (!planKey || !['comments', 'single', 'social', 'yearly'].includes(planKey)) {

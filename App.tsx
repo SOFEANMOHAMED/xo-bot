@@ -19,6 +19,7 @@ import {
 } from './routes/paths';
 import { ProtectedRoute, GuestOnlyRoute } from './routes/ProtectedRoute';
 import MerchantApp from './components/MerchantApp';
+import AgencyApp from './components/AgencyApp';
 import AdminApp from './components/AdminApp';
 import LandingPage from './components/LandingPage';
 import LoginPage from './components/LoginPage';
@@ -30,12 +31,20 @@ import PageView from './components/PageView';
 import StorifyPartnerPage from './components/StorifyPartnerPage';
 import AboutPage from './components/AboutPage';
 import WhatsAppBotPage from './components/WhatsAppBotPage';
+import AgencyPartnerPage from './components/AgencyPartnerPage';
+import AgencyRegisterPage from './components/AgencyRegisterPage';
 import NotFoundPage from './components/NotFoundPage';
 import SeoHead from './components/SeoHead';
 
-function postLoginPath(role: UserRole | string | undefined): string {
+function postLoginPath(
+  role: UserRole | string | undefined,
+  accountType?: string
+): string {
   if (role === 'owner' || role === 'admin') {
     return adminPath(AdminView.OVERVIEW);
+  }
+  if (accountType === 'agency') {
+    return PATHS.AGENCY;
   }
   return appPath(AppView.DASHBOARD);
 }
@@ -66,9 +75,13 @@ function LoginRoute() {
     <GuestOnlyRoute>
       <SeoHead title="تسجيل الدخول" noindex canonicalPath={PATHS.LOGIN} />
       <LoginPage
-        onLoginSuccess={(role) => {
+        onLoginSuccess={(role, accountType) => {
           if (role === 'owner' || role === 'admin') {
             navigate(adminPath(AdminView.OVERVIEW), { replace: true });
+            return;
+          }
+          if (accountType === 'agency') {
+            navigate(PATHS.AGENCY, { replace: true });
             return;
           }
           const target =
@@ -197,7 +210,7 @@ function CompleteProfileRoute() {
       <SeoHead title="إكمال الملف الشخصي" noindex canonicalPath={PATHS.COMPLETE_PROFILE} />
       <CompleteProfilePage
         onComplete={() => {
-          navigate(postLoginPath(user?.role), { replace: true });
+          navigate(postLoginPath(user?.role, user?.accountType), { replace: true });
         }}
       />
     </>
@@ -296,6 +309,53 @@ function WhatsAppBotRoute() {
   );
 }
 
+function BecomeAgencyRoute() {
+  const navigate = useNavigate();
+  return (
+    <AgencyPartnerPage
+      onNavigateToLogin={() => navigate(PATHS.AGENCY_LOGIN)}
+      onNavigateToSignup={() => navigate(PATHS.AGENCY_REGISTER)}
+      onNavigateToPage={(slug) => navigate(`/${slug}`)}
+      onBack={() => navigate(PATHS.HOME)}
+    />
+  );
+}
+
+function AgencyLoginRoute() {
+  const navigate = useNavigate();
+  return (
+    <GuestOnlyRoute>
+      <SeoHead title="تسجيل دخول الوكالة" noindex canonicalPath={PATHS.AGENCY_LOGIN} />
+      <LoginPage
+        variant="agency"
+        onLoginSuccess={(_role, accountType) => {
+          if (accountType === 'agency') {
+            navigate(PATHS.AGENCY, { replace: true });
+            return;
+          }
+          navigate(PATHS.AGENCY_LOGIN, { replace: true });
+        }}
+        onBack={() => navigate(PATHS.BECOME_AGENCY)}
+        onNavigateToSignup={() => navigate(PATHS.AGENCY_REGISTER)}
+        onNavigateToForgotPassword={() => navigate(PATHS.FORGOT_PASSWORD)}
+      />
+    </GuestOnlyRoute>
+  );
+}
+
+function AgencyRegisterRoute() {
+  const navigate = useNavigate();
+  return (
+    <GuestOnlyRoute>
+      <SeoHead title="إنشاء حساب وكالة" noindex canonicalPath={PATHS.AGENCY_REGISTER} />
+      <AgencyRegisterPage
+        onNavigateToLogin={() => navigate(PATHS.AGENCY_LOGIN)}
+        onBack={() => navigate(PATHS.BECOME_AGENCY)}
+      />
+    </GuestOnlyRoute>
+  );
+}
+
 function AdminLogoutRoute() {
   const navigate = useNavigate();
   const { logout } = useAuth();
@@ -324,7 +384,7 @@ function HomeRoute() {
     );
   }
   if (isAuthenticated && user) {
-    return <Navigate to={postLoginPath(user.role)} replace />;
+    return <Navigate to={postLoginPath(user.role, user.accountType)} replace />;
   }
   return <LandingRoute />;
 }
@@ -357,6 +417,17 @@ const App: React.FC = () => {
           }
         />
 
+        <Route path={PATHS.AGENCY_LOGIN} element={<AgencyLoginRoute />} />
+        <Route path={PATHS.AGENCY_REGISTER} element={<AgencyRegisterRoute />} />
+        <Route
+          path={PATHS.AGENCY}
+          element={
+            <ProtectedRoute requireAgency>
+              <AgencyApp />
+            </ProtectedRoute>
+          }
+        />
+
         {/* Secret super-admin panel (path from VITE_ADMIN_BASE_PATH) */}
         <Route path={adminLoginPath()} element={<AdminLoginRoute />} />
         <Route path={PATHS.ADMIN} element={<Navigate to={adminPath(AdminView.OVERVIEW)} replace />} />
@@ -369,6 +440,7 @@ const App: React.FC = () => {
         <Route path="/storify" element={<StorifyPartnerRoute />} />
         <Route path={PATHS.ABOUT} element={<AboutRoute />} />
         <Route path={PATHS.WHATSAPP_BOT} element={<WhatsAppBotRoute />} />
+        <Route path={PATHS.BECOME_AGENCY} element={<BecomeAgencyRoute />} />
         <Route path="/:slug" element={<PublicPageRoute />} />
         <Route path="*" element={<NotFoundRoute />} />
       </Routes>

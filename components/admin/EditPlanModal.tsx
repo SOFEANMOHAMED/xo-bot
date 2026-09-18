@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Save, Plus, Trash2 } from 'lucide-react';
 import { useAdminNotifications } from './AdminNotificationContext';
+import ModalOverlay from '../ModalOverlay';
 
 interface PlanLimits {
   maxProducts: number;
@@ -179,9 +180,9 @@ const EditPlanModal: React.FC<EditPlanModalProps> = ({ isOpen, plan, onClose, on
   );
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[10000] p-4 animate-fade-in">
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl animate-scale-in max-h-[90vh] overflow-y-auto">
-        <div className="flex justify-between items-center p-6 border-b border-slate-800 sticky top-0 bg-slate-900">
+    <ModalOverlay panelClassName="w-full max-w-2xl" onClose={isSaving ? undefined : onClose}>
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full shadow-2xl animate-scale-in">
+        <div className="flex justify-between items-center p-6 border-b border-slate-800 sticky top-0 bg-slate-900 z-10">
           <h3 className="text-xl font-bold text-white">تعديل الباقة</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors" disabled={isSaving}>
             <X size={24} />
@@ -402,7 +403,7 @@ const EditPlanModal: React.FC<EditPlanModalProps> = ({ isOpen, plan, onClose, on
           </button>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 };
 

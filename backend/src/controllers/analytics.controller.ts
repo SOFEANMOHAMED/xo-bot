@@ -2,6 +2,12 @@ import { Response, NextFunction } from 'express';
 import pool from '../database/connection.js';
 import { createError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
+import {
+  conversationHasLiveMessagesSql,
+  isBillableBotResponseSql,
+  isImportedHistoryMessageSql,
+  isLiveCustomerMessageSql,
+} from '../services/inbox/historyImportFlags.js';
 
 // Get comprehensive analytics dashboard data
 export const getAnalyticsDashboard = async (
@@ -74,17 +80,19 @@ export const getAnalyticsDashboard = async (
       [merchantId, startDate]
     );
 
-    // Conversation Analytics
+    // Conversation Analytics — exclude channel history imported at link time
     const conversationResult = await pool.query(
       `SELECT 
         COUNT(DISTINCT c.id) as total_conversations,
         COUNT(m.id) as total_messages,
-        COUNT(DISTINCT CASE WHEN m.role = 'user' THEN m.id END) as user_messages,
-        COUNT(DISTINCT CASE WHEN m.role = 'assistant' THEN m.id END) as bot_responses
+        COUNT(*) FILTER (WHERE ${isLiveCustomerMessageSql('m')}) as user_messages,
+        COUNT(*) FILTER (WHERE ${isBillableBotResponseSql('m')}) as bot_responses
        FROM conversations c
        LEFT JOIN messages m ON m.conversation_id = c.id
+         AND NOT ${isImportedHistoryMessageSql('m')}
        WHERE c.merchant_id = $1 
-       AND c.created_at >= $2`,
+       AND c.created_at >= $2
+       AND ${conversationHasLiveMessagesSql('c')}`,
       [merchantId, startDate]
     );
 
@@ -100,7 +108,8 @@ export const getAnalyticsDashboard = async (
          AND o.created_at <= c.created_at + INTERVAL '24 hours'
        )
        WHERE c.merchant_id = $1 
-       AND c.created_at >= $2`,
+       AND c.created_at >= $2
+       AND ${conversationHasLiveMessagesSql('c')}`,
       [merchantId, startDate]
     );
 
@@ -128,9 +137,10 @@ export const getAnalyticsDashboard = async (
       `SELECT 
         platform,
         COUNT(*) as count
-       FROM conversations 
-       WHERE merchant_id = $1 
-       AND created_at >= $2
+       FROM conversations c
+       WHERE c.merchant_id = $1 
+       AND c.created_at >= $2
+       AND ${conversationHasLiveMessagesSql('c')}
        GROUP BY platform
        ORDER BY count DESC`,
       [merchantId, startDate]
@@ -144,7 +154,7 @@ export const getAnalyticsDashboard = async (
        FROM messages m
        JOIN conversations c ON c.id = m.conversation_id
        WHERE c.merchant_id = $1 
-       AND m.role = 'user'
+       AND ${isLiveCustomerMessageSql('m')}
        AND m.created_at >= $2
        AND LENGTH(m.content) > 10
        GROUP BY m.content
@@ -326,12 +336,13 @@ export const getConversationAnalytics = async (
     // Conversations over time
     const conversationsOverTimeResult = await pool.query(
       `SELECT 
-        DATE(created_at) as date,
+        DATE(c.created_at) as date,
         COUNT(*) as count
-       FROM conversations 
-       WHERE merchant_id = $1 
-       AND created_at >= $2
-       GROUP BY DATE(created_at)
+       FROM conversations c
+       WHERE c.merchant_id = $1 
+       AND c.created_at >= $2
+       AND ${conversationHasLiveMessagesSql('c')}
+       GROUP BY DATE(c.created_at)
        ORDER BY date ASC`,
       [merchantId, startDate]
     );
@@ -343,10 +354,10 @@ export const getConversationAnalytics = async (
        FROM messages m1
        JOIN messages m2 ON m2.conversation_id = m1.conversation_id 
          AND m2.created_at > m1.created_at
-         AND m2.role = 'assistant'
+         AND ${isBillableBotResponseSql('m2')}
        JOIN conversations c ON c.id = m1.conversation_id
        WHERE c.merchant_id = $1 
-       AND m1.role = 'user'
+       AND ${isLiveCustomerMessageSql('m1')}
        AND m1.created_at >= $2
        AND m2.created_at <= m1.created_at + INTERVAL '1 hour'`,
       [merchantId, startDate]
@@ -355,14 +366,14 @@ export const getConversationAnalytics = async (
     // Peak hours
     const peakHoursResult = await pool.query(
       `SELECT 
-        EXTRACT(HOUR FROM messages.created_at) as hour,
+        EXTRACT(HOUR FROM m.created_at) as hour,
         COUNT(*) as count
-       FROM messages
-       JOIN conversations c ON c.id = messages.conversation_id
+       FROM messages m
+       JOIN conversations c ON c.id = m.conversation_id
        WHERE c.merchant_id = $1 
-       AND messages.created_at >= $2
-       AND messages.role = 'user'
-       GROUP BY EXTRACT(HOUR FROM messages.created_at)
+       AND m.created_at >= $2
+       AND ${isLiveCustomerMessageSql('m')}
+       GROUP BY EXTRACT(HOUR FROM m.created_at)
        ORDER BY count DESC
        LIMIT 10`,
       [merchantId, startDate]

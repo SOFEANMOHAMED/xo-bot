@@ -31,6 +31,7 @@ export async function buildPublicMerchantUser(merchant: {
   subscription_ends_at?: Date | string | null;
   created_at?: Date | string | null;
   role?: string | null;
+  account_type?: string | null;
 }) {
   const { ensureSubscriptionEndsAtColumn, enforceMerchantSubscriptionExpiry } = await import(
     './subscriptionExpiry/index.js'
@@ -42,6 +43,11 @@ export async function buildPublicMerchantUser(merchant: {
     subscription_ends_at: merchant.subscription_ends_at ?? null
   });
 
+  const accountType =
+    merchant.account_type === 'agency' || merchant.account_type === 'agency_client'
+      ? merchant.account_type
+      : 'merchant';
+
   return {
     id: merchant.id,
     email: merchant.email,
@@ -51,7 +57,8 @@ export async function buildPublicMerchantUser(merchant: {
     trialEndsAt: toIsoOrNull(merchant.trial_ends_at),
     subscriptionEndsAt: toIsoOrNull(enforced.subscriptionEndsAt ?? merchant.subscription_ends_at),
     createdAt: toIsoOrNull(merchant.created_at) ?? undefined,
-    role: (merchant.role || 'user') as 'owner' | 'admin' | 'user'
+    role: (merchant.role || 'user') as 'owner' | 'admin' | 'user',
+    accountType
   };
 }
 

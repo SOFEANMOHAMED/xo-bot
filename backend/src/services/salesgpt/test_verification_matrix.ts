@@ -42,6 +42,13 @@ import {
   getCartItems,
 } from './conversationCart.js';
 import { formatOrderNotesForMerchant, buildMerchantOrderNotes } from '../../orders/merchantOrderNotes.js';
+import { extractProductKeywords, hasSpecificProductSearchIntent } from './productKeywords.js';
+import {
+  violatesNoMatchGrounding,
+  buildNoMatchFallbackMessage,
+  isGenuineCatalogNoMatch,
+} from './catalogGrounding.js';
+import type { ProductOverviewRow } from '../../catalog/product-search.js';
 
 type Channel =
   | 'facebook'
@@ -603,6 +610,138 @@ const MATRIX: MatrixRow[] = [
       assert(formatted.includes('ساعات'), 'keeps product names for legacy');
       assert(!buildMerchantOrderNotes({ notes: legacy })?.includes('Facebook'), 'new store drops channel');
       assert(buildMerchantOrderNotes({}) === null, 'empty notes stay empty');
+    },
+  },
+  {
+    id: 'M22',
+    scenario: 'تلفاز vs كتاب ناطق — نية بحث محددة بدون تطابق لا تُعامل كتصفح',
+    channels: 'all',
+    layer: 'catalogGrounding',
+    run: () => {
+      const tvAsk = 'في عندك تلفاز؟';
+      const browse = 'شو عندكم؟';
+      assert(hasSpecificProductSearchIntent({
+        messageText: tvAsk,
+        mentionedInMessageCount: 0,
+        productQuery: null,
+      }), 'TV ask is specific search');
+      assert(
+        extractProductKeywords(tvAsk).includes('تلفاز'),
+        'TV keyword extracted without Arabic question mark'
+      );
+      assert(!hasSpecificProductSearchIntent({
+        messageText: browse,
+        mentionedInMessageCount: 0,
+        productQuery: null,
+      }), 'generic browse is not specific search');
+      assert(
+        isGenuineCatalogNoMatch(true, false) === true,
+        'specific + no hit = no-match'
+      );
+      assert(
+        isGenuineCatalogNoMatch(false, false) === false,
+        'browse + empty products still uses Strategy 3'
+      );
+      assert(
+        isGenuineCatalogNoMatch(true, true) === false,
+        'real catalog hit is not no-match'
+      );
+
+      const catalog: ProductOverviewRow[] = [
+        {
+          id: 'book-1',
+          name: 'كتاب ناطق',
+          category: 'كتب أطفال',
+          price: 2100,
+          currency: 'SYP',
+          inStock: true,
+          hasImage: true,
+          hasColors: false,
+          hasSizes: false,
+        },
+      ];
+      const hallucinated =
+        'نعم! عندنا تلفاز 43 بوصة بسعر 450,000 ليرة وتلفاز 55 بوصة بسعر 650,000 ليرة';
+      assert(
+        violatesNoMatchGrounding(hallucinated, catalog, 'arabic'),
+        'fake TV prices must fail grounding'
+      );
+      const honest =
+        'للأسف ما عنا تلفاز. المتوفر عندنا كتاب ناطق بسعر 2100 ليرة';
+      assert(
+        !violatesNoMatchGrounding(honest, catalog, 'arabic'),
+        'honest unavailability + real price is allowed'
+      );
+      const fallback = buildNoMatchFallbackMessage({
+        language: 'arabic',
+        persona: 'friendly',
+        salespersonName: 'مساعد المتجر',
+        storeName: 'متجر تجريبي',
+        catalogOverview: catalog,
+      });
+      assert(!/تلفاز/.test(fallback), 'fallback must not invent TV');
+      assert(!/450/.test(fallback) && !/650/.test(fallback), 'fallback must not use fake prices');
+      assert(fallback.includes('كتاب ناطق'), 'fallback may offer the real book');
+      assert(/غير متوفر|ما عنا/.test(fallback), 'fallback admits unavailability');
+    },
+  },
+  {
+    id: 'M23',
+    scenario: 'iPhone 15 vs أغطية جوال — لا اختراع سعر آيفون',
+    channels: 'all',
+    layer: 'catalogGrounding',
+    run: () => {
+      assert(hasSpecificProductSearchIntent({
+        messageText: 'بدي iPhone 15',
+        mentionedInMessageCount: 0,
+        productQuery: null,
+      }), 'iPhone ask is specific');
+      const catalog: ProductOverviewRow[] = [
+        {
+          id: 'case-1',
+          name: 'غطاء جوال سيليكون',
+          category: 'اكسسوارات',
+          price: 25,
+          currency: 'USD',
+          inStock: true,
+          hasImage: true,
+          hasColors: true,
+          hasSizes: false,
+        },
+        {
+          id: 'case-2',
+          name: 'غطاء جوال شفاف',
+          category: 'اكسسوارات',
+          price: 18,
+          currency: 'USD',
+          inStock: true,
+          hasImage: true,
+          hasColors: false,
+          hasSizes: false,
+        },
+      ];
+      const inventedIphone =
+        'نعم يتوفر iPhone 15 عندنا بسعر 999 USD مع ضمان سنة';
+      assert(
+        violatesNoMatchGrounding(inventedIphone, catalog, 'english'),
+        'invented iPhone USD price must fail grounding'
+      );
+      const honestCases =
+        "We don't have iPhone 15. We do carry phone cases — غطاء جوال سيليكون at 25 USD.";
+      assert(
+        !violatesNoMatchGrounding(honestCases, catalog, 'english'),
+        'honest miss plus real case price is allowed'
+      );
+      const fallback = buildNoMatchFallbackMessage({
+        language: 'english',
+        persona: 'fast',
+        salespersonName: 'Store assistant',
+        storeName: 'Case Shop',
+        catalogOverview: catalog,
+      });
+      assert(!/iPhone/i.test(fallback), 'fallback must not name iPhone');
+      assert(!/999/.test(fallback), 'fallback must not use invented iPhone price');
+      assert(fallback.includes('غطاء جوال سيليكون'), 'offers real case');
     },
   },
 ];

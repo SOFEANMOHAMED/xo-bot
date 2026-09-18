@@ -17,6 +17,7 @@ import AdminPaymentRequests from './admin/AdminPaymentRequests';
 import AdminOfficialPageComments from './admin/AdminOfficialPageComments';
 import AdminOfficialPageInbox from './admin/AdminOfficialPageInbox';
 import AdminAcquisition from './admin/AdminAcquisition';
+import AdminAgencies from './admin/AdminAgencies';
 import AdminContentPublishing from './admin/AdminContentPublishing';
 import NotificationContainer from './Notification';
 import { AdminNotificationProvider, useAdminNotifications } from './admin/AdminNotificationContext';
@@ -173,6 +174,8 @@ const AdminAppContent: React.FC<AdminAppProps & { currentView: AdminView }> = ({
         return <AdminContentPublishing />;
       case AdminView.ACQUISITION:
         return <AdminAcquisition />;
+      case AdminView.AGENCIES:
+        return <AdminAgencies />;
       default:
         return <AdminOverview />;
     }

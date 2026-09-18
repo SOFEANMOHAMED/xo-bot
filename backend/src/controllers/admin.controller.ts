@@ -24,6 +24,9 @@ import {
   enforceMerchantSubscriptionExpiry,
 } from '../services/subscriptionExpiry/index.js';
 import { logger } from '../utils/logger.js';
+import {
+  isBillableBotResponseSql,
+} from '../services/inbox/historyImportFlags.js';
 // Note: PRODUCT_BOT_SYSTEM_PROMPT and SERVICE_BOT_SYSTEM_PROMPT are now in utils/prompts
 // Legacy prompt helpers removed; orchestrator is the single source of truth.
 const PRODUCT_BOT_SYSTEM_PROMPT = 'You are a helpful product assistant.';
@@ -116,8 +119,8 @@ export const getAdminStats = async (
     try {
       const aiResponsesResult = await pool.query(
         `SELECT COUNT(*)::int as count 
-         FROM messages 
-         WHERE role = 'assistant'`
+         FROM messages m
+         WHERE ${isBillableBotResponseSql('m')}`
       );
       totalAiResponses = aiResponsesResult.rows[0]?.count || 0;
     } catch (err) {
@@ -678,7 +681,7 @@ export const getAdminChartData = async (
         COUNT(*)::int as count
        FROM messages msg
        JOIN conversations c ON c.id = msg.conversation_id
-       WHERE msg.role = 'assistant'
+       WHERE ${isBillableBotResponseSql('msg')}
        AND msg.created_at >= CURRENT_DATE - INTERVAL '7 days'
        GROUP BY DATE(msg.created_at)
        ORDER BY date ASC`
@@ -758,7 +761,8 @@ export const getAdminUsers = async (
         trial_ends_at,
         created_at,
         role
-       FROM merchants 
+       FROM merchants
+       WHERE COALESCE(account_type, 'merchant') <> 'agency'
        ORDER BY created_at DESC`
     );
 

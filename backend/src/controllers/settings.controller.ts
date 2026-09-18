@@ -12,6 +12,7 @@ import { clearProductKeywordsCache } from '../services/tools/catalogTool.js';
 import { maskSecret, isMaskedSecret } from '../utils/logPrivacy.js';
 import { getMerchantPlanLimits, merchantHasSalesBot } from '../utils/planLimits.js';
 import { toPlanCapabilities } from '../utils/planDefinitions.js';
+import { isLiveCustomerMessageSql } from '../services/inbox/historyImportFlags.js';
 
 const settingsSchema = z.object({
   storeName: z.string().optional(),
@@ -309,7 +310,7 @@ export const getUserDashboardStats = async (
        FROM messages msg
        JOIN conversations c ON c.id = msg.conversation_id
        WHERE c.merchant_id = $1
-       AND msg.role = 'user'`,
+       AND ${isLiveCustomerMessageSql('msg')}`,
       [req.merchantId]
     );
     const totalQueries = totalQueriesResult.rows[0]?.count || 0;
@@ -331,7 +332,7 @@ export const getUserDashboardStats = async (
        FROM messages msg
        JOIN conversations c ON c.id = msg.conversation_id
        WHERE c.merchant_id = $1
-       AND msg.role = 'user'
+       AND ${isLiveCustomerMessageSql('msg')}
        AND msg.created_at >= CURRENT_DATE - INTERVAL '7 days'
        GROUP BY DATE(msg.created_at)
        ORDER BY date ASC`,
@@ -346,7 +347,7 @@ export const getUserDashboardStats = async (
        FROM messages msg
        JOIN conversations c ON c.id = msg.conversation_id
        WHERE c.merchant_id = $1
-       AND msg.role = 'user'
+       AND ${isLiveCustomerMessageSql('msg')}
        AND msg.created_at >= CURRENT_DATE - INTERVAL '1 month'
        GROUP BY DATE_TRUNC('week', msg.created_at)
        ORDER BY week_start ASC
@@ -362,7 +363,7 @@ export const getUserDashboardStats = async (
        FROM messages msg
        JOIN conversations c ON c.id = msg.conversation_id
        WHERE c.merchant_id = $1
-       AND msg.role = 'user'
+       AND ${isLiveCustomerMessageSql('msg')}
        AND msg.created_at >= CURRENT_DATE - INTERVAL '1 year'
        GROUP BY DATE_TRUNC('month', msg.created_at)
        ORDER BY month_start ASC

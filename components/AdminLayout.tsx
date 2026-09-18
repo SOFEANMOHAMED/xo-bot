@@ -24,7 +24,8 @@ import {
   MessageSquareText,
   Megaphone,
   CalendarClock,
-  Inbox
+  Inbox,
+  Building2
 } from 'lucide-react';
 import ConfirmDialog from './admin/ConfirmDialog';
 import apiService from '../services/api';
@@ -73,6 +74,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ currentView, onLogout, childr
     { id: AdminView.USERS, label: 'المستخدمون', icon: Users },
     { id: AdminView.SUBSCRIPTIONS, label: 'الاشتراكات والخطط', icon: CreditCard },
     { id: AdminView.PAYMENT_REQUESTS, label: 'طلبات الدفع', icon: Wallet },
+    { id: AdminView.AGENCIES, label: 'الوكالات', icon: Building2 },
     { id: AdminView.USAGE, label: 'استخدام النظام', icon: Activity },
     { id: AdminView.AFFILIATE_PROGRAM, label: 'التسويق بالعمولة', icon: Share2 },
     { id: AdminView.ACQUISITION, label: 'اكتساب الحملات', icon: Megaphone },

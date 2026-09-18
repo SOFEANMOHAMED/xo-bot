@@ -60,6 +60,7 @@ async function buildPublicMerchantUser(
     subscription_ends_at?: Date | string | null;
     created_at?: Date | string | null;
     role?: string | null;
+    account_type?: string | null;
   },
   impersonation?: {
     active: boolean;
@@ -75,6 +76,11 @@ async function buildPublicMerchantUser(
     subscription_ends_at: merchant.subscription_ends_at ?? null
   });
 
+  const accountType =
+    merchant.account_type === 'agency' || merchant.account_type === 'agency_client'
+      ? merchant.account_type
+      : 'merchant';
+
   return {
     id: merchant.id,
     email: merchant.email,
@@ -85,6 +91,7 @@ async function buildPublicMerchantUser(
     subscriptionEndsAt: toIsoOrNull(enforced.subscriptionEndsAt ?? merchant.subscription_ends_at),
     createdAt: toIsoOrNull(merchant.created_at) ?? undefined,
     role: (merchant.role || 'user') as 'owner' | 'admin' | 'user',
+    accountType,
     ...(impersonation ? { impersonation } : {})
   };
 }
@@ -355,11 +362,14 @@ export const login = async (
     const { password } = validated;
 
     await ensureSubscriptionEndsAtColumn();
+    const { ensureAgencySchema } = await import('../services/agency/index.js');
+    await ensureAgencySchema();
 
     // Password comes from DB only; sync SUPER_ADMIN_* from .env via: npm run create-super-admin
     const result = await pool.query(
       `SELECT id, email, password_hash, name, subscription_plan, subscription_status,
-              trial_ends_at, subscription_ends_at, role, created_at
+              trial_ends_at, subscription_ends_at, role, created_at,
+              COALESCE(account_type, 'merchant') as account_type
        FROM merchants WHERE LOWER(TRIM(email)) = $1`,
       [email]
     );
@@ -412,9 +422,12 @@ export const getProfile = async (
 ) => {
   try {
     await ensureSubscriptionEndsAtColumn();
+    const { ensureAgencySchema } = await import('../services/agency/index.js');
+    await ensureAgencySchema();
     const result = await pool.query(
       `SELECT id, email, name, subscription_plan, subscription_status,
-              trial_ends_at, subscription_ends_at, role, created_at
+              trial_ends_at, subscription_ends_at, role, created_at,
+              COALESCE(account_type, 'merchant') as account_type
        FROM merchants WHERE id = $1`,
       [req.merchantId]
     );

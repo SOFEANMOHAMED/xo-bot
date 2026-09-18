@@ -177,7 +177,7 @@ export class FacebookAdapter implements ChannelAdapter {
 
       // Find merchant by page ID (SaaS: never fall back to another merchant or hardcoded tokens)
       const merchantResult = await pool.query(
-        `SELECT merchant_id, access_token, auto_reply_messenger
+        `SELECT merchant_id, access_token, auto_reply_messenger, created_at
          FROM facebook_pages
          WHERE page_id = $1
          ORDER BY updated_at DESC NULLS LAST, created_at DESC
@@ -296,7 +296,9 @@ export class FacebookAdapter implements ChannelAdapter {
           pageId,
           senderId,
           messageId: rawEvent.message?.mid,
-          accessToken: access_token
+          accessToken: access_token,
+          pageLinkedAt: merchantResult.rows[0].created_at,
+          eventTimestamp: rawEvent.timestamp,
         }
       };
     } catch (error) {

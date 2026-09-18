@@ -202,6 +202,12 @@ export interface CatalogAwareness {
     meta?: CatalogMetaSummary;
     activeProductId?: string | null;
     isExploring?: boolean;
+    /** Customer turn named/queried a specific product (not generic browsing). */
+    hadSpecificSearchIntent?: boolean;
+    /** True when strategies -1/0a/0/1/2 found a catalog hit (not Strategy 3 fallback). */
+    searchMatchedQuery?: boolean;
+    /** Genuine miss: specific query and no catalog hit — do not treat top products as active. */
+    noMatchForSpecificQuery?: boolean;
 }
 
 // ==================== SALESGPT AGENT CLASS ====================
@@ -330,8 +336,9 @@ export class SalesGPTAgent {
         const previousStageId = this.state.conversationStageId;
 
         // Step 1: Tools — when no products were loaded upstream, always search (no keyword gate).
+        // Skip on a genuine specific-query miss: search already failed and overview is attached.
         let toolContext: string = '';
-        if (this.config.useTools && products.length === 0) {
+        if (this.config.useTools && products.length === 0 && !catalog?.noMatchForSpecificQuery) {
             const ctx: ToolContext = {
                 merchantId: this.config.merchantId,
                 merchantConfig: this.config.merchantConfig,
@@ -706,6 +713,30 @@ export class SalesGPTAgent {
         const currencyLabel = getCurrencyDisplayName(currencyCode, isArabic ? 'arabic' : 'english');
 
         const sections: string[] = [];
+        const noMatchForSpecificQuery = catalog?.noMatchForSpecificQuery === true;
+
+        // ----- 0) Genuine specific-query miss — say so before catalog facts -----
+        if (products.length === 0 && noMatchForSpecificQuery) {
+            sections.push(
+                isArabic
+                    ? [
+                        '⚠️ لم يتم العثور على أي منتج يطابق طلب العميل الحالي في كتالوج هذا المتجر.',
+                        'الكتالوج الفعلي المتوفر حالياً هو فقط ما يظهر في "نظرة عامة على الكتالوج" أدناه.',
+                        'تعليمات صارمة:',
+                        '- لا تخترع اسم منتج أو سعراً أو مقاساً غير موجود في الكتالوج أدناه تحت أي ظرف.',
+                        '- أخبر العميل بصدق ووضوح أن هذا الصنف غير متوفر لدينا.',
+                        '- إذا كان هناك منتج قريب المعنى ضمن الكتالوج أدناه، اقترحه كبديل بصدق. إذا لا يوجد أي بديل منطقي، قل ذلك بصراحة ولا تجبر اقتراحاً غير منطقي.',
+                    ].join('\n')
+                    : [
+                        '⚠️ No product in this merchant catalog matches the customer\'s current request.',
+                        'The only real inventory is what appears in the "Catalog overview" section below.',
+                        'Strict instructions:',
+                        '- Never invent a product name, price, or size that is not listed below.',
+                        '- Tell the customer clearly and honestly that this item is not available here.',
+                        '- If something in the catalog below is a reasonable alternative, offer it honestly. If nothing is a logical alternative, say so — do not force an unrelated suggestion.',
+                    ].join('\n')
+            );
+        }
 
         // ----- 1) Active product(s) – full details -----
         if (products.length > 0) {
@@ -789,9 +820,13 @@ export class SalesGPTAgent {
                         : `\n(Total catalog: ${catalog.meta.totalProducts} — showing top ${filtered.length})`)
                     : '';
 
-                const header = isArabic
-                    ? '📚 منتجات أخرى في كتالوج هذا التاجر (حقائق — استخدمها للإجابة عن البدائل بصدق):'
-                    : '📚 Other products in this merchant catalog (facts — use them to answer alternatives truthfully):';
+                const header = noMatchForSpecificQuery
+                    ? (isArabic
+                        ? '📚 نظرة عامة على الكتالوج (حقائق فقط — هذه الأصناف المتوفرة فعلياً):'
+                        : '📚 Catalog overview (facts only — these are the items actually available):')
+                    : (isArabic
+                        ? '📚 منتجات أخرى في كتالوج هذا التاجر (حقائق — استخدمها للإجابة عن البدائل بصدق):'
+                        : '📚 Other products in this merchant catalog (facts — use them to answer alternatives truthfully):');
                 sections.push(`${header}\n${lines}${totalSuffix}`);
             }
         }
@@ -800,7 +835,13 @@ export class SalesGPTAgent {
         if (catalog?.meta && typeof catalog.meta.totalProducts === 'number') {
             const total = catalog.meta.totalProducts;
             const activeCount = products.length;
-            if (isArabic) {
+            if (noMatchForSpecificQuery) {
+                sections.push(
+                    isArabic
+                        ? `📊 إجمالي منتجات المتجر: ${total}. هذا هو الكتالوج الحقيقي فقط — ممنوع إضافة أصناف غير مذكورة أعلاه.`
+                        : `📊 Store product count: ${total}. This is the real catalog only — do not add items that are not listed above.`
+                );
+            } else if (isArabic) {
                 sections.push(
                     `📊 إجمالي منتجات المتجر: ${total}.` +
                     (total > activeCount

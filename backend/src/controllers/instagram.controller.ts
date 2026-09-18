@@ -60,6 +60,11 @@ import {
 } from '../services/facebookPageWebhooks.js';
 import { scheduleInstagramAccountHistorySync } from '../services/metaConversationHistorySync.js';
 import { clearMerchantChannelConversations } from '../services/metaConversationCleanup.js';
+import { persistImportedChannelMessage } from '../services/inbox/importedConversation.js';
+import {
+  isBeforeChannelLink,
+  parseChannelEventTime,
+} from '../services/inbox/historyImportFlags.js';
 
 // ==================== HELPERS ====================
 
@@ -1112,6 +1117,33 @@ const processInstagramDM = async (event: any) => {
   const merchantId: string = ig.merchant_id;
 
   if (!ig.auto_reply_dm) return;
+
+  const eventTime = parseChannelEventTime(event?.timestamp);
+  if (isBeforeChannelLink(eventTime, ig.created_at)) {
+    const preview =
+      (typeof messageText === 'string' && messageText.trim()) ||
+      (igImageAttachmentUrl ? '[صورة]' : '[رسالة]');
+    await persistImportedChannelMessage({
+      merchantId,
+      platform: 'instagram',
+      userId: String(senderId),
+      userName: null,
+      externalMessageId: externalMessageId,
+      content: preview,
+      createdAt: eventTime || new Date(),
+      source: 'instagram',
+      extraMetadata: {
+        importSource: 'pre_link_webhook',
+        platform: 'instagram',
+      },
+    });
+    logger.info('Skipping bot for Instagram message sent before account link', {
+      merchantId,
+      senderId,
+      eventTime: eventTime?.toISOString() || null,
+    });
+    return;
+  }
 
   if (!checkRateLimit(senderId, merchantId)) return;
 

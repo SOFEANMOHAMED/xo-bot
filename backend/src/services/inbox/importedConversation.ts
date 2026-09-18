@@ -4,6 +4,7 @@
  */
 
 import pool from '../../database/connection.js';
+import { buildImportedHistoryMetadata } from './historyImportFlags.js';
 
 export type InboxImportPlatform =
   | 'facebook_messenger'
@@ -144,4 +145,58 @@ export async function touchImportedConversationTimestamps(params: {
       params.source,
     ]
   );
+}
+
+/**
+ * Persist a pre-link / history webhook payload for inbox display only.
+ * Never a bot turn — caller must skip SalesGPT after this.
+ */
+export async function persistImportedChannelMessage(params: {
+  merchantId: string;
+  platform: InboxImportPlatform;
+  userId: string;
+  userName: string | null;
+  externalMessageId: string;
+  content: string;
+  createdAt: Date;
+  fromBusiness?: boolean;
+  source: string;
+  extraMetadata?: Record<string, unknown>;
+}): Promise<void> {
+  const content = (params.content || '').trim() || '[رسالة]';
+  const externalMessageId = (params.externalMessageId || '').trim();
+  if (!params.merchantId || !params.userId || !externalMessageId) return;
+
+  const conversation = await getOrCreateImportedConversation({
+    merchantId: params.merchantId,
+    platform: params.platform,
+    userId: params.userId,
+    userName: params.userName,
+  });
+
+  const fromBusiness = params.fromBusiness === true;
+  await upsertImportedMessage({
+    conversationId: conversation.id,
+    externalMessageId,
+    role: fromBusiness ? 'assistant' : 'user',
+    senderType: fromBusiness ? 'human' : 'user',
+    source: params.source,
+    content,
+    createdAt: params.createdAt,
+    metadata: buildImportedHistoryMetadata({
+      platform: params.platform,
+      ...params.extraMetadata,
+    }),
+  });
+
+  await touchImportedConversationTimestamps({
+    conversationId: conversation.id,
+    merchantId: params.merchantId,
+    userName: params.userName,
+    lastMessageAt: params.createdAt,
+    source:
+      typeof params.extraMetadata?.importSource === 'string'
+        ? params.extraMetadata.importSource
+        : params.source,
+  });
 }

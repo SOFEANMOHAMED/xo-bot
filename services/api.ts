@@ -372,6 +372,8 @@ class ApiService {
         trialEndsAt?: string | null;
         subscriptionEndsAt?: string | null;
         createdAt?: string;
+        role?: 'owner' | 'admin' | 'user';
+        accountType?: 'merchant' | 'agency' | 'agency_client';
       };
       token: string;
     }>('/auth/login', {
@@ -409,6 +411,7 @@ class ApiService {
         subscriptionEndsAt?: string | null;
         createdAt: string;
         role?: 'owner' | 'admin' | 'user';
+        accountType?: 'merchant' | 'agency' | 'agency_client';
         impersonation?: {
           active: boolean;
           adminId?: string;
@@ -2859,6 +2862,351 @@ class ApiService {
 
   async openAdminPaymentProof(id: string): Promise<void> {
     const endpoint = `/billing/admin/payment-requests/${id}/proof`;
+    const headers: Record<string, string> = {};
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+    const response = await fetch(`${this.baseURL}${endpoint}`, {
+      headers,
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      throw new Error('تعذر فتح إثبات الدفع');
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
+  // ─── Agency seats ─────────────────────────────────────────────
+
+  async submitAgencySignupRequest(body: {
+    email: string;
+    password: string;
+    phone: string;
+    agencyName: string;
+  }) {
+    return this.request<{ id: string; message?: string }>(
+      '/agency/signup-requests',
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+      false
+    );
+  }
+
+  async getAdminAgencySignupRequests(status?: 'pending' | 'approved' | 'rejected') {
+    const q = status ? `?status=${encodeURIComponent(status)}` : '';
+    return this.request<{
+      requests: Array<{
+        id: string;
+        email: string;
+        phone: string;
+        agencyName: string;
+        status: 'pending' | 'approved' | 'rejected';
+        adminNote: string | null;
+        reviewedAt: string | null;
+        createdMerchantId: string | null;
+        createdAt: string;
+      }>;
+    }>(`/admin/agency-signup-requests${q}`);
+  }
+
+  async approveAdminAgencySignupRequest(
+    id: string,
+    body?: {
+      adminNote?: string;
+      pricing?: Array<{ planKey: string; unitPrice: number }>;
+    }
+  ) {
+    return this.request<{
+      request: { id: string; status: string };
+      agency: { agency: { id: string; name: string; status: string } };
+    }>(`/admin/agency-signup-requests/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify(body || {}),
+    });
+  }
+
+  async rejectAdminAgencySignupRequest(id: string, adminNote?: string) {
+    return this.request<{ request: { id: string; status: string } }>(
+      `/admin/agency-signup-requests/${id}/reject`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ adminNote: adminNote || null }),
+      }
+    );
+  }
+
+  async getAgencyMe() {
+    return this.request<{
+      agency: { id: string; name: string; status: string; notes: string | null; createdAt: string };
+      pricing: Array<{ planKey: string; unitPrice: number }>;
+    }>('/agency/me');
+  }
+
+  async getAgencyReports() {
+    return this.request<{
+      reports: {
+        seats: {
+          pending_payment: number;
+          active: number;
+          suspended: number;
+          cancelled: number;
+          total: number;
+        };
+        byPlan: Array<{ planKey: string; total: number; active: number }>;
+        expiringSoon: Array<{
+          id: string;
+          planKey: string;
+          clientLabel: string | null;
+          clientEmail: string;
+          endsAt: string;
+          unitPrice: number;
+        }>;
+        spending: {
+          thisMonth: number;
+          total: number;
+          pendingAmount: number;
+          pendingCount: number;
+          approvedCount: number;
+        };
+      };
+    }>('/agency/reports');
+  }
+
+  async getAgencySeats() {
+    return this.request<{
+      seats: Array<{
+        id: string;
+        planKey: string;
+        unitPrice: number;
+        status: string;
+        clientLabel: string | null;
+        clientEmail?: string;
+        clientName?: string | null;
+        clientSubscriptionStatus?: string;
+        startsAt: string | null;
+        endsAt: string | null;
+        createdAt: string;
+      }>;
+    }>('/agency/seats');
+  }
+
+  async createAgencySeat(body: {
+    email: string;
+    password: string;
+    planKey: string;
+    clientLabel?: string;
+    clientName?: string;
+  }) {
+    return this.request<{
+      seat: {
+        id: string;
+        planKey: string;
+        unitPrice: number;
+        status: string;
+        clientEmail?: string;
+        clientLabel: string | null;
+      };
+      amountDue: number;
+    }>('/agency/seats', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async payAgencySeat(
+    seatId: string,
+    body: {
+      proofUrl: string;
+      method: string;
+      purpose: 'activate' | 'renew' | 'change_plan';
+      planKey?: string;
+    }
+  ) {
+    return this.request<{
+      id: string;
+      seatId: string;
+      planKey: string;
+      amount: number;
+      purpose: string;
+      method: string;
+      status: string;
+      createdAt: string;
+    }>(`/agency/seats/${seatId}/pay`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async suspendAgencySeat(seatId: string) {
+    return this.request<{ seat: { id: string; status: string } }>(`/agency/seats/${seatId}/suspend`, {
+      method: 'POST',
+    });
+  }
+
+  async cancelAgencySeat(seatId: string) {
+    return this.request<{ seat: { id: string; status: string } }>(`/agency/seats/${seatId}/cancel`, {
+      method: 'POST',
+    });
+  }
+
+  async updateAgencySeat(seatId: string, body: { clientLabel?: string | null }) {
+    return this.request<{ seat: { id: string; clientLabel: string | null } }>(
+      `/agency/seats/${seatId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }
+    );
+  }
+
+  async resetAgencySeatPassword(seatId: string, password: string) {
+    return this.request<{ seatId: string; clientEmail: string; message: string }>(
+      `/agency/seats/${seatId}/reset-password`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ password }),
+      }
+    );
+  }
+
+  async getAgencyPayments() {
+    return this.request<{
+      payments: Array<{
+        id: string;
+        seatId: string;
+        planKey: string;
+        amount: number;
+        purpose: string;
+        method: string;
+        proofUrl: string;
+        status: string;
+        adminNote: string | null;
+        createdAt: string;
+        clientLabel: string | null;
+        clientEmail: string;
+      }>;
+    }>('/agency/payments');
+  }
+
+  async getAdminAgencies() {
+    return this.request<{
+      agencies: Array<{
+        id: string;
+        name: string;
+        status: string;
+        notes: string | null;
+        ownerMerchantId: string;
+        ownerEmail: string;
+        ownerName: string | null;
+        seatCount: number;
+        activeSeatCount: number;
+        createdAt: string;
+      }>;
+    }>('/admin/agencies');
+  }
+
+  async searchAgencyCandidates(q: string) {
+    return this.request<{
+      merchants: Array<{ id: string; email: string; name: string | null; subscriptionPlan: string }>;
+    }>(`/admin/agencies/candidates?q=${encodeURIComponent(q)}`);
+  }
+
+  async activateAgency(body: {
+    merchantId: string;
+    name?: string;
+    notes?: string;
+    pricing?: Array<{ planKey: string; unitPrice: number }>;
+  }) {
+    return this.request<{
+      agency: { id: string; name: string; status: string };
+      pricing: Array<{ planKey: string; unitPrice: number }>;
+    }>('/admin/agencies/activate', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async getAdminAgency(id: string) {
+    return this.request<{
+      agency: {
+        id: string;
+        name: string;
+        status: string;
+        ownerEmail: string;
+        ownerName: string | null;
+        seatCount: number;
+        activeSeatCount: number;
+      };
+      pricing: Array<{ planKey: string; unitPrice: number }>;
+      seats: Array<{
+        id: string;
+        planKey: string;
+        unitPrice: number;
+        status: string;
+        clientEmail?: string;
+        clientLabel: string | null;
+        endsAt: string | null;
+      }>;
+    }>(`/admin/agencies/${id}`);
+  }
+
+  async updateAdminAgencyPricing(id: string, pricing: Array<{ planKey: string; unitPrice: number }>) {
+    return this.request<{ pricing: Array<{ planKey: string; unitPrice: number }> }>(
+      `/admin/agencies/${id}/pricing`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ pricing }),
+      }
+    );
+  }
+
+  async updateAdminAgencyStatus(id: string, status: 'active' | 'suspended') {
+    return this.request<{ agency: { id: string; status: string; name: string } }>(
+      `/admin/agencies/${id}/status`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ status }),
+      }
+    );
+  }
+
+  async getAdminAgencySeatPayments(status?: 'pending' | 'approved' | 'rejected') {
+    const query = status ? `?status=${status}` : '';
+    return this.request<{
+      payments: Array<{
+        id: string;
+        seatId: string;
+        agencyId: string;
+        agencyName: string;
+        agencyOwnerEmail: string;
+        clientLabel: string | null;
+        clientEmail: string;
+        planKey: string;
+        amount: number;
+        purpose: string;
+        method: string;
+        proofUrl: string;
+        status: string;
+        adminNote: string | null;
+        createdAt: string;
+        reviewedAt: string | null;
+      }>;
+    }>(`/admin/agency-seat-payments${query}`);
+  }
+
+  async reviewAdminAgencySeatPayment(id: string, action: 'approve' | 'reject', adminNote?: string) {
+    return this.request<{ id: string; status: string }>(`/admin/agency-seat-payments/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ action, adminNote }),
+    });
+  }
+
+  async openAdminAgencySeatPaymentProof(id: string): Promise<void> {
+    const endpoint = `/admin/agency-seat-payments/${id}/proof`;
     const headers: Record<string, string> = {};
     if (this.token) {
       headers['Authorization'] = `Bearer ${this.token}`;

@@ -56,7 +56,12 @@ import {
     CONFIRM_ORDER_ACTION,
     shouldAppendOrderData
 } from './orderConfirmationPolicy.js';
-import { extractProductKeywords } from './productKeywords.js';
+import { extractProductKeywords, hasSpecificProductSearchIntent } from './productKeywords.js';
+import {
+    violatesNoMatchGrounding,
+    buildNoMatchFallbackMessage,
+    isGenuineCatalogNoMatch,
+} from './catalogGrounding.js';
 import { isExplicitPhotoRequest } from './turnIntent.js';
 import {
     applySalesGPTStage,
@@ -338,10 +343,17 @@ export const processWithSalesGPT = async (
     // so the model can answer alternatives truthfully without keyword gates.
     let products: Product[] = [];
     let activeProductId: string | null = conversationState.last_recommended_products?.[0] || null;
+    /** True when a real catalog hit came from strategies -1, 0a, 0, 1, or 2 — not Strategy 3. */
+    let searchMatchedQuery = false;
 
     // Prefetch a wide catalog slice for name→message matching (images + multi-buy).
     const catalogForMention = await getTopProducts(merchantId, 40);
     const mentionedInMessage = findProductsMentionedInText(messageText, catalogForMention);
+    const hadSpecificSearchIntent = hasSpecificProductSearchIntent({
+        messageText,
+        mentionedInMessageCount: mentionedInMessage.length,
+        productQuery: conversationState.extracted_entities?.product_query,
+    });
 
     // Strategy -1: seeded product from ad/post/comment acquisition (recommended start, not exclusive)
     const seededProductId = conversationState.extracted_entities?.product_id;
@@ -350,6 +362,7 @@ export const processWithSalesGPT = async (
         if (seeded) {
             products = [seeded];
             activeProductId = seeded.id;
+            searchMatchedQuery = true;
             console.log('🎯 SalesGPT: Using acquisition-seeded product:', seeded.name);
         }
     }
@@ -358,6 +371,7 @@ export const processWithSalesGPT = async (
     if (mentionedInMessage.length > 0) {
         products = mentionedInMessage;
         activeProductId = mentionedInMessage[0].id;
+        searchMatchedQuery = true;
         console.log('🎯 SalesGPT: Products mentioned in message:', {
             names: mentionedInMessage.map((p) => p.name),
         });
@@ -366,7 +380,10 @@ export const processWithSalesGPT = async (
     // Strategy 0: explicit entity query has highest priority for switching focus
     if (mentionedInMessage.length === 0 && conversationState.extracted_entities?.product_query) {
         products = await searchProducts(merchantId, conversationState.extracted_entities.product_query, undefined, 5);
-        if (products[0]) activeProductId = products[0].id;
+        if (products[0]) {
+            activeProductId = products[0].id;
+            searchMatchedQuery = true;
+        }
     }
 
     // Strategy 1: keyword extraction when we still have no focus product
@@ -380,6 +397,7 @@ export const processWithSalesGPT = async (
                 if (searchResults.length > 0) {
                     products = searchResults;
                     activeProductId = searchResults[0]?.id || activeProductId;
+                    searchMatchedQuery = true;
                     console.log('✅ SalesGPT: Found products from keywords:', {
                         keyword,
                         count: products.length,
@@ -415,12 +433,22 @@ export const processWithSalesGPT = async (
         if (product) {
             products = [product];
             activeProductId = product.id;
+            searchMatchedQuery = true;
             console.log('📦 SalesGPT: Retrieved product from history:', product.name);
         }
     }
 
-    // Strategy 3: Top products when still empty (browse / cold start)
-    if (products.length === 0) {
+    const noMatchForSpecificQuery = isGenuineCatalogNoMatch(
+        hadSpecificSearchIntent,
+        searchMatchedQuery
+    );
+
+    if (noMatchForSpecificQuery) {
+        // Genuine miss: do not treat a random top-catalog row as the "active" product.
+        products = [];
+        activeProductId = null;
+    } else if (products.length === 0) {
+        // Strategy 3: Top products when still empty (browse / cold start)
         products = catalogForMention.length > 0 ? catalogForMention.slice(0, 5) : await getTopProducts(merchantId, 5);
         if (products[0]) activeProductId = products[0].id;
     }
@@ -434,7 +462,10 @@ export const processWithSalesGPT = async (
         overview: catalogOverview,
         meta: catalogMeta,
         activeProductId,
-        isExploring: true
+        isExploring: true,
+        hadSpecificSearchIntent,
+        searchMatchedQuery,
+        noMatchForSpecificQuery,
     };
 
     // ==================== STEP 2: Create & Run SalesGPT Agent ====================
@@ -826,6 +857,24 @@ export const processWithSalesGPT = async (
 
     try {
         salesResult = await agent.step(messageText, products, catalogAwareness);
+        if (
+            catalogAwareness.noMatchForSpecificQuery &&
+            violatesNoMatchGrounding(salesResult.responseText, catalogOverview, language)
+        ) {
+            const discardedResponseText = salesResult.responseText;
+            logger.warn('SalesGPT: no-match grounding replaced hallucinated catalog reply', {
+                merchantId,
+                discardedResponseText,
+            });
+            const storeName = merchantConfig.storeName || merchantConfig.store_name || '';
+            salesResult.responseText = buildNoMatchFallbackMessage({
+                language,
+                persona: merchantConfig.persona,
+                salespersonName: storeName ? `مساعد ${storeName}` : 'مساعد المتجر',
+                storeName,
+                catalogOverview,
+            });
+        }
     } catch (error) {
         logger.error('SalesGPT agent failed', error as Error, { merchantId });
         console.error('❌ SalesGPT error:', error);
@@ -850,7 +899,10 @@ export const processWithSalesGPT = async (
     // Attach images only when agent already gated send_image via model wants_photo.
     const shouldAttachImage = salesResult.nextAction === 'send_image';
 
-    if (shouldAttachImage) {
+    if (shouldAttachImage && catalogAwareness.noMatchForSpecificQuery) {
+        // Do not attach a random catalog photo after a genuine catalog miss.
+        finalReplyText = stripFalseImageDeliveryClaims(finalReplyText);
+    } else if (shouldAttachImage) {
         // Resolve the product the customer asked to see — never blindly use a stale products[0].
         const imageProduct =
             mentionedInMessage[0] ||

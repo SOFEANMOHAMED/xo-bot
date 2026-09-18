@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { AppView, DEFAULT_PLAN_CAPABILITIES, type PlanCapabilities } from '../types';
+import { AppView, AdminView, DEFAULT_PLAN_CAPABILITIES, type PlanCapabilities } from '../types';
 import { appPath, adminPath } from '../routes/paths';
-import { AppView, AdminView } from '../types';
 import { 
   LayoutDashboard, 
   Package, 
@@ -368,7 +367,9 @@ const Layout: React.FC<LayoutProps> = ({
       <main 
         id="main-content" 
         className={`flex-1 overflow-auto w-full flex flex-col ${
-          user && (user.subscriptionPlan === 'trial' || user.trialEndsAt) 
+          user &&
+          user.accountType !== 'agency_client' &&
+          (user.subscriptionPlan === 'trial' || user.trialEndsAt) 
             ? 'pt-32 md:pt-0' 
             : 'pt-16 md:pt-0'
         }`} 
@@ -429,7 +430,10 @@ const Layout: React.FC<LayoutProps> = ({
         )}
 
         {/* Trial Banner Sticky Below Header - Only show if user is on trial plan */}
-        {user && (user.subscriptionPlan === 'trial' || user.trialEndsAt) && user.subscriptionPlan === 'trial' && (() => {
+        {user &&
+          user.accountType !== 'agency_client' &&
+          (user.subscriptionPlan === 'trial' || user.trialEndsAt) &&
+          user.subscriptionPlan === 'trial' && (() => {
           // Calculate trial end date: use trialEndsAt from DB, or calculate from createdAt + 7 days
           let trialEndDate: Date | string | null = null;
           if (user.trialEndsAt) {
@@ -455,6 +459,7 @@ const Layout: React.FC<LayoutProps> = ({
 
         {/* Paid subscription renewal warning (last 5 days) */}
         {user &&
+          user.accountType !== 'agency_client' &&
           user.subscriptionPlan !== 'trial' &&
           isRenewalWarning &&
           subscriptionEndsAt && (
@@ -479,7 +484,7 @@ const Layout: React.FC<LayoutProps> = ({
       <DashboardAssistant isOpen={showAssistant} onOpenChange={setShowAssistant} />
 
       {/* Upgrade Modal */}
-      {showUpgradeModal && (
+      {showUpgradeModal && user?.accountType !== 'agency_client' && (
         <SubscriptionModal onClose={() => setShowUpgradeModal(false)} />
       )}
 

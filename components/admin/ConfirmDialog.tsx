@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertTriangle, X } from 'lucide-react';
+import ModalOverlay from '../ModalOverlay';
 
 interface ConfirmDialogProps {
   isOpen: boolean;
@@ -37,8 +38,8 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[10000] p-4">
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl animate-fade-in">
+    <ModalOverlay panelClassName="w-full max-w-md" onClose={onCancel}>
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full shadow-2xl animate-fade-in">
         <div className="p-6">
           <div className="flex items-start gap-4 mb-4">
             <div className={`p-3 rounded-full ${colors[type]}`}>
@@ -55,7 +56,7 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
               <X size={20} />
             </button>
           </div>
-          
+
           <div className="flex gap-3 justify-end mt-6">
             <button
               onClick={onCancel}
@@ -72,9 +73,8 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           </div>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 };
 
 export default ConfirmDialog;
-

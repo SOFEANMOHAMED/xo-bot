@@ -7,12 +7,12 @@ import BrandLogo from './BrandLogo';
 import { buildGoogleAuthQuery, captureAndPersistAttribution } from '../utils/marketingAttribution';
 
 interface LoginPageProps {
-  onLoginSuccess: (role?: UserRole) => void;
+  onLoginSuccess: (role?: UserRole, accountType?: string) => void;
   onBack: () => void;
   onNavigateToSignup: () => void;
   onNavigateToForgotPassword?: () => void;
   /** Quiet login for the secret admin surface (no public signup CTAs) */
-  variant?: 'default' | 'admin';
+  variant?: 'default' | 'admin' | 'agency';
 }
 
 const LoginPage: React.FC<LoginPageProps> = ({
@@ -27,8 +27,10 @@ const LoginPage: React.FC<LoginPageProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { login } = useAuth();
+  const { login, logout } = useAuth();
   const isAdminVariant = variant === 'admin';
+  const isAgencyVariant = variant === 'agency';
+  const hidePublicExtras = isAdminVariant || isAgencyVariant;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,10 +39,20 @@ const LoginPage: React.FC<LoginPageProps> = ({
 
     try {
       const user = await login(email, password);
-      const role = (user as any)?.role || 'user';
-      onLoginSuccess(role as UserRole);
-    } catch (err: any) {
-      setError(err.message || 'فشل تسجيل الدخول. يرجى التحقق من البيانات.');
+      const role = (user as { role?: string })?.role || 'user';
+      const accountType = (user as { accountType?: string })?.accountType;
+
+      if (isAgencyVariant && accountType !== 'agency') {
+        logout();
+        setError('هذا الحساب ليس وكالة مفعّلة. إن أرسلت طلباً، انتظر الموافقة أولاً.');
+        return;
+      }
+
+      onLoginSuccess(role as UserRole, accountType);
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : 'فشل تسجيل الدخول. يرجى التحقق من البيانات.';
+      setError(message);
     } finally {
       setIsLoading(false);
     }
@@ -64,14 +76,14 @@ const LoginPage: React.FC<LoginPageProps> = ({
               onClick={onNavigateToSignup}
               className="text-sm font-semibold text-slate-600 hover:text-brand transition-colors hidden sm:block"
             >
-              إنشاء حساب
+              {isAgencyVariant ? 'طلب وكالة' : 'إنشاء حساب'}
             </button>
             <button
               type="button"
               onClick={onNavigateToSignup}
               className="px-5 py-2.5 rounded-xl bg-brand text-white font-bold text-sm hover:bg-brand-600 transition-all shadow-lg shadow-brand/30"
             >
-              جرب مجاناً 7 أيام
+              {isAgencyVariant ? 'إنشاء حساب وكالة' : 'جرب مجاناً 7 أيام'}
             </button>
           </>
         )
@@ -87,16 +99,22 @@ const LoginPage: React.FC<LoginPageProps> = ({
           <BrandLogo className="h-14 w-auto select-none" />
         </div>
         <h2 className="text-3xl font-extrabold text-slate-900 mb-2">
-          {isAdminVariant ? 'دخول لوحة الإدارة' : 'مرحباً بك مجدداً'}
+          {isAdminVariant
+            ? 'دخول لوحة الإدارة'
+            : isAgencyVariant
+              ? 'دخول حساب الوكالة'
+              : 'مرحباً بك مجدداً'}
         </h2>
         <p className="text-slate-500">
           {isAdminVariant
             ? 'سجّل الدخول بحساب المسؤول للمتابعة'
-            : 'سجل الدخول للمتابعة إلى لوحة التحكم'}
+            : isAgencyVariant
+              ? 'سجّل الدخول لإدارة مقاعد عملائك'
+              : 'سجل الدخول للمتابعة إلى لوحة التحكم'}
         </p>
       </div>
 
-      {!isAdminVariant && (
+      {!hidePublicExtras && (
         <>
           <div className="space-y-4 mb-8">
             <button
@@ -212,9 +230,9 @@ const LoginPage: React.FC<LoginPageProps> = ({
 
       {!isAdminVariant && (
         <p className="mt-8 text-center text-slate-500 text-sm">
-          ليس لديك حساب؟{' '}
+          {isAgencyVariant ? 'ليس لديك حساب وكالة؟ ' : 'ليس لديك حساب؟ '}
           <button onClick={onNavigateToSignup} className="text-brand hover:text-brand-600 font-semibold hover:underline">
-            أنشئ حساباً جديداً
+            {isAgencyVariant ? 'قدّم طلباً جديداً' : 'أنشئ حساباً جديداً'}
           </button>
         </p>
       )}

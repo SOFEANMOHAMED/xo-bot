@@ -79,6 +79,20 @@ import {
   disconnectAdminOtpWhatsApp,
   updateAdminOtpSettings
 } from '../controllers/adminOtp.controller.js';
+import {
+  adminListAgencies,
+  adminActivateAgency,
+  adminGetAgency,
+  adminUpdateAgencyPricing,
+  adminUpdateAgencyStatus,
+  adminListSeatPayments,
+  adminReviewSeatPayment,
+  serveAdminAgencyPaymentProof,
+  adminSearchAgencyCandidates,
+  adminListAgencySignupRequests,
+  adminApproveAgencySignupRequest,
+  adminRejectAgencySignupRequest
+} from '../controllers/adminAgency.controller.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { requireAdminGate } from '../middleware/adminGate.js';
 
@@ -110,6 +124,20 @@ router.post('/users/:id/impersonate', impersonateAdminUser);
 router.get('/users/:id', getAdminUser);
 router.put('/users/:id', updateAdminUser);
 router.delete('/users/:id', deleteAdminUser);
+
+// Agencies
+router.get('/agencies', adminListAgencies);
+router.get('/agencies/candidates', adminSearchAgencyCandidates);
+router.post('/agencies/activate', adminActivateAgency);
+router.get('/agency-signup-requests', adminListAgencySignupRequests);
+router.post('/agency-signup-requests/:id/approve', adminApproveAgencySignupRequest);
+router.post('/agency-signup-requests/:id/reject', adminRejectAgencySignupRequest);
+router.get('/agencies/:id', adminGetAgency);
+router.put('/agencies/:id/pricing', adminUpdateAgencyPricing);
+router.put('/agencies/:id/status', adminUpdateAgencyStatus);
+router.get('/agency-seat-payments', adminListSeatPayments);
+router.get('/agency-seat-payments/:id/proof', serveAdminAgencyPaymentProof);
+router.put('/agency-seat-payments/:id', adminReviewSeatPayment);
 
 // System
 router.get('/logs', getSystemLogs);

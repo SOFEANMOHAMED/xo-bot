@@ -19,6 +19,7 @@ import {
 } from './inbound.js';
 import {
   enqueueWhatsAppWebHistoryImport,
+  isWhatsAppHistoryTimestamp,
   resetWhatsAppWebHistoryBudget
 } from './historyImport.js';
 import {
@@ -40,6 +41,7 @@ import {
   updateWhatsAppWebStatus,
   upsertWhatsAppWebSession
 } from './sessionStore.js';
+import { historyCutoffFromLinkedAt } from '../inbox/historyImportFlags.js';
 import type { MerchantWaRuntime, WhatsAppWebPairingEvent, WhatsAppWebStatus } from './types.js';
 
 const MAX_RECONNECT_ATTEMPTS = 8;
@@ -95,7 +97,8 @@ function getOrCreateRuntime(merchantId: string): MerchantWaRuntime {
     reconnectAttempts: 0,
     reconnectTimer: null,
     starting: false,
-    sentMessageIds: new Set()
+    sentMessageIds: new Set(),
+    historyCutoffAt: null
   };
   setMerchantRuntime(created);
   return created;
@@ -203,6 +206,8 @@ async function openSocket(merchantId: string, allowQr: boolean): Promise<void> {
   }
 
   await upsertWhatsAppWebSession(merchantId);
+  const session = await getWhatsAppWebSession(merchantId);
+  runtime.historyCutoffAt = historyCutoffFromLinkedAt(session?.created_at);
   await endSocket(runtime);
 
   try {
@@ -244,8 +249,17 @@ async function openSocket(merchantId: string, allowQr: boolean): Promise<void> {
     sock.ev.on('messages.upsert', ({ messages, type }) => {
       if (generation !== runtime.generation) return;
       if (type === 'notify') {
+        const cutoff = runtime.historyCutoffAt;
+        const historical: WAMessage[] = [];
         for (const message of messages) {
+          if (cutoff && isWhatsAppHistoryTimestamp(message, cutoff)) {
+            historical.push(message);
+            continue;
+          }
           void dispatchInbound(merchantId, message);
+        }
+        if (historical.length > 0) {
+          enqueueWhatsAppWebHistoryImport(merchantId, historical);
         }
         return;
       }

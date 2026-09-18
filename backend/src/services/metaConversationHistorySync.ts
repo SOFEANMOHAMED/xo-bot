@@ -315,6 +315,7 @@ async function syncAccountHistory(params: {
           metadata: {
             platform: params.storedPlatform,
             imported: true,
+            historyOnly: true,
             importSource: 'meta_conversations_api',
             metaConversationId: thread.id,
             ...(imageUrl ? { imageUrl } : {}),

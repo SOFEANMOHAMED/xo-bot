@@ -8,9 +8,29 @@ interface ProtectedRouteProps {
   children: React.ReactNode;
   /** Require owner/admin role */
   requireAdmin?: boolean;
+  /** Require agency account type */
+  requireAgency?: boolean;
 }
 
-export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requireAdmin = false }) => {
+function postAuthHome(user: {
+  role?: string;
+  accountType?: string;
+} | null): string {
+  const role = user?.role || 'user';
+  if (role === 'owner' || role === 'admin') {
+    return adminPath(AdminView.OVERVIEW);
+  }
+  if (user?.accountType === 'agency') {
+    return PATHS.AGENCY;
+  }
+  return appPath(AppView.DASHBOARD);
+}
+
+export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
+  children,
+  requireAdmin = false,
+  requireAgency = false,
+}) => {
   const { isAuthenticated, isLoading, user } = useAuth();
   const location = useLocation();
 
@@ -26,21 +46,39 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requir
   }
 
   if (!isAuthenticated) {
-    // Keep admins on the secret surface — never bounce them to public /login
-    const loginTo = requireAdmin ? adminLoginPath() : PATHS.LOGIN;
+    const loginTo = requireAdmin
+      ? adminLoginPath()
+      : requireAgency
+        ? PATHS.AGENCY_LOGIN
+        : PATHS.LOGIN;
     return <Navigate to={loginTo} replace state={{ from: location.pathname }} />;
   }
 
   const role = user?.role || 'user';
   const isAdmin = role === 'owner' || role === 'admin';
+  const isAgency = user?.accountType === 'agency';
 
   if (requireAdmin && !isAdmin) {
-    return <Navigate to={appPath(AppView.DASHBOARD)} replace />;
+    return <Navigate to={postAuthHome(user)} replace />;
+  }
+
+  if (requireAgency) {
+    if (isAdmin) {
+      return <Navigate to={adminPath(AdminView.OVERVIEW)} replace />;
+    }
+    if (!isAgency) {
+      return <Navigate to={appPath(AppView.DASHBOARD)} replace />;
+    }
+    return <>{children}</>;
   }
 
   if (!requireAdmin && isAdmin) {
-    // Admins belong in the admin panel, not merchant app
     return <Navigate to={adminPath(AdminView.OVERVIEW)} replace />;
+  }
+
+  // Agency accounts use /agency, not merchant /app
+  if (!requireAdmin && isAgency) {
+    return <Navigate to={PATHS.AGENCY} replace />;
   }
 
   return <>{children}</>;
@@ -62,11 +100,7 @@ export const GuestOnlyRoute: React.FC<{ children: React.ReactNode }> = ({ childr
   }
 
   if (isAuthenticated && user) {
-    const role = user.role || 'user';
-    if (role === 'owner' || role === 'admin') {
-      return <Navigate to={adminPath(AdminView.OVERVIEW)} replace />;
-    }
-    return <Navigate to={appPath(AppView.DASHBOARD)} replace />;
+    return <Navigate to={postAuthHome(user)} replace />;
   }
 
   return <>{children}</>;

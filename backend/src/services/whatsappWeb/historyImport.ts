@@ -10,6 +10,10 @@ import type { proto, WAMessage } from '@whiskeysockets/baileys';
 import { logger } from '../../utils/logger.js';
 import { isPlaceholderCustomerName } from '../socialProfile.js';
 import {
+  buildImportedHistoryMetadata,
+  WHATSAPP_WEB_HISTORY_ORIGIN,
+} from '../inbox/historyImportFlags.js';
+import {
   getOrCreateImportedConversation,
   touchImportedConversationTimestamps,
   upsertImportedMessage,
@@ -45,11 +49,15 @@ export function resetWhatsAppWebHistoryBudget(merchantId: string): void {
   budgets.delete(merchantId);
 }
 
-function waTimestampToDate(message: WAMessage): Date {
+export function waTimestampToDate(message: WAMessage): Date {
   const raw = message.messageTimestamp;
   const n = typeof raw === 'number' ? raw : Number(raw || 0);
   if (!Number.isFinite(n) || n <= 0) return new Date();
   return new Date(n > 1e12 ? n : n * 1000);
+}
+
+export function isWhatsAppHistoryTimestamp(message: WAMessage, cutoff: Date): boolean {
+  return waTimestampToDate(message).getTime() < cutoff.getTime();
 }
 
 function getBudget(merchantId: string): HistoryBudget {
@@ -115,11 +123,12 @@ async function importWhatsAppWebHistoryMessages(
       source: 'whatsapp',
       content: described.text,
       createdAt,
-      metadata: {
+      metadata: buildImportedHistoryMetadata({
         platform: 'whatsapp',
-        origin: 'whatsapp_web_history',
+        origin: WHATSAPP_WEB_HISTORY_ORIGIN,
+        importSource: WHATSAPP_WEB_HISTORY_ORIGIN,
         fromMe,
-      },
+      }),
     });
 
     if (!imported) continue;
@@ -143,7 +152,7 @@ async function importWhatsAppWebHistoryMessages(
       merchantId,
       userName: row.userName,
       lastMessageAt: row.lastMessageAt,
-      source: 'whatsapp_web_history',
+      source: WHATSAPP_WEB_HISTORY_ORIGIN,
     });
   }
 }

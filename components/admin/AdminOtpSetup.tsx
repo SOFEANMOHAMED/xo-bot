@@ -4,6 +4,7 @@ import apiService from '../../services/api';
 import { useAdminNotifications } from './AdminNotificationContext';
 import { useAdminOtpPairing } from '../../hooks/useAdminOtpPairing';
 import { logger } from '../../utils/logger';
+import ModalOverlay from '../ModalOverlay';
 
 const ToggleItem: React.FC<{
   label: string;
@@ -195,8 +196,16 @@ const AdminOtpSetup: React.FC = () => {
       </div>
 
       {showQrModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-sm w-full text-center space-y-4">
+        <ModalOverlay
+          panelClassName="w-full max-w-sm"
+          onClose={() => {
+            setShowQrModal(false);
+            setQrDataUrl(null);
+            setPairingError(null);
+            setIsPairing(false);
+          }}
+        >
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full text-center space-y-4">
             <h4 className="text-white font-bold">امسح رمز QR من واتساب</h4>
             <p className="text-xs text-slate-400">
               من تطبيق واتساب على هاتفك: الإعدادات → الأجهزة المرتبطة → ربط جهاز
@@ -225,7 +234,7 @@ const AdminOtpSetup: React.FC = () => {
               إغلاق
             </button>
           </div>
-        </div>
+        </ModalOverlay>
       )}
     </div>
   );

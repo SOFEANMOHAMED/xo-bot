@@ -190,6 +190,32 @@ const SignupPage: React.FC<SignupPageProps> = ({ onSignupSuccess, onNavigateToLo
         <p className="text-slate-500">ابدأ رحلتك مع Xo Bot وجرب الخدمة مجاناً لمدة 7 أيام</p>
       </div>
 
+      {!otpStep && (
+        <>
+          <div className="space-y-4 mb-8">
+            <button
+              type="button"
+              onClick={handleGoogleSignup}
+              disabled={isLoading}
+              className="w-full bg-white text-slate-900 font-semibold py-3 px-4 rounded-xl flex items-center justify-center gap-3 border border-slate-200 hover:border-brand-200 hover:bg-brand-50/40 transition-colors focus:outline-none focus:ring-2 focus:ring-brand/40 disabled:opacity-70 disabled:cursor-not-allowed"
+              aria-label="التسجيل باستخدام Google"
+            >
+              <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="w-5 h-5" alt="" aria-hidden="true" />
+              <span>المتابعة باستخدام Google</span>
+            </button>
+          </div>
+
+          <div className="relative mb-8">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-slate-200" />
+            </div>
+            <div className="relative flex justify-center text-sm">
+              <span className="px-4 bg-white text-slate-400">أو عن طريق البريد الإلكتروني</span>
+            </div>
+          </div>
+        </>
+      )}
+
       {error && !otpStep && (
         <div id="signup-error" className="mb-4 p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm" role="alert" aria-live="polite">
           {error}
@@ -392,28 +418,6 @@ const SignupPage: React.FC<SignupPageProps> = ({ onSignupSuccess, onNavigateToLo
           )}
         </button>
       </form>
-      )}
-
-      {!otpStep && (
-      <>
-      <div className="relative my-6">
-        <div className="absolute inset-0 flex items-center">
-          <div className="w-full border-t border-slate-200" />
-        </div>
-        <div className="relative flex justify-center text-sm">
-          <span className="px-4 bg-white text-slate-400">أو التسجيل عبر</span>
-        </div>
-      </div>
-
-      <button
-        onClick={handleGoogleSignup}
-        className="w-full bg-white hover:bg-brand-50/50 border border-slate-200 text-slate-800 py-2.5 px-6 rounded-xl flex items-center justify-center gap-2 transition-colors"
-        aria-label="التسجيل باستخدام Google"
-      >
-        <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="w-5 h-5" alt="Google" />
-        <span className="text-sm font-medium">Google</span>
-      </button>
-      </>
       )}
 
       <p className="mt-8 text-center text-slate-500 text-sm">

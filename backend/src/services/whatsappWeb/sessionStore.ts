@@ -8,7 +8,7 @@ export async function getWhatsAppWebSession(
   const result = await pool.query(
     `SELECT merchant_id, phone_number, phone_digits, status,
             creds_ciphertext, keys_ciphertext, auto_reply_enabled, welcome_message,
-            last_connected_at, last_disconnect_at, last_disconnect_reason
+            last_connected_at, last_disconnect_at, last_disconnect_reason, created_at
      FROM whatsapp_web_sessions
      WHERE merchant_id = $1
      LIMIT 1`,

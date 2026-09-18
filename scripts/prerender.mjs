@@ -13,7 +13,7 @@ const distDir = path.join(rootDir, 'dist');
 const previewPort = Number(process.env.PRERENDER_PORT || 4173);
 const baseUrl = `http://127.0.0.1:${previewPort}`;
 
-const STATIC_ROUTES = ['/', '/about', '/storify', '/whatsapp-bot'];
+const STATIC_ROUTES = ['/', '/about', '/storify', '/whatsapp-bot', '/become-agency'];
 
 function parseSitemapRoutes() {
   const sitemapPath = path.join(rootDir, 'public', 'sitemap.xml');

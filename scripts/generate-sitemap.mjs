@@ -29,6 +29,7 @@ function buildStaticSitemap() {
     { loc: `${siteOrigin}/`, changefreq: 'weekly', priority: '1.0' },
     { loc: `${siteOrigin}/about`, changefreq: 'monthly', priority: '0.9' },
     { loc: `${siteOrigin}/whatsapp-bot`, changefreq: 'monthly', priority: '0.85' },
+    { loc: `${siteOrigin}/become-agency`, changefreq: 'monthly', priority: '0.85' },
     { loc: `${siteOrigin}/storify`, changefreq: 'monthly', priority: '0.8' },
     { loc: `${siteOrigin}/privacy-policy`, changefreq: 'monthly', priority: '0.6' },
     { loc: `${siteOrigin}/terms-of-service`, changefreq: 'monthly', priority: '0.6' },
@@ -64,10 +65,35 @@ async function fetchFromApi() {
   return xml;
 }
 
+/** Ensure core marketing routes exist even when sitemap comes from CMS API */
+function ensureMarketingUrls(xml) {
+  const today = new Date().toISOString().slice(0, 10);
+  const required = [
+    { loc: `${siteOrigin}/become-agency`, changefreq: 'monthly', priority: '0.85' },
+    { loc: `${siteOrigin}/whatsapp-bot`, changefreq: 'monthly', priority: '0.85' },
+    { loc: `${siteOrigin}/about`, changefreq: 'monthly', priority: '0.9' },
+    { loc: `${siteOrigin}/storify`, changefreq: 'monthly', priority: '0.8' },
+  ];
+
+  let out = xml;
+  for (const u of required) {
+    if (out.includes(`<loc>${u.loc}</loc>`)) continue;
+    const entry = `
+  <url>
+    <loc>${escapeXml(u.loc)}</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>${u.changefreq}</changefreq>
+    <priority>${u.priority}</priority>
+  </url>`;
+    out = out.replace('</urlset>', `${entry}\n</urlset>`);
+  }
+  return out;
+}
+
 async function main() {
   let xml;
   try {
-    xml = await fetchFromApi();
+    xml = ensureMarketingUrls(await fetchFromApi());
     console.log('[sitemap] Generated from API:', `${apiBase}/pages/sitemap.xml`);
   } catch (error) {
     console.warn('[sitemap] API unavailable, using static fallback:', error?.message || error);

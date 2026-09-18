@@ -36,6 +36,11 @@ import { applyCommentTemplate, clampSocialText, DEFAULT_COMMENT_REPLY, DEFAULT_D
 import { normalizePageFeedCommentValue, isPageFeedCommentEvent } from '../services/pageFeedCommentPayload.js';
 import { processInstagramCommentFromPageFeed } from './instagram.controller.js';
 import { getMerchantPlanLimits, getFacebookPagesCount } from '../utils/planLimits.js';
+import { persistImportedChannelMessage } from '../services/inbox/importedConversation.js';
+import {
+  isBeforeChannelLink,
+  parseChannelEventTime,
+} from '../services/inbox/historyImportFlags.js';
 import { runCommentAutomation } from '../services/socialCommentAutomation.js';
 import {
   fetchFacebookCommenterProfile,
@@ -364,6 +369,30 @@ const processFacebookMessage = async (event: any) => {
     // ==================== VALIDATION ====================
     if ((!messageText || messageText.trim().length < 1) && !imageAttachmentUrl && !audioAttachmentUrl) {
       logger.debug('Ignoring empty Facebook message', { userId });
+      return;
+    }
+
+    const eventTime = parseChannelEventTime(rawEventMetadata?.eventTimestamp ?? event?.timestamp);
+    if (isBeforeChannelLink(eventTime, rawEventMetadata?.pageLinkedAt)) {
+      await persistImportedChannelMessage({
+        merchantId,
+        platform: 'facebook_messenger',
+        userId,
+        userName: userName || null,
+        externalMessageId: externalMessageId || String(rawEventMetadata?.messageId || ''),
+        content: messageText || (imageAttachmentUrl ? '[صورة]' : '[رسالة]'),
+        createdAt: eventTime || new Date(),
+        source: 'facebook_messenger',
+        extraMetadata: {
+          importSource: 'pre_link_webhook',
+          platform: 'facebook_messenger',
+        },
+      });
+      logger.info('Skipping bot for Facebook message sent before page link', {
+        merchantId,
+        userId,
+        eventTime: eventTime?.toISOString() || null,
+      });
       return;
     }
 

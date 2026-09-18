@@ -213,6 +213,24 @@ export const DEFAULT_PLAN_LIMITS: Record<string, PlanLimits> = {
     hasSalesBot: true,
     billingPeriod: 'yearly'
   },
+  /** Agency management account — no operational channels/bots */
+  agency: {
+    maxProducts: 0,
+    maxMonthlyAIResponses: 0,
+    maxMonthlyMarketingImages: 0,
+    maxFacebookPages: 0,
+    maxInstagramAccounts: 0,
+    maxWhatsAppAccounts: 0,
+    maxShopifyStores: 0,
+    maxStorifyStores: 0,
+    maxTelegramBots: 0,
+    maxTotalChannels: 0,
+    maxCustomers: 0,
+    hasAdvancedAnalytics: false,
+    hasAPIAccess: false,
+    hasSalesBot: false,
+    billingPeriod: 'monthly'
+  },
   trial: {
     maxProducts: -1,
     maxMonthlyAIResponses: -1,
