@@ -149,9 +149,11 @@ async function turn(
   );
 }
 
-console.log(`collect-info-order: ${failures.length === 0 ? 'would pass' : `${failed} failed`}`);
-for (const item of failures) console.error(`FAIL: ${item}`);
-console.error(
-  'KNOWN_PENDING: collect-info-order requires deterministic one-field collect_info sequencing (LLM still free to ask address after name)',
+console.log(
+  `collect-info-order: ${failures.length === 0 ? 'passed' : `${failed} failed`}`,
 );
-process.exit(1);
+if (failures.length > 0) {
+  for (const item of failures) console.error(`FAIL: ${item}`);
+  process.exit(1);
+}
+process.exit(0);

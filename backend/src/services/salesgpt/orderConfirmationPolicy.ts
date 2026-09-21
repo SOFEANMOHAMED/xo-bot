@@ -17,6 +17,9 @@ import {
   type TurnIntent,
 } from './turnIntent.js';
 import { classifyInterimCancelIntent } from './interimCancelMatchers.js';
+import {
+  buildIdentityCollectMessage,
+} from './collectInfoOrder.js';
 
 export const AWAIT_CONFIRMATION_ACTION = 'await_confirmation';
 export const CONFIRM_ORDER_ACTION = 'confirm_order';
@@ -348,8 +351,15 @@ export function buildCollectMissingFieldsMessage(
   language: Language,
   missingFields: string[]
 ): string {
+  // Identity fields always use the deterministic one-question templates.
+  for (const field of ['name', 'phone', 'address'] as const) {
+    if (missingFields.includes(field)) {
+      return buildIdentityCollectMessage(language, field);
+    }
+  }
+
   const first = missingFields.find((field) =>
-    ['name', 'phone', 'address', 'product_name', 'product', 'color', 'size'].includes(field)
+    ['product_name', 'product', 'color', 'size'].includes(field)
   ) || missingFields[0] || 'name';
   if (language === 'arabic') {
     const label = MISSING_FIELD_LABELS_AR[first] || 'المعلومة التالية';
@@ -592,21 +602,25 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
     };
   }
 
-  // Incomplete → never confirm; rewrite leaked checkout copy (including literal "null").
+  // Incomplete → never confirm; identity questions come from code templates only.
   if (!effectivelyComplete) {
     const triedCheckout =
       aiNextAction === CONFIRM_ORDER_ACTION ||
       aiNextAction === AWAIT_CONFIRMATION_ACTION ||
       aiNextAction === 'close_sale';
     const leakedCheckout = isPrematureCheckoutCopy(responseText);
-    if (triedCheckout || leakedCheckout) {
+    const identityMissing = missingFields.some((f) =>
+      f === 'name' || f === 'phone' || f === 'address'
+    );
+    const collecting =
+      aiNextAction === 'collect_info' || triedCheckout || leakedCheckout || identityMissing;
+
+    if (collecting) {
       return {
         nextAction: 'collect_info',
-        responseText: leakedCheckout || triedCheckout
-          ? buildCollectMissingFieldsMessage(language, missingFields)
-          : responseText,
+        responseText: buildCollectMissingFieldsMessage(language, missingFields),
         awaitingConfirmation: false,
-        reason: 'incomplete_fields_blocked_confirm'
+        reason: 'deterministic_identity_collect',
       };
     }
     return {

@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-09-21 14:05 UTC — PHASE 2D ITEM 2 / deterministic collect_info order — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** النموذج كان يسأل العنوان بعد الاسم. أُضيفت قوالب حتمية للحقل الناقص الأول (اسم → هاتف → عنوان) وتُفرض عند `collect_info`/نقص الهوية.
+- **الملفات / الدوال:**
+  - `collectInfoOrder.ts` — `firstMissingIdentityField` / `buildIdentityCollectMessage` / `resolveIdentityCollectReply`
+  - `orderConfirmationPolicy.ts` — `buildCollectMissingFieldsMessage` + مسار `deterministic_identity_collect`
+  - `test_collect_info_order.ts` يغادر KNOWN_PENDING · `testSkip.ts` · docs
+- **اختبارات:** typecheck PASS. `test-collect-info-order` PASS.
+- **أثر السلوك:** بعد الاسم يُسأل الهاتف فقط؛ بعد الهاتف العنوان؛ رسالة واحدة بكل الحقول → لا إعادة سؤال.
+- **حدود معروفة:** commerceEngine الكامل وM24–M35 ما زالا معلّقين.
+
+---
+
 ## 2026-09-21 13:55 UTC — PHASE 2D ITEM 1 / resolveFocus + OOS + color-focus — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
