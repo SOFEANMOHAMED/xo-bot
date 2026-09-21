@@ -16,6 +16,7 @@ import {
   isBrowseTurnIntent,
   type TurnIntent,
 } from './turnIntent.js';
+import { classifyInterimCancelIntent } from './interimCancelMatchers.js';
 
 export const AWAIT_CONFIRMATION_ACTION = 'await_confirmation';
 export const CONFIRM_ORDER_ACTION = 'confirm_order';
@@ -155,14 +156,16 @@ export function customerDeclinesMoreItems(messageText: string): boolean {
   return containsAnyToken(messageText, DECLINE_MORE_TOKENS);
 }
 
-/** Explicit order cancellation. */
+/** Explicit order cancellation (whole order only — partial remove uses interim matchers). */
 export function customerCancelsOrder(messageText: string): boolean {
   if (!messageText) return false;
   if (isProductInfoRequest(messageText)) return false;
+  const kind = classifyInterimCancelIntent(messageText);
+  if (kind === 'whole_cancel') return true;
+  if (kind === 'partial_remove' || kind === 'none') return false;
   if (CANCEL_ORDER_PATTERNS.some((p) => p.test(messageText))) return true;
   return containsAnyToken(messageText, CANCEL_ORDER_TOKENS);
 }
-
 export function botReplyAnnouncesConfirmation(text: string): boolean {
   if (!text) return false;
   const normalized = normalizeArabic(text);

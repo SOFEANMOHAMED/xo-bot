@@ -17,6 +17,7 @@ export const KNOWN_PENDING_SUITES: readonly string[] = Object.freeze([
   'test-commerce-engine',
   'test-pending-bot-question',
   'test-verification-matrix-pending',
+  'test-collect-info-order',
 ]);
 
 export function skipSuite(reason: string): never {

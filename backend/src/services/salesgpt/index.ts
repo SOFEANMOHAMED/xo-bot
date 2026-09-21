@@ -50,6 +50,7 @@ import {
     botReplyAsksForConfirmation,
     botReplyAsksToAddMore,
     buildOrderConfirmedMessage,
+    buildOrderCancelledMessage,
     buildAwaitConfirmationMessage,
     isProductInfoRequest,
     sanitizeCollectedText,
@@ -74,10 +75,12 @@ import {
     buildCartItemsFromProducts,
     buildCartSyncedMessage,
     cartHasItems,
+    clearCart,
     clearDraftOnFocusChange,
     coerceSafeQuantity,
     detectsAddAnotherIntent,
     ensureCartForCheckout,
+    ensureLineId,
     fillCartVariantsFromDraft,
     findProductsMentionedInText,
     formatCartSummary,
@@ -87,9 +90,12 @@ import {
     lockDraftIntoCart,
     messageSignalsBothProducts,
     normalizeCart,
+    removeCartLineById,
     replaceCartItems,
     shouldSyncMultiProductCart,
 } from './conversationCart.js';
+import { classifyInterimCancelIntent } from './interimCancelMatchers.js';
+import { matchCartLinesForRemoval } from './cartLineRemoval.js';
 
 // Re-export confirmation helpers so channel controllers keep a stable import path
 export {
@@ -550,6 +556,167 @@ export const processWithSalesGPT = async (
     const fastPathColorReady =
         !catalogColorsForConfirm?.length ||
         isColorInProductCatalog(colorForFastPath, catalogColorsForConfirm);
+
+    // ——— INTERIM cancel / remove-line rails (cartLineOps) ———
+    {
+        const cancelKind = classifyInterimCancelIntent(messageText);
+        const liveItems = getCartItems(conversationState).map(ensureLineId);
+
+        if (cancelKind === 'whole_cancel') {
+            const cleared = clearCart(conversationState);
+            const reply = buildOrderCancelledMessage(language);
+            const updatedCancel: ConversationState = {
+                ...cleared,
+                last_intent: 'other',
+                language,
+                awaiting_order_confirmation: false,
+                last_interaction: new Date().toISOString(),
+                message_count: (conversationState.message_count || 0) + 1,
+            };
+            applySalesGPTStage(updatedCancel, '9');
+            return {
+                replyText: reply,
+                intent: 'other' as Intent,
+                stage: 'close' as Stage,
+                entities: updatedCancel.extracted_entities || {},
+                missingFields: [],
+                products: [],
+                plan: {
+                    nextAction: 'handoff' as NextAction,
+                    oneQuestion: reply,
+                    ctaType: 'support' as CtaType,
+                    recommendationStrategy: null as RecommendationStrategy,
+                    shouldOfferDiscount: false,
+                    handoffReason: '',
+                },
+                updatedState: updatedCancel,
+                aiCallsCount: 0,
+                language,
+                next_action: 'end_conversation',
+            };
+        }
+
+        if (cancelKind === 'partial_remove') {
+            const matches = matchCartLinesForRemoval(messageText, liveItems);
+            if (matches.length === 0) {
+                const reply =
+                    language === 'arabic'
+                        ? 'هذا المنتج مو موجود بطلبك الحالي.'
+                        : 'That item is not in your current order.';
+                const updatedMiss: ConversationState = {
+                    ...conversationState,
+                    language,
+                    last_interaction: new Date().toISOString(),
+                    message_count: (conversationState.message_count || 0) + 1,
+                };
+                return {
+                    replyText: reply,
+                    intent: 'order' as Intent,
+                    stage: 'close' as Stage,
+                    entities: updatedMiss.extracted_entities || {},
+                    missingFields: [],
+                    products: [],
+                    plan: {
+                        nextAction: 'recommend_products' as NextAction,
+                        oneQuestion: reply,
+                        ctaType: 'choose' as CtaType,
+                        recommendationStrategy: null as RecommendationStrategy,
+                        shouldOfferDiscount: false,
+                        handoffReason: '',
+                    },
+                    updatedState: updatedMiss,
+                    aiCallsCount: 0,
+                    language,
+                    next_action: 'present_product',
+                };
+            }
+
+            let nextItems = liveItems;
+            for (const line of matches) {
+                const id = ensureLineId(line).lineId;
+                nextItems = removeCartLineById(nextItems, id).map(ensureLineId);
+            }
+
+            if (nextItems.length === 0) {
+                const reply =
+                    language === 'arabic'
+                        ? 'تمام، شلت آخر منتج من طلبك. الطلب فاضي هلق — خبرني إذا بدك تختار شي تاني.'
+                        : 'Okay, I removed the last item. Your order is empty now — tell me if you want to pick something else.';
+                const emptied = clearCart(conversationState);
+                const updatedEmpty: ConversationState = {
+                    ...emptied,
+                    language,
+                    awaiting_order_confirmation: false,
+                    last_interaction: new Date().toISOString(),
+                    message_count: (conversationState.message_count || 0) + 1,
+                };
+                applySalesGPTStage(updatedEmpty, '4');
+                return {
+                    replyText: reply,
+                    intent: 'browse' as Intent,
+                    stage: 'offer' as Stage,
+                    entities: updatedEmpty.extracted_entities || {},
+                    missingFields: [],
+                    products: [],
+                    plan: {
+                        nextAction: 'recommend_products' as NextAction,
+                        oneQuestion: reply,
+                        ctaType: 'choose' as CtaType,
+                        recommendationStrategy: null as RecommendationStrategy,
+                        shouldOfferDiscount: false,
+                        handoffReason: '',
+                    },
+                    updatedState: updatedEmpty,
+                    aiCallsCount: 0,
+                    language,
+                    next_action: 'present_product',
+                };
+            }
+
+            const cart = normalizeCart(
+                { items: nextItems, status: 'building' },
+                { storeCurrency: merchantConfig.storeCurrency || merchantConfig.currency }
+            );
+            const summary = formatCartSummary(cart.items, language, {
+                shippingPolicy: merchantConfig.shippingPolicy,
+            });
+            const removedNames = matches.map((m) => m.productName).join('، ');
+            const reply =
+                language === 'arabic'
+                    ? `تمام، شلت ${removedNames} من طلبك.\n${summary}\n\nنقدر نضيف منتج ثاني، أو نكمّل الطلب؟`
+                    : `Okay, I removed ${removedNames} from your order.\n${summary}\n\nWe can add another product, or finish the order.`;
+            const updatedPartial: ConversationState = {
+                ...conversationState,
+                cart,
+                last_recommended_products: cart.items.map((i) => i.productId),
+                language,
+                awaiting_order_confirmation: false,
+                last_interaction: new Date().toISOString(),
+                message_count: (conversationState.message_count || 0) + 1,
+            };
+            applySalesGPTStage(updatedPartial, '4');
+            return {
+                replyText: reply,
+                intent: 'order' as Intent,
+                stage: 'offer' as Stage,
+                entities: updatedPartial.extracted_entities || {},
+                missingFields: [],
+                products: [],
+                plan: {
+                    nextAction: 'recommend_products' as NextAction,
+                    oneQuestion: reply,
+                    ctaType: 'choose' as CtaType,
+                    recommendationStrategy: null as RecommendationStrategy,
+                    shouldOfferDiscount: false,
+                    handoffReason: '',
+                },
+                updatedState: updatedPartial,
+                aiCallsCount: 0,
+                language,
+                next_action: ADD_TO_CART_ACTION,
+            };
+        }
+    }
 
     // Multi-product order / cart correction: MERGE named products into cart (code-owned).
     // Existing lines stay; mentioned products add lines; quantities are not reset.

@@ -4,6 +4,23 @@
 
 ---
 
+## 2026-09-21 11:00 UTC — PHASE 2B ITEM 2 / partial cancel + collect-info-order — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** «الغي القميص» كان يُعامل كإلغاء كلي أو يُتجاهل. أُضيف مصنّف INTERIM للأفعال + مطابقة أسماء سطور السلة + حذف عبر `cartLineOps`؛ سيناريو `collect-info-order` كـ KNOWN_PENDING لتسلسل الحقول.
+- **الملفات / الدوال:**
+  - `interimCancelMatchers.ts` — `classifyInterimCancelIntent` / `isInterimWholeOrderCancel` / `isInterimPartialRemoveVerb` + قائمة اختبار
+  - `cartLineRemoval.ts` — `matchCartLinesForRemoval`
+  - `index.ts` — مسار سريع: إلغاء كلي / حذف سطر / «مو موجود بطلبك» / سلة فارغة بصياغة طبيعية
+  - `orderConfirmationPolicy.ts` — `customerCancelsOrder` يحترم المصنّف (لا يلغي عند تصحيح لون)
+  - `test_interim_cancel_matchers.ts` / `test_collect_info_order.ts` / تحديث `test_p0_cart_integrity.ts`
+  - `package.json` / `testSkip.ts` / `BOT_BRAIN_MAP.md` / `CHANGELOG_BRAIN.md`
+- **اختبارات:** typecheck PASS. `test-all`: **15 passed، 0 failed، 6 known_pending من 21**.
+- **أثر السلوك:** حذف سطر بالاسم من السلة؛ إلغاء كلي صريح؛ هدف غائب لا يمس السلة.
+- **حدود معروفة:** INTERIM حتى مفسّر LLM؛ SetVariant/صور/تسلسل collect_info ما زالت معلّقة.
+
+---
+
 ## 2026-09-21 10:52 UTC — PHASE 2B ITEM 1 / priced cartSummary — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

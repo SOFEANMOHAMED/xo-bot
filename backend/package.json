@@ -40,6 +40,8 @@
     "test-verification-matrix-pending": "NODE_ENV=test tsx --import ./src/database/testPreflight.ts src/services/salesgpt/test_verification_matrix_pending.ts",
     "test-conversation-cart": "NODE_ENV=test tsx --import ./src/database/testPreflight.ts src/services/salesgpt/test_conversation_cart.ts",
     "test-p0-cart-integrity": "NODE_ENV=test tsx --import ./src/database/testPreflight.ts --import ./src/services/salesgpt/test_pipeline_hooks.ts src/services/salesgpt/test_p0_cart_integrity.ts",
+    "test-interim-cancel-matchers": "NODE_ENV=test tsx --import ./src/database/testPreflight.ts src/services/salesgpt/test_interim_cancel_matchers.ts",
+    "test-collect-info-order": "NODE_ENV=test tsx --import ./src/database/testPreflight.ts --import ./src/services/salesgpt/test_pipeline_hooks.ts src/services/salesgpt/test_collect_info_order.ts",
     "test-p0-color-focus": "NODE_ENV=test tsx --import ./src/database/testPreflight.ts --import ./src/services/salesgpt/test_pipeline_hooks.ts src/services/salesgpt/test_p0_color_focus.ts",
     "test-commerce-engine": "NODE_ENV=test tsx --import ./src/database/testPreflight.ts src/services/salesgpt/test_commerce_engine.ts",
     "test-pending-bot-question": "NODE_ENV=test tsx --import ./src/database/testPreflight.ts --import ./src/services/salesgpt/test_pipeline_hooks.ts src/services/salesgpt/test_pending_bot_question.ts",

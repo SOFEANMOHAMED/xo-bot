@@ -21,6 +21,8 @@ import {
   getCartItems,
 } from './conversationCart.js';
 import { customerCancelsOrder } from './orderConfirmationPolicy.js';
+import { classifyInterimCancelIntent } from './interimCancelMatchers.js';
+import { matchCartLinesForRemoval } from './cartLineRemoval.js';
 import {
   REAL_TEST_CATALOG,
   REAL_TEST_MOBILE,
@@ -173,7 +175,7 @@ async function runTurn(input: {
   });
 }
 
-// ——— Soft-pending: commerceEngine / cancel classification (not PHASE 2A) ———
+// ——— Soft-pending: commerceEngine (not PHASE 2B) ———
 let commerce: CommerceApi | null = null;
 try {
   const modulePath = './commerceEngine.js';
@@ -191,6 +193,43 @@ const twoLineCart: CartState = {
   phase: 'configuring',
   focusProductId: REAL_TEST_WATCH.id,
 };
+
+// Hard: interim cancel/remove rails (PHASE 2B ITEM 2)
+{
+  assertHard(
+    classifyInterimCancelIntent('خلص بدي الغي القميص') === 'partial_remove',
+    'partial cancel classifies as partial_remove',
+  );
+  assertHard(
+    classifyInterimCancelIntent('ألغي الطلب كله') === 'whole_cancel',
+    'full cancel classifies as whole_cancel',
+  );
+  assertHard(
+    classifyInterimCancelIntent('لا ما بدي اسود بدي احمر') === 'none',
+    'variant correction is not cancellation',
+  );
+  assertHard(
+    classifyInterimCancelIntent('لا شكراً بس بدي الأزرق') === 'none',
+    'لا شكراً بس بدي الأزرق is not cancel',
+  );
+  assertHard(
+    classifyInterimCancelIntent('بعدين بخبرك') === 'none',
+    'بعدين بخبرك is not cancel',
+  );
+  assertHard(customerCancelsOrder('ألغي الطلب كله'), 'explicit full cancel is detected');
+  assertHard(
+    !customerCancelsOrder('لا ما بدي اسود بدي احمر'),
+    'variant correction is not customerCancelsOrder',
+  );
+
+  const shirtHits = matchCartLinesForRemoval('خلص بدي الغي القميص', twoLineCart.lines);
+  assertHard(
+    shirtHits.length === 1 && shirtHits[0].productId === REAL_TEST_SHIRT.id,
+    'line-match targets shirt from cart names',
+  );
+  const missingHits = matchCartLinesForRemoval('الغي الموبايل', twoLineCart.lines);
+  assertHard(missingHits.length === 0, 'absent product matches no cart line');
+}
 
 if (commerce) {
   const partial = commerce.classifyCommerceEvent({
@@ -237,12 +276,6 @@ if (commerce) {
   );
 }
 
-assertPending(customerCancelsOrder('ألغي الطلب كله'), 'explicit full cancel is detected');
-assertPending(
-  !customerCancelsOrder('لا ما بدي اسود بدي احمر'),
-  'variant correction is not cancellation',
-);
-
 {
   const summary = formatCartSummary([watchLine('أسود'), shirtLine()], 'arabic');
   const shirtRow = summary.split('\n').find((row) => /قميص/.test(row)) || '';
@@ -287,15 +320,29 @@ assertPending(
     recentMessages: [{ role: 'assistant', content: 'تحب نضيف شي تاني، ولا نكمّل الطلب؟' }],
   });
   const items = getCartItems(partial.updatedState);
-  assertPending(
+  assertHard(
     items.some((item) => item.productId === REAL_TEST_WATCH.id),
     'pipeline partial cancel keeps watch',
   );
-  assertPending(
+  assertHard(
     !items.some((item) => item.productId === REAL_TEST_SHIRT.id),
     'pipeline partial cancel removes shirt',
   );
-  assertPending(partial.next_action !== 'confirm_order', 'partial cancel does not confirm');
+  assertHard(partial.next_action !== 'confirm_order', 'partial cancel does not confirm');
+}
+
+{
+  const missing = await runTurn({
+    message: 'الغي الموبايل',
+    state: twoLineState(),
+    llmText: 'تم',
+  });
+  const items = getCartItems(missing.updatedState);
+  assertHard(items.length === 2, 'absent product removes nothing from cart');
+  assertHard(
+    /مو موجود|not in your current order/i.test(missing.replyText),
+    `absent product gets honest reply, got: ${missing.replyText}`,
+  );
 }
 
 {
@@ -473,7 +520,7 @@ if (hardFailures.length > 0) {
 if (pendingFailures.length > 0) {
   for (const item of pendingFailures) console.error(`PENDING: ${item}`);
   console.error(
-    'KNOWN_PENDING: commerceEngine, cancel/correction rails, and image policy are not restored yet',
+    'KNOWN_PENDING: commerceEngine SetVariant, image policy, and collect-info-order field sequencing are not restored yet',
   );
   process.exit(0);
 }
