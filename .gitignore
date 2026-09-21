@@ -9,6 +9,7 @@ logs/
 !.env.production.example
 backend/.env
 backend/logs/
+backend/logs-test/
 backend/.cache/
 .cache/
 .DS_Store

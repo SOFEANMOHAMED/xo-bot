@@ -4,9 +4,27 @@
 
 ---
 
-## 2026-09-21 09:04 UTC — STEP B fix — فرع `main`
+## 2026-09-21 09:21 UTC — STEP C / PHASE 0 — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** لا بوابة `typecheck`/`test-all`، واللوجر كان يكتب `logs/` حتى تحت `NODE_ENV=test` فيهدد `backend/logs` الحي. أُضيفت البوابات وعُزل اللوج إلى `logs-test` مع إثبات على sandbox.
+- **الملفات / الدوال:**
+  - `backend/package.json` — سكربتات `typecheck`, `test-all`, `test-logger-isolation`
+  - `backend/src/database/runAllTestSuites.ts` — `runNpm`, `classifySuite` (typecheck أولاً؛ FAIL يخرج 1؛ `KNOWN_PENDING_SUITES` فارغ؛ مهلة 60s لكل سويت)
+  - `backend/src/database/testSkip.ts` — `skipSuite`, `markKnownPending`, `countSkippedLines`, `KNOWN_PENDING_SUITES`
+  - `backend/src/utils/logger.ts` — `resolveLoggerDir`, `productionLogDir`, `pruneOldLogs` (لا تلمس مجلد الإنتاج)
+  - `backend/src/database/test_logger_isolation.ts` — 11 إثبات على جذر مؤقت
+  - `backend/.gitignore` / `.gitignore` — `logs-test`
+  - `docs/CHANGELOG_BRAIN.md` — هذا السجل
+- **اختبارات (تشغيل واحد لـ `npm run test-all`):** typecheck PASS (0 أخطاء). الحارس سابقاً 11/11. عزل اللوج 11/11. الإجمالي: 12 passed، 2 failed، 0 skipped، 0 known_pending من 14. الفاشلان: `test-conversation-state` و`test-hybrid-orchestrator-helpers` (المنطق نجح ثم `pool.end()` تجاوز 60s). لم تُصلَح السويتات الفاشلة.
+- **أثر السلوك:** الإنتاج ما زال يكتب `logs/`. تحت test فقط `logs-test`. لا تغيير لعقد عقل البوت.
+- **حدود معروفة:** `KNOWN_PENDING_SUITES` فارغ. `test-catalog-tool` يخرج 0 بلا منتجات في `xobot_test` فيُحسب PASS. مهلة السويت قد تقتل عملية علّقت على `pool.end()`.
+
+---
+
+## 2026-09-21 09:04 UTC — STEP B fix — فرع `main`
+
+- **الهاش:** `cb2939d48ae9ea436c64b5bf36d8c0065af3e4fc`
 - **ماذا تغيّر والسبب الجذري:** `psql -c` / `-v test_password=` لا يستبدل `:'var'` (يُرسل النص كما هو للخادم) فظهر `ERROR: syntax error at or near ":"` وتوقف السكربت قبل أي نسخ. الإصلاح: `\set` عبر stdin ثم `SELECT format(... %I/%L ...) \gexec`؛ كلمة السر ليست في argv/`ps` ولا `PGPASSWORD`.
 - **الملفات / الدوال:**
   - `scripts/setup-test-db.sh` — `psql_single_quote`, أنبوب `\set test_password` / `\set test_user` + `\gexec`؛ فحص الصلاحيات عبر `SET SESSION AUTHORIZATION` (بلا كلمة سر في argv)
