@@ -4,6 +4,21 @@ Living plan for cart / focus / reply regressions. Identifiers in English.
 
 ---
 
+## Status (2026-09-21)
+
+| Phase | Status | Notes |
+| --- | --- | --- |
+| **0 / harness & gates** | Done | `test-all`, KNOWN_PENDING, logs-test |
+| **1A regression specs** | Done | P0 cart/color, pending, matrix, playground fixture |
+| **1B live measurement** | **Done** | `test-live`, `docs/BASELINE.md`, thresholds, `--gate` |
+| **2B–2E brain rails** | Done | cancel/remove, pending, variant, resolveFocus, collect order, 2E gate |
+| **4-PREP analysis** | **Done (docs)** | `docs/BASELINE_BREAKDOWN.md`, `docs/INTERPRETER_CONTRACT.md` |
+| **Phase 4 interpreter** | **Next** | Shadow → flip per TURN TYPE per contract; no keyword growth |
+
+**Deploy rule:** passing `LIVE_LLM=1 npm run test-live -- --gate` required (see CHANGELOG).
+
+---
+
 ## §6 — Live measurement scenarios (PHASE 1B)
 
 Twenty core scripts used by `npm run test-live` (`LIVE_LLM=1`). Catalog fixtures:
