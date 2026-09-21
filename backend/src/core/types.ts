@@ -181,6 +181,9 @@ export interface ConversationState {
    * Draft product lives in extracted_entities until locked into cart.items.
    */
   cart?: ConversationCart;
+  /** Pending color/size ask from a deterministic template (cleared after the next answer). */
+  pending_bot_question?: 'color' | 'size' | null;
+  pending_bot_question_product_id?: string | null;
   abandoned_checkout?: AbandonedCheckoutState;
   channel_binding?: ChannelBinding;
 }

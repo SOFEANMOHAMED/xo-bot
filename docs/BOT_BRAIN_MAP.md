@@ -310,7 +310,7 @@ flowchart TD
 2. إن طلب معلومات منتج → `present_product` (أو send_image / end).
 3. إلغاء صريح والطلب مكتمل → `end_conversation` + رسالة إلغاء.
 4. «لا» عند سؤال التأكيد (وليس سؤال إضافة) → توضيح غموض، يبقى `await_confirmation` (لا تأكيد).
-5. لون بعد عرض صورة وغير مسموح بالإنهاء → `send_image`.
+5. ~~لون بعد عرض صورة → `send_image`~~ **أُزيل** (`preferSendImage` / `variantAfterPhotoOffer`) — الصورة فقط عند طلب صريح في الرسالة الحالية.
 6. `allowedToFinalize` → `confirm_order` + رسالة شكر آمنة.
 7. غير مكتمل وحاول النموذج التأكيد/الملخص → `collect_info` + سؤال الحقل الناقص.
 8. مكتمل بلا إنهاء صريح → `await_confirmation` + ملخص إن لزم.
@@ -386,13 +386,17 @@ flowchart TD
 
 | الشرط | النتيجة |
 |-------|---------|
-| `next_action === send_image` و ليس no-match | إلحاق `[IMAGE: url]` بعد تنظيف التعليق |
+| الرسالة الحالية تطلب صورة صراحة (`isExplicitPhotoRequest`) وليست رفضاً (`isExplicitPhotoRefusal`) وليست no-match | إلحاق `[IMAGE: url]` بعد تنظيف التعليق |
+| اختيار اللون/المقاس رداً على `pending_bot_question` | **لا صورة** — يُسجَّل المتغير على سطر المنتج فقط |
+| رفض صريح («ما بدي الصورة») | لا صورة حتى لو ذكرت كلمة صورة |
 | اختيار المنتج للصورة | ذكر حالي → اسم في collectedInfo → activeProductId → products[0] |
 | لون مطلوب | `resolveProductImageForBot` (صورة بلون إن وُجدت) |
-| نموذج ادّعى إرسال صورة دون `send_image` | `stripFalseImageDeliveryClaims` |
-| no-match + send_image | لا صورة عشوائية |
+| نموذج ادّعى إرسال صورة دون طلب صريح | `stripFalseImageDeliveryClaims` |
+| no-match + طلب صورة | لا صورة عشوائية |
 
-الكلمات المفتاحية لطلب الصورة: انظر `isExplicitPhotoRequest`.
+**أُزيلت heuristics تاريخية:** `preferSendImage` · `variantAfterPhotoOffer` · `lastAssistantOfferedPhoto` · `previousUserAskedForPhoto` · `lastAssistantAskedColorChoice` · `isCatalogOrShortColorReply`
+
+الكلمات المفتاحية لطلب الصورة: انظر `isExplicitPhotoRequest`. حالة السؤال المعلّق: `pendingBotQuestion.ts` (`pending_bot_question` + `pending_bot_question_product_id`).
 
 ---
 

@@ -4,6 +4,25 @@
 
 ---
 
+## 2026-09-21 12:40 UTC — PHASE 2C ITEM 1 / pending_bot_question + image policy — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** رد «الأسود» بعد سؤال اللون كان يُفسَّر كطلب صورة من تاريخ العرض (`preferSendImage` / `variantAfterPhotoOffer` / عروض الصورة السابقة). أُضيفت حالة `pending_bot_question` مربوطة بـ `product_id` من قوالب السؤال الحتمية فقط، ومسار أولوية يُسجّل اللون على سطر ذلك المنتج بلا صورة؛ الرفض الصريح يكبت الصورة؛ الإرفاق فقط عند `isExplicitPhotoRequest` للرسالة الحالية.
+- **الملفات / الدوال:**
+  - `pendingBotQuestion.ts` — `detectPendingBotQuestion` / `bindPendingBotQuestion` / `resolvePendingVariantAnswer` / `isExplicitPhotoRefusal` / …
+  - `index.ts` — سكة pending أولاً؛ `shouldAttachImage = isExplicitPhotoRequest && !isExplicitPhotoRefusal`؛ ربط القالب عند الخروج
+  - `agent.ts` — حذف heuristics: `preferSendImage` · `variantAfterPhotoOffer` · `lastAssistantOfferedPhoto` · `previousUserAskedForPhoto` · `lastAssistantAskedColorChoice` · `isCatalogOrShortColorReply`
+  - `turnIntent.ts` — تجاهل `variantAfterPhotoOffer`؛ الصورة من الرسالة الحالية
+  - `orderConfirmationPolicy.ts` — `preferSendImage` deprecated/unused
+  - `types.ts` — حقول `pending_bot_question*`
+  - اختبارات: `test_pending_bot_question.ts` (يغادر KNOWN_PENDING) · playground صورة hard · golden بدون إجبار send_image
+  - `testSkip.ts` / `BOT_BRAIN_MAP.md` / `CHANGELOG_BRAIN.md`
+- **اختبارات:** typecheck PASS. `test-pending-bot-question` PASS (يغادر القائمة). playground: لا IMAGE على «الأسود» ولا على الرفض.
+- **أثر السلوك:** اختيار لون/مقاس بعد سؤال القالب يُثبَّت على السطر الصحيح بدون صورة؛ صورة فقط بطلب صريح؛ رفض «ما بدي الصورة» يكبتها.
+- **حدود معروفة:** `resolveVariantChange` / SetVariant وتصحيح «لا ما بدي اسود بدي احمر» ما زالا معلّقين (ITEM 2).
+
+---
+
 ## 2026-09-21 11:00 UTC — PHASE 2B ITEM 2 / partial cancel + collect-info-order — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

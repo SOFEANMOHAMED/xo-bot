@@ -55,8 +55,8 @@ type CommerceApi = {
   }) => CommerceEvent;
 };
 type TestState = ConversationState & {
-  pending_bot_question?: string;
-  pending_bot_question_product_id?: string;
+  pending_bot_question?: 'color' | 'size' | null;
+  pending_bot_question_product_id?: string | null;
 };
 
 let hardPassed = 0;
@@ -416,7 +416,7 @@ if (commerce) {
           watch?.color === 'أسود',
           `${label} state binds black to watch, got ${watch?.color}`,
         );
-        assertPending(!/\[IMAGE:/i.test(result.replyText), `${label} bare color emits no IMAGE tag`);
+        assertHard(!/\[IMAGE:/i.test(result.replyText), `${label} bare color emits no IMAGE tag`);
       },
     },
     {
@@ -427,7 +427,7 @@ if (commerce) {
           (item) => item.productId === REAL_TEST_WATCH.id,
         );
         assertHard(watch?.color === 'أسود', `${label} refusal keeps black watch state`);
-        assertPending(
+        assertHard(
           !/\[IMAGE:/i.test(result.replyText),
           `${label} explicit refusal emits no image`,
         );
@@ -520,7 +520,7 @@ if (hardFailures.length > 0) {
 if (pendingFailures.length > 0) {
   for (const item of pendingFailures) console.error(`PENDING: ${item}`);
   console.error(
-    'KNOWN_PENDING: commerceEngine SetVariant, image policy, and collect-info-order field sequencing are not restored yet',
+    'KNOWN_PENDING: commerceEngine SetVariant / resolveVariantChange and collect-info-order field sequencing are not restored yet',
   );
   process.exit(0);
 }

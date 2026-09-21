@@ -55,7 +55,7 @@ import {
     type CustomerRequestSignals
 } from './customerRequest.js';
 import { formatColorOptionsForDisplay } from '../../catalog/color-options.js';
-import { extractColorFromUserText, isColorInProductCatalog } from './orderColorPolicy.js';
+import { isColorInProductCatalog } from './orderColorPolicy.js';
 import {
     formatCartSummary,
     getCartItems,
@@ -396,18 +396,14 @@ export class SalesGPTAgent {
         }
 
         // Step 4.1: Deterministic TurnIntent — browse_media / product_qa before order rails.
-        const colorReply = this.isCatalogOrShortColorReply(messageText);
-        const offeredPhoto = this.lastAssistantOfferedPhoto() || this.previousUserAskedForPhoto();
-        const askedColorChoice = this.lastAssistantAskedColorChoice();
-        const preferSendImage = colorReply && offeredPhoto;
-        const variantAfterPhotoOffer =
-            preferSendImage || (colorReply && askedColorChoice);
-
+        // Photo intent comes ONLY from the current message (or explicit wants_photo flag).
+        // Removed: preferSendImage / variantAfterPhotoOffer / lastAssistantOfferedPhoto /
+        // previousUserAskedForPhoto / lastAssistantAskedColorChoice / isCatalogOrShortColorReply
+        // heuristics that inferred photo intent from history.
         const lastBotReply = this.getLastAssistantHistoryText();
         const turnIntent: TurnIntent = resolveTurnIntent({
             userMessage: messageText,
             customerRequest,
-            variantAfterPhotoOffer,
             asksProductInfo:
                 customerRequest?.asksProductInfo === true ||
                 isProductInfoRequest(messageText),
@@ -439,10 +435,9 @@ export class SalesGPTAgent {
                 response = browseMediaCaptionFallback(this.config.language);
             }
         } else {
-            // Legacy image safety: model said send_image without photo intent → demote
+            // Model said send_image without an explicit photo ask in THIS message → demote.
             const allowSendImage =
                 customerRequest?.wantsPhoto === true ||
-                preferSendImage ||
                 isExplicitPhotoRequest(messageText);
             if (nextAction === 'send_image' && !allowSendImage) {
                 nextAction = 'present_product';
@@ -487,7 +482,6 @@ export class SalesGPTAgent {
             modelAsksProductInfo:
                 customerRequest === null ? undefined : customerRequest.asksProductInfo,
             missingFields: orderCompleteness.missing,
-            preferSendImage: variantAfterPhotoOffer && !orderCompleteness.complete,
             cartLinesSummary: this.state.cartSummary || undefined,
             turnIntent,
             lastBotReply,
@@ -649,48 +643,6 @@ export class SalesGPTAgent {
             return line;
         }
         return '';
-    }
-
-    private previousUserAskedForPhoto(): boolean {
-        const userTurns = this.state.conversationHistory.filter((line) =>
-            line.startsWith('المستخدم:')
-        );
-        if (userTurns.length < 2) return false;
-        const prev = userTurns[userTurns.length - 2]
-            .replace(/^المستخدم:\s*/, '')
-            .replace(/\s*<END_OF_TURN>\s*$/, '');
-        return isExplicitPhotoRequest(prev);
-    }
-
-    private lastAssistantOfferedPhoto(): boolean {
-        const lastBot = this.getLastAssistantHistoryText();
-        return (
-            isExplicitPhotoRequest(lastBot) ||
-            /سأرسل|رح أرسل|رح ارسل|رح ابعت|أرسلك|ابعثلك/i.test(lastBot)
-        );
-    }
-
-    private lastAssistantAskedColorChoice(): boolean {
-        return /لون|ألوان|الالوان|الألوان|color|colours?|أسود|اسود|أحمر|احمر|black|red/i.test(
-            this.getLastAssistantHistoryText()
-        );
-    }
-
-    private isCatalogOrShortColorReply(messageText: string): boolean {
-        if (!messageText?.trim()) return false;
-        if (this.currentProductColors.length > 0) {
-            if (extractColorFromUserText(messageText, this.currentProductColors)) {
-                return true;
-            }
-        }
-        const trimmed = messageText.trim();
-        if (trimmed.split(/\s+/).length > 3) return false;
-        if (/(طلب|اشتري|عنوان|هاتف|تأكيد|أكد|confirm|order|buy|yes|نعم)/i.test(trimmed)) {
-            return false;
-        }
-        return /^(أحمر|احمر|أسود|اسود|أبيض|ابيض|أزرق|ازرق|أخضر|اخضر|ذهبي|فضي|red|black|white|blue|green|gold|silver)$/i.test(
-            trimmed
-        );
     }
 
     /**

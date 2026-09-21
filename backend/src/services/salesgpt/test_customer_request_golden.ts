@@ -185,7 +185,8 @@ function run(): void {
   );
   passed++;
 
-  // Color after photo offer → send_image, never await_confirmation
+  // Bare color must NOT force send_image via the removed preferSendImage heuristic.
+  // Image attach is gated by isExplicitPhotoRequest on the current message only.
   const photoColor = resolveOrderNextAction({
     aiNextAction: 'await_confirmation',
     fieldsComplete: false,
@@ -196,15 +197,15 @@ function run(): void {
     collectedInfo: { product_name: 'Watch', color: 'أحمر' },
     responseText: 'تمام null! طلبك جاهز للتأكيد',
     missingFields: ['name', 'phone', 'address'],
-    preferSendImage: true
+    preferSendImage: true, // ignored / deprecated
   });
   assert(
-    photoColor.nextAction === 'send_image',
-    `color after photo should send_image, got ${photoColor.nextAction}`
+    photoColor.nextAction !== 'send_image',
+    `bare color must not force send_image via preferSendImage, got ${photoColor.nextAction}`
   );
   assert(
     !/جاهز للتأكيد/.test(photoColor.responseText),
-    'photo color reply must not show confirmation summary'
+    'incomplete-order color reply must not show confirmation summary'
   );
   passed++;
 

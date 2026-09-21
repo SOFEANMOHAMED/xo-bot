@@ -46,8 +46,8 @@ export interface ResolveTurnIntentInput {
   userMessage: string;
   customerRequest?: CustomerRequestSignals | null;
   /**
-   * Color reply after the bot offered a photo — treated as browse_media
-   * so checkout rails do not steal the turn.
+   * @deprecated Do not use — photo intent must come from the current message only.
+   * Kept optional so older call sites compile; ignored when classifying.
    */
   variantAfterPhotoOffer?: boolean;
   /** Precomputed by caller (orderConfirmationPolicy.isProductInfoRequest / model flag). */
@@ -64,15 +64,13 @@ export function resolveTurnIntent(input: ResolveTurnIntentInput): TurnIntent {
   const {
     userMessage,
     customerRequest,
-    variantAfterPhotoOffer = false,
     asksProductInfo = false,
     isFinalizing = false,
   } = input;
 
+  // Current message only — never infer photo from prior bot/user turns.
   const photo =
-    isExplicitPhotoRequest(userMessage) ||
-    customerRequest?.wantsPhoto === true ||
-    variantAfterPhotoOffer;
+    isExplicitPhotoRequest(userMessage) || customerRequest?.wantsPhoto === true;
 
   // Finalize only when not clearly asking for a photo in the same breath
   if ((isFinalizing || customerRequest?.readyToConfirm) && !photo) {

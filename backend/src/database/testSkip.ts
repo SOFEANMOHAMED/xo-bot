@@ -15,7 +15,6 @@ export const KNOWN_PENDING_SUITES: readonly string[] = Object.freeze([
   'test-p0-cart-integrity',
   'test-p0-color-focus',
   'test-commerce-engine',
-  'test-pending-bot-question',
   'test-verification-matrix-pending',
   'test-collect-info-order',
 ]);

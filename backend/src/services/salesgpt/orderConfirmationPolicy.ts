@@ -438,8 +438,7 @@ export interface ResolveOrderActionInput {
   /** Missing identity/product fields after sanitizing placeholders. */
   missingFields?: string[];
   /**
-   * Customer picked a color/size after the bot offered a photo (or asked
-   * which colour to show). Never treat that as checkout.
+   * @deprecated Unused — photo turns are gated by TurnIntent from the current message only.
    */
   preferSendImage?: boolean;
   /** Pre-formatted cart lines for multi-item await_confirmation summary. */
@@ -477,7 +476,6 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
     responseText,
     modelAsksProductInfo,
     missingFields = [],
-    preferSendImage = false,
     cartLinesSummary,
     turnIntent = 'other',
     lastBotReply = '',
@@ -578,24 +576,6 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
     effectivelyComplete &&
     customerWantsFinalize &&
     (botAskedConfirm || fieldsWereCompleteBeforeTurn || (declinesMore && botAskedAddMore));
-
-  const photoCaptionFallback =
-    language === 'arabic'
-      ? 'تمام، رح أرسلك صورة هذا الخيار.'
-      : 'Sure — I will send a photo of that option.';
-
-  // Color/size after a photo offer is browsing, not checkout.
-  if (preferSendImage && !allowedToFinalize) {
-    const keepCaption =
-      responseText.trim().length > 0 &&
-      !isPrematureCheckoutCopy(responseText);
-    return {
-      nextAction: 'send_image',
-      responseText: keepCaption ? responseText : photoCaptionFallback,
-      awaitingConfirmation: false,
-      reason: 'variant_after_photo_offer'
-    };
-  }
 
   // Finalize only after an explicit yes while we were already ready / awaiting.
   if (allowedToFinalize) {
