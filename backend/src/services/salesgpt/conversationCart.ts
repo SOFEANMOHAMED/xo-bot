@@ -31,10 +31,33 @@ function emptyCart(): ConversationCart {
   return { items: [], status: 'building', updatedAt: new Date().toISOString() };
 }
 
-export function normalizeCart(cart: ConversationCart | null | undefined): ConversationCart {
+export type NormalizeCartOptions = {
+  /** Store default — used only when a line has no currency of its own. */
+  storeCurrency?: string | null;
+};
+
+/** Line currency: product first, then store. Never invent a hard-coded code. */
+export function resolveLineCurrency(
+  product: Product | null | undefined,
+  storeCurrency?: string | null
+): string {
+  const fromProduct =
+    typeof product?.currency === 'string' ? product.currency.trim() : '';
+  if (fromProduct) return fromProduct;
+  const fromStore =
+    typeof storeCurrency === 'string' ? storeCurrency.trim() : '';
+  return fromStore;
+}
+
+export function normalizeCart(
+  cart: ConversationCart | null | undefined,
+  options?: NormalizeCartOptions
+): ConversationCart {
   if (!cart || !Array.isArray(cart.items)) {
     return emptyCart();
   }
+  const storeFallback =
+    typeof options?.storeCurrency === 'string' ? options.storeCurrency.trim() : '';
   const items = cart.items
     .filter((item): item is CartItem =>
       !!item &&
@@ -43,22 +66,31 @@ export function normalizeCart(cart: ConversationCart | null | undefined): Conver
       typeof item.productName === 'string' &&
       item.productName.trim().length > 0
     )
-    .map((item) => ({
-      productId: item.productId.trim(),
-      productName: item.productName.trim(),
-      quantity:
-        typeof item.quantity === 'number' && item.quantity > 0
-          ? Math.min(Math.floor(item.quantity), 99)
-          : 1,
-      unitPrice:
-        typeof item.unitPrice === 'number' && Number.isFinite(item.unitPrice)
-          ? item.unitPrice
-          : 0,
-      currency: (item.currency || 'USD').trim() || 'USD',
-      color: sanitizeCollectedText(item.color),
-      size: sanitizeCollectedText(item.size),
-      addedAt: item.addedAt || new Date().toISOString(),
-    }));
+    .map((item) => {
+      const own =
+        typeof item.currency === 'string' ? item.currency.trim() : '';
+      return {
+        lineId:
+          typeof item.lineId === 'string' && item.lineId.trim()
+            ? item.lineId.trim()
+            : undefined,
+        productId: item.productId.trim(),
+        productName: item.productName.trim(),
+        quantity:
+          typeof item.quantity === 'number' && item.quantity > 0
+            ? Math.min(Math.floor(item.quantity), 99)
+            : 1,
+        unitPrice:
+          typeof item.unitPrice === 'number' && Number.isFinite(item.unitPrice)
+            ? item.unitPrice
+            : 0,
+        // Keep the line's currency; fall back to store only — never hard-code USD.
+        currency: own || storeFallback,
+        color: sanitizeCollectedText(item.color),
+        size: sanitizeCollectedText(item.size),
+        addedAt: item.addedAt || new Date().toISOString(),
+      };
+    });
   return {
     items,
     status: cart.status === 'checking_out' ? 'checking_out' : 'building',
@@ -129,17 +161,40 @@ export function findCompatibleCartLineIndex(
   return items.findIndex((row) => isCompatibleCartLine(row, incoming as CartItem));
 }
 
-function canonicalizeLineColor(
+/**
+ * Catalog-bound color for one product line.
+ * Products without colors never receive a color (null) — no cross-SKU inheritance.
+ */
+export function canonicalizeLineColor(
   color: string | undefined,
   product?: Product | null
-): string | undefined {
+): string | null {
   const raw = specifiedVariant(color);
-  if (!raw) return undefined;
-  if (product?.colors && product.colors.length > 0) {
-    const matched = matchColorOption(raw, product.colors).matched;
-    if (matched) return matched;
+  if (!raw) return null;
+  const options = product?.colors;
+  if (!options?.length) return null;
+  return matchColorOption(raw, options).matched || null;
+}
+
+/**
+ * When the focused catalog product changes, drop draft product/color/size
+ * so the next SKU cannot inherit the previous line's variants.
+ */
+export function clearDraftOnFocusChange(
+  entities: Entities | null | undefined,
+  focusedProduct: Product | null | undefined
+): Entities {
+  const prev = { ...(entities || {}) };
+  const focusId = focusedProduct?.id ? String(focusedProduct.id) : undefined;
+  const prevId = sanitizeCollectedText(prev.product_id);
+  if (!focusId || !prevId || prevId === focusId) {
+    return prev;
   }
-  return raw;
+  return {
+    ...clearProductDraftFields(prev),
+    product_id: focusId,
+    product_query: sanitizeCollectedText(focusedProduct?.name),
+  };
 }
 
 function mergeCartLine(
@@ -267,6 +322,9 @@ export function buildCartItemFromDraft(params: {
 
   if (!productId || !productName) return null;
 
+  // Color only when this product owns catalog colors and the draft color matches them.
+  const lineColor = canonicalizeLineColor(entities.color, product);
+
   const qtyRaw = entities.quantity;
   const quantity =
     typeof qtyRaw === 'number' && qtyRaw > 0 ? Math.min(Math.floor(qtyRaw), 99) : 1;
@@ -279,8 +337,8 @@ export function buildCartItemFromDraft(params: {
       typeof product?.price === 'number' && Number.isFinite(product.price)
         ? product.price
         : 0,
-    currency: currency || product?.currency || 'USD',
-    color: canonicalizeLineColor(entities.color, product),
+    currency: resolveLineCurrency(product, currency),
+    color: lineColor || undefined,
     size: sanitizeCollectedText(entities.size),
     addedAt: new Date().toISOString(),
   };
@@ -369,37 +427,58 @@ export function applyDraftToCart(
 /**
  * Write draft color/size onto the matching cart line without adding SKUs.
  * Safe mid-conversation (does not require a complete draft, does not clear entities).
+ * Empty cart + complete draft → promote one line so the chosen color has a home.
  */
 export function fillCartVariantsFromDraft(
   state: ConversationState,
   product?: Product | null
 ): ConversationState {
-  const items = getCartItems(state);
-  if (items.length === 0) return state;
-
   const entities = state.extracted_entities || {};
   const productId =
     sanitizeCollectedText(entities.product_id) ||
     (product?.id ? String(product.id) : undefined);
   if (!productId) return state;
 
-  const color = canonicalizeLineColor(entities.color, product);
+  // Never apply a draft color to a different product than the one under focus.
+  if (product?.id && productId !== String(product.id)) {
+    return state;
+  }
+
+  const items = getCartItems(state);
+  if (items.length === 0) {
+    if (!product || !isDraftLineComplete(entities, product).complete) {
+      return state;
+    }
+    const item = buildCartItemFromDraft({
+      entities,
+      product,
+      currency: resolveLineCurrency(product),
+    });
+    if (!item) return state;
+    return {
+      ...state,
+      cart: addItemToCart(emptyCart(), item),
+    };
+  }
+
+  const color = canonicalizeLineColor(entities.color, product) || undefined;
   const size = sanitizeCollectedText(entities.size);
   if (!color && !size) return state;
 
+  const existing = items.find((row) => row.productId === productId);
   const stub: CartItem = {
     productId,
     productName:
+      existing?.productName ||
       sanitizeCollectedText(product?.name) ||
       sanitizeCollectedText(entities.product_query) ||
-      items.find((row) => row.productId === productId)?.productName ||
       'Product',
     quantity: 1,
-    unitPrice: 0,
-    currency: items.find((row) => row.productId === productId)?.currency || 'USD',
+    unitPrice: existing?.unitPrice && existing.unitPrice > 0 ? existing.unitPrice : 0,
+    currency: existing?.currency || resolveLineCurrency(product),
     color,
     size,
-    addedAt: new Date().toISOString(),
+    addedAt: existing?.addedAt || new Date().toISOString(),
   };
 
   const idx = findCompatibleCartLineIndex(items, stub);
@@ -726,7 +805,7 @@ export function buildCartItemsFromProducts(
       typeof product.price === 'number' && Number.isFinite(product.price)
         ? product.price
         : 0,
-    currency: currency || product.currency || 'USD',
+    currency: resolveLineCurrency(product, currency),
     addedAt: now,
   }));
 }

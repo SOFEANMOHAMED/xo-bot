@@ -139,6 +139,8 @@ export interface ChannelBinding {
  * Price is snapshotted at add time so checkout totals stay stable.
  */
 export interface CartItem {
+  /** Stable id for line ops (add/merge/update/remove). Optional for legacy rows. */
+  lineId?: string;
   productId: string;
   productName: string;
   quantity: number;

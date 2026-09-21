@@ -73,6 +73,7 @@ import {
     buildCartItemsFromProducts,
     buildCartSyncedMessage,
     cartHasItems,
+    clearDraftOnFocusChange,
     coerceSafeQuantity,
     detectsAddAnotherIntent,
     ensureCartForCheckout,
@@ -235,12 +236,9 @@ function resolveProductOrderColor(params: {
     policy: ResolveOrderColorResult | null;
 } {
     const catalogColors = params.product?.colors;
+    // Colorless SKUs never inherit a draft/AI color from another product.
     if (!catalogColors?.length) {
-        const fallback =
-            params.aiColor ||
-            params.conversationState.extracted_entities?.color ||
-            null;
-        return { color: fallback, replyText: params.replyText, policy: null };
+        return { color: null, replyText: params.replyText, policy: null };
     }
 
     const userMessages = collectUserMessageTexts(params.recentMessages, params.messageText);
@@ -572,15 +570,15 @@ export const processWithSalesGPT = async (
         }
 
         if (productsForCart.length >= 1) {
-            const currency = merchantConfig.storeCurrency || merchantConfig.currency;
-            const cartItems = buildCartItemsFromProducts(productsForCart, messageText, currency);
+            const storeCurrency = merchantConfig.storeCurrency || merchantConfig.currency;
+            const cartItems = buildCartItemsFromProducts(productsForCart, messageText, storeCurrency);
             // Prefer qty 1 when "both" phrasing made AI/heuristic think quantity=2
             const safeItems = cartItems.map((item) => ({
                 ...item,
                 quantity: coerceSafeQuantity(messageText, item.quantity) ?? item.quantity,
             }));
             const syncedState = replaceCartItems(conversationState, safeItems);
-            const cart = normalizeCart(syncedState.cart);
+            const cart = normalizeCart(syncedState.cart, { storeCurrency });
             const reply = buildCartSyncedMessage(language, cart);
             const updatedMulti: ConversationState = {
                 ...syncedState,
@@ -641,12 +639,19 @@ export const processWithSalesGPT = async (
         ).complete ||
             cartHasItems(conversationState))
     ) {
+        const storeCurrency = merchantConfig.storeCurrency || merchantConfig.currency;
+        // Focus product wins; never carry previous SKU color onto a new line.
+        const focused = clearDraftOnFocusChange(
+            conversationState.extracted_entities,
+            products[0]
+        );
         const draftEntities = {
-            ...(conversationState.extracted_entities || {}),
-            color: colorForFastPath || conversationState.extracted_entities?.color,
-            product_id: products[0]?.id || conversationState.extracted_entities?.product_id,
-            product_query:
-                products[0]?.name || conversationState.extracted_entities?.product_query,
+            ...focused,
+            color: products[0]?.colors?.length
+                ? colorForFastPath || focused.color
+                : undefined,
+            product_id: products[0]?.id || focused.product_id,
+            product_query: products[0]?.name || focused.product_query,
         };
         const draftReady = isDraftLineComplete(draftEntities, products[0]).complete;
         let stateForAdd: ConversationState = {
@@ -659,7 +664,7 @@ export const processWithSalesGPT = async (
             const locked = lockDraftIntoCart(
                 stateForAdd,
                 products[0],
-                merchantConfig.storeCurrency || merchantConfig.currency
+                storeCurrency
             );
             if (locked.locked) {
                 stateForAdd = locked.state;
@@ -668,7 +673,7 @@ export const processWithSalesGPT = async (
         }
 
         if (lockedItem || cartHasItems(stateForAdd)) {
-            const cart = normalizeCart(stateForAdd.cart);
+            const cart = normalizeCart(stateForAdd.cart, { storeCurrency });
             const displayItem =
                 lockedItem ||
                 cart.items[cart.items.length - 1]!;
@@ -982,6 +987,13 @@ export const processWithSalesGPT = async (
         salesResult.collectedInfo.color = undefined;
     }
 
+    const storeCurrency = merchantConfig.storeCurrency || merchantConfig.currency;
+    // Drop previous SKU variants when catalog focus moved (e.g. watch → shirt).
+    const focusedEntities = clearDraftOnFocusChange(
+        conversationState.extracted_entities,
+        products[0]
+    );
+
     const updatedState: ConversationState = {
         ...conversationState,
         last_intent: salesResult.intent,
@@ -989,20 +1001,22 @@ export const processWithSalesGPT = async (
         language,
         last_order: isReturningAfterOrder ? undefined : conversationState.last_order,
         awaiting_order_confirmation: salesResult.nextAction === AWAIT_CONFIRMATION_ACTION,
-        cart: normalizeCart(conversationState.cart),
+        cart: normalizeCart(conversationState.cart, { storeCurrency }),
         extracted_entities: {
-            ...(conversationState.extracted_entities || {}),
+            ...focusedEntities,
             product_query:
                 sanitizeCollectedText(salesResult.collectedInfo.product_name) ||
-                sanitizeCollectedText(conversationState.extracted_entities?.product_query),
+                sanitizeCollectedText(focusedEntities.product_query) ||
+                sanitizeCollectedText(products[0]?.name),
+            // Focused catalog product wins over a stale draft product_id.
             product_id:
+                (products[0]?.id ? String(products[0].id) : undefined) ||
                 sanitizeCollectedText(salesResult.collectedInfo.product_id) ||
-                sanitizeCollectedText(conversationState.extracted_entities?.product_id) ||
-                (products[0]?.id ? String(products[0].id) : undefined),
+                sanitizeCollectedText(focusedEntities.product_id),
             color: resolvedColor || undefined,
             size:
                 sanitizeCollectedText(salesResult.collectedInfo.size) ||
-                sanitizeCollectedText(conversationState.extracted_entities?.size),
+                sanitizeCollectedText(focusedEntities.size),
             quantity: (() => {
                 const fromAi = coerceSafeQuantity(
                     messageText,
@@ -1010,17 +1024,17 @@ export const processWithSalesGPT = async (
                 );
                 if (fromAi !== undefined) return fromAi;
                 if (messageSignalsBothProducts(messageText)) return undefined;
-                return conversationState.extracted_entities?.quantity;
+                return focusedEntities.quantity;
             })(),
             name:
                 sanitizeCollectedText(salesResult.collectedInfo.name) ||
-                sanitizeCollectedText(conversationState.extracted_entities?.name),
+                sanitizeCollectedText(focusedEntities.name),
             phone:
                 sanitizeCollectedText(salesResult.collectedInfo.phone) ||
-                sanitizeCollectedText(conversationState.extracted_entities?.phone),
+                sanitizeCollectedText(focusedEntities.phone),
             address:
                 sanitizeCollectedText(salesResult.collectedInfo.address) ||
-                sanitizeCollectedText(conversationState.extracted_entities?.address)
+                sanitizeCollectedText(focusedEntities.address)
         },
         last_interaction: new Date().toISOString(),
         message_count: (conversationState.message_count || 0) + 1
@@ -1083,7 +1097,7 @@ export const processWithSalesGPT = async (
             finalReplyText = buildAddedToCartMessage(
                 language,
                 locked.item,
-                normalizeCart(locked.state.cart)
+                normalizeCart(locked.state.cart, { storeCurrency })
             );
             effectiveNextAction = ADD_TO_CART_ACTION;
             updatedState.awaiting_order_confirmation = false;

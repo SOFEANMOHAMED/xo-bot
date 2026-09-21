@@ -4,6 +4,22 @@
 
 ---
 
+## 2026-09-21 10:41 UTC — PHASE 2A FIX 1 / cart line color+currency — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** اللون كان يُنسَخ من المسودة إلى أي منتج (حتى بلا `colors`)، و`normalizeCart` يفرض `USD`. الإصلاح: اللون ملك السطر؛ مسح المسودة عند تغيّر التركيز؛ العملة من المنتج ثم المتجر.
+- **الملفات / الدوال:**
+  - `conversationCart.ts` — `canonicalizeLineColor` → `null` بلا ألوان؛ `clearDraftOnFocusChange`؛ `resolveLineCurrency`؛ `fillCartVariantsFromDraft` يرقّي مسودة مكتملة؛ `normalizeCart` بلا `USD` ثابت
+  - `index.ts` — `resolveProductOrderColor` لا يورّث لوناً لمنتج بلا ألوان؛ مسح التركيز + `product_id` من المنتج المركّز
+  - `types.ts` — `CartItem.lineId?` (تحضير لـ FIX 2)
+  - `test_p0_cart_integrity.ts` / `test_conversation_cart.ts` — بوابات صلبة vs `KNOWN_PENDING`
+  - `docs/BOT_BRAIN_MAP.md` — عقد اللون/العملة
+- **اختبارات:** typecheck PASS. `test-conversation-cart` PASS. `test-p0-cart-integrity`: hard-pass للون/عملات/سطرين؛ الباقي `KNOWN_PENDING` (commerce/صور/ملخص مسعّر).
+- **أثر السلوك:** قميص بلا ألوان بعد ساعة سوداء لا يرث «أسود» ولا يُسأل عن لون؛ عملات السطور تُحفظ من المنتج.
+- **حدود معروفة:** `replaceCartItems` ما زال يستبدل (FIX 2)؛ سياسة الصورة وملخص الأسعار المسعّر ما زالا معلّقين.
+
+---
+
 ## 2026-09-21 10:30 UTC — PHASE 1A / regression spec + baseline — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

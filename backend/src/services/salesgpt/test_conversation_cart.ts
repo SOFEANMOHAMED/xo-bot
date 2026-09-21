@@ -9,12 +9,16 @@
 import type { CartItem, ConversationState, Product } from '../../core/types.js';
 import {
   addItemToCart,
+  canonicalizeLineColor,
+  clearDraftOnFocusChange,
   ensureCartForCheckout,
   fillCartVariantsFromDraft,
   getCartItems,
   isCheckoutReady,
   lockDraftIntoCart,
+  normalizeCart,
   replaceCartItems,
+  resolveLineCurrency,
 } from './conversationCart.js';
 
 const WATCH_ID = 'aaaaaaaa-1111-4000-8000-000000000001';
@@ -263,6 +267,48 @@ function run(): void {
     shirtProduct
   );
   assert(shirtReady.complete, 'shirt without colors is checkout-ready');
+  passed++;
+
+  // 9) Colorless product never receives a draft color (FIX 1a).
+  assert(
+    canonicalizeLineColor('أسود', shirtProduct) === null,
+    'canonicalizeLineColor returns null when product has no colors'
+  );
+  assert(
+    canonicalizeLineColor('أسود', watchProduct) === 'أسود',
+    'canonicalizeLineColor matches catalog color on watch'
+  );
+  passed++;
+
+  // 10) Focus change clears draft color/size (FIX 1b).
+  const cleared = clearDraftOnFocusChange(
+    { product_id: WATCH_ID, product_query: 'ساعات', color: 'أسود', name: 'أحمد' },
+    shirtProduct
+  );
+  assert(cleared.product_id === SHIRT_ID, 'focus switches to shirt');
+  assert(!cleared.color, 'previous color cleared on focus change');
+  assert(cleared.name === 'أحمد', 'identity kept on focus change');
+  passed++;
+
+  // 11) Currency from product; normalizeCart never invents USD (FIX 1c).
+  assert(resolveLineCurrency(watchProduct, 'SAR') === 'USD', 'product currency wins over store');
+  assert(
+    resolveLineCurrency({ ...shirtProduct, currency: '' }, 'SAR') === 'SAR',
+    'store fallback when product has no currency'
+  );
+  const noUsd = normalizeCart({
+    status: 'building',
+    items: [line({ productId: WATCH_ID, productName: 'ساعات', unitPrice: 200, currency: 'SAR' })],
+  });
+  assert(noUsd.items[0].currency === 'SAR', 'normalizeCart keeps line currency');
+  const storeFallback = normalizeCart(
+    {
+      status: 'building',
+      items: [{ ...line({ productId: WATCH_ID, productName: 'ساعات', unitPrice: 200 }), currency: '' }],
+    },
+    { storeCurrency: 'SAR' }
+  );
+  assert(storeFallback.items[0].currency === 'SAR', 'normalizeCart falls back to store currency');
   passed++;
 
   console.log(`✅ conversation cart merge policy: ${passed} checks passed`);

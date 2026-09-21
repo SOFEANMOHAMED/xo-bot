@@ -343,9 +343,14 @@ flowchart TD
 | `cart.items[]` | سطور مؤكدة داخل المحادثة |
 | `lockDraftIntoCart` | نقل المسودة إلى سطر سلة ومسح حقول المنتج من المسودة |
 | `ensureCartForCheckout` | قبل await/confirm: ضمان وجود سطر سلة من المسودة |
-| `fillCartVariantsFromDraft` | كتابة اللون/المقاس على السطر المطابق فوراً |
-| `replaceCartItems` | تصحيح سلة متعددة المنتجات من الرسالة |
+| `fillCartVariantsFromDraft` | كتابة اللون/المقاس على السطر المطابق فوراً؛ إن السلة فارغة والمسودة مكتملة تُرقّى لسطر |
+| `replaceCartItems` | تصحيح/مزامنة سلة متعددة المنتجات من الرسالة |
+| `clearDraftOnFocusChange` | عند تغيّر المنتج المركّز: مسح product/color/size من المسودة (لا توريث بين SKUs) |
+| `canonicalizeLineColor` | لون السطر من كتالوج **نفس** المنتج فقط؛ إن لا ألوان → `null` |
+| `resolveLineCurrency` | عملة السطر من المنتج ثم عملة المتجر — بلا افتراض `USD` ثابت في `normalizeCart` |
 | `coerceSafeQuantity` | منع كمية 2 خاطئة عند صيغ «الاتنين / كلاهما» |
+
+**عقد اللون (PHASE 2A FIX 1):** اللون ملك السطر، لا المسودة العامة. منتج بلا `colors` لا يرث لوناً من مسودة/سلة منتج آخر.
 
 **اكتمال الدفع (`isCheckoutReady`):**
 
