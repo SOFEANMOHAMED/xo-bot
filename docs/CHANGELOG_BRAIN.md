@@ -4,6 +4,26 @@
 
 ---
 
+## 2026-09-21 09:55 UTC — STEP D re-review / PHASE 0 — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** trap داخل `swap_live_dist` لا يرث للاحقين بلا `set -E`؛ لا DRY_RUN ولا قفل؛ `sitemap.xml` متتبَّع رغم إعادة توليده؛ `prune` قد يحذف `dist.bak-20260920T212631Z`.
+- **الملفات / الدوال:**
+  - `scripts/deploy-lib.sh` — `acquire_deploy_lock`, `assert_live_db_connections`, `print_live_commit`, `backup_is_kept`, `wait_for_health`
+  - `scripts/deploy.sh` — `set -E` + trap على المستوى الأعلى قبل المبادلة؛ `DRY_RUN=1`؛ `prune_dist_backups` يحترم `dist.keep`
+  - `scripts/rollback.sh` — قفل + `assert_live_db_connections` + `print_live_commit`
+  - `scripts/test_deploy_err_trap.sh` — إثبات stub للـ ERR trap
+  - `backend/dist.keep` — يثبت `dist.bak-20260920T212631Z`
+  - `.gitignore` + `git rm --cached public/sitemap.xml`
+  - `docs/CHANGELOG_BRAIN.md` — هذا السجل + known issues
+- **اختبارات:** `bash -n` OK؛ `shellcheck -x` OK (0.9.0 من apt)؛ `test_deploy_err_trap.sh` طبع التلميح وخرج ≠0؛ `npm run generate:sitemap` أعاد كتابة `public/sitemap.xml`. لم يُنفَّذ deploy/rollback/pm2.
+- **أثر السلوك:** لا تغيير لعقد عقل البوت. لم تُمسّ `xobot_db` كتابةً.
+- **حدود معروفة / known issues:**
+  - `getRecentMessages` — `backend/src/controllers/conversation.controller.ts:getRecentMessages:1269` (تعليق ASC، SQL `ORDER BY created_at DESC` بلا `.reverse()`؛ المسار الحي للقنوات لا يستدعيه حالياً).
+  - `DRY_RUN=1` ما زال يشغّل بوابة الاختبار و`pg_dump` (قراءة فقط على DB).
+
+---
+
 ## 2026-09-21 09:49 UTC — STEP D fix / PHASE 0 — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

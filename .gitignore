@@ -4,6 +4,7 @@ backend/dist.new
 backend/dist.bak-*
 backend/dist.failed-*
 backend/dist.commit
+public/sitemap.xml
 backups/
 logs/
 *.log

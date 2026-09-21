@@ -1,0 +1,4 @@
+# Pin dist.bak-* basenames that prune_dist_backups must never delete.
+# WHY: dist.bak-20260920T212631Z is the only compiled copy of recovered PHASE-0
+# fixes besides recovered/ and the tarball under /root/backups.
+dist.bak-20260920T212631Z

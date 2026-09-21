@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
 # Restore the newest backend/dist.bak-* (copy, keep backup) and restart pm2.
-# Review before running. This script is not executed by the STEP D fix commit itself.
+# Review before running. Not executed by the STEP D re-review commit itself.
 
 set -euo pipefail
 
-DEFAULT_PORT=3001
-HEALTH_PATH=/api/health
-HEALTH_RETRY_SECONDS=5
-HEALTH_WAIT_SECONDS=90
 KEEP_FAILED_BUILDS=2
 PM2_APP=xobot-backend
+PG_CONTAINER="${PG_CONTAINER:-xobot-postgres}"
+PRODUCTION_DB_NAME=xobot_db
+TEST_DB_NAME=xobot_test
+DEPLOY_LOCK_FILE=/tmp/xobot-deploy.lock
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BACKEND="${ROOT}/backend"
-# shellcheck source=deploy-lib.sh
-source "${ROOT}/scripts/deploy-lib.sh"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Dynamic path — shellcheck cannot resolve dirname "$0".
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/deploy-lib.sh"
+
+acquire_deploy_lock "$DEPLOY_LOCK_FILE"
 
 newest_backup() {
   local newest=""
@@ -45,6 +49,7 @@ prune_failed_builds() {
   sorted="$(printf '%s\n' "${failed[@]}" | sort)"
   local i=0
   while IFS= read -r p; do
+    [[ -n "$p" ]] || continue
     if (( i < drop )); then
       rm -rf "$p"
     fi
@@ -83,4 +88,8 @@ restart_pm2
 if ! wait_for_health "$BACKEND" "ROLLBACK health check failed"; then
   exit 1
 fi
+if ! assert_live_db_connections "$PG_CONTAINER" "$PRODUCTION_DB_NAME" "$TEST_DB_NAME"; then
+  exit 1
+fi
+print_live_commit "$BACKEND"
 echo "ROLLBACK OK"

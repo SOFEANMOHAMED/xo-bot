@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
 # Atomic backend deploy: test gate → dist.new → swap live dist → pm2 → health.
-# Review before running. This script is not executed by the STEP D fix commit itself.
+# Review before running. Not executed by the STEP D re-review commit itself.
 #
+# DRY_RUN=1 — run through pre-swap dump, then exit before any mv/pm2.
 # WHY subshell NODE_ENV=test: a leaked NODE_ENV=test would make the live bot
 # load .env.test / xobot_test. Live restart always `unset NODE_ENV` first.
 
 set -euo pipefail
 
-DEFAULT_PORT=3001
-HEALTH_PATH=/api/health
-HEALTH_RETRY_SECONDS=5
-HEALTH_WAIT_SECONDS=90
 KEEP_DIST_BACKUPS=3
 PM2_APP=xobot-backend
 PG_CONTAINER="${PG_CONTAINER:-xobot-postgres}"
@@ -19,13 +16,20 @@ TEST_DB_NAME=xobot_test
 TEST_DB_SUFFIX=_test
 BACKUP_DIR=/root/backups
 MIN_DUMP_BYTES=$((100 * 1024))
+DEPLOY_LOCK_FILE=/tmp/xobot-deploy.lock
+DRY_RUN="${DRY_RUN:-0}"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BACKEND="${ROOT}/backend"
 ENV_TEST="${BACKEND}/.env.test"
 ROLLBACK_SH="${ROOT}/scripts/rollback.sh"
-# shellcheck source=deploy-lib.sh
-source "${ROOT}/scripts/deploy-lib.sh"
+DIST_KEEP_FILE="${BACKEND}/dist.keep"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Dynamic path — shellcheck cannot resolve dirname "$0".
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/deploy-lib.sh"
+
+acquire_deploy_lock "$DEPLOY_LOCK_FILE"
 
 refuse_dirty_git() {
   cd "$ROOT"
@@ -146,22 +150,29 @@ dump_production_db() {
   echo "==> dump OK (${size} bytes)"
 }
 
+# Rotate oldest dist.bak-* except names listed in backend/dist.keep.
 prune_dist_backups() {
-  local -a baks=()
+  local -a candidates=()
   local p
   for p in "$BACKEND"/dist.bak-*; do
     [[ -e "$p" ]] || continue
-    baks+=("$p")
+    if backup_is_kept "$p" "$DIST_KEEP_FILE"; then
+      echo "==> keep pinned backup $(basename "$p")"
+      continue
+    fi
+    candidates+=("$p")
   done
-  if (( ${#baks[@]} <= KEEP_DIST_BACKUPS )); then
+  if (( ${#candidates[@]} <= KEEP_DIST_BACKUPS )); then
     return 0
   fi
-  local drop=$(( ${#baks[@]} - KEEP_DIST_BACKUPS ))
+  local drop=$(( ${#candidates[@]} - KEEP_DIST_BACKUPS ))
   local sorted
-  sorted="$(printf '%s\n' "${baks[@]}" | sort)"
+  sorted="$(printf '%s\n' "${candidates[@]}" | sort)"
   local i=0
   while IFS= read -r p; do
+    [[ -n "$p" ]] || continue
     if (( i < drop )); then
+      echo "==> prune backup $(basename "$p")"
       rm -rf "$p"
     fi
     i=$((i + 1))
@@ -170,8 +181,6 @@ prune_dist_backups() {
 
 swap_live_dist() {
   cd "$BACKEND"
-  # WHY trap from here: any failure after swap begins needs an explicit rollback hint.
-  trap 'echo "DEPLOY FAILED after swap started — Rollback: '"${ROLLBACK_SH}"'"' ERR
   local stamp
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
   if [[ -d dist ]]; then
@@ -197,34 +206,31 @@ restart_pm2() {
   pm2 logs "$PM2_APP" --err --lines 100 --nostream || true
 }
 
-# After HTTP 200: live must use xobot_db only — never xobot_test.
-assert_live_db_connections() {
-  local prod_n test_n
-  prod_n="$(docker exec "$PG_CONTAINER" psql -U postgres -d postgres -Atc \
-    "SELECT count(*) FROM pg_stat_activity WHERE datname = '${PRODUCTION_DB_NAME}'")"
-  test_n="$(docker exec "$PG_CONTAINER" psql -U postgres -d postgres -Atc \
-    "SELECT count(*) FROM pg_stat_activity WHERE datname = '${TEST_DB_NAME}'")"
-  echo "==> pg_stat_activity ${PRODUCTION_DB_NAME}=${prod_n} ${TEST_DB_NAME}=${test_n}"
-  if [[ -z "$prod_n" || "$prod_n" -lt 1 ]]; then
-    echo "ROLLBACK NOW — no connections on ${PRODUCTION_DB_NAME}"
-    exit 1
-  fi
-  if [[ -z "$test_n" || "$test_n" -ne 0 ]]; then
-    echo "ROLLBACK NOW — unexpected connections on ${TEST_DB_NAME}"
-    exit 1
-  fi
-}
-
 refuse_dirty_git
 refuse_unreachable_test_db
 run_test_gate
 build_dist_new
 refuse_missing_live_extras
 dump_production_db
+
+if [[ "$DRY_RUN" == "1" ]]; then
+  echo "DRY RUN OK — nothing swapped/restarted"
+  exit 0
+fi
+
+# WHY set -E + top-level trap: a trap set inside a function does not fire in
+# later functions unless errtrace is on. Install here so restart_pm2/health fail
+# still print the rollback hint.
+set -E
+trap 'echo "DEPLOY FAILED after swap started — Rollback: '"${ROLLBACK_SH}"'"' ERR
+
 swap_live_dist
 restart_pm2
 if ! wait_for_health "$BACKEND" "Rollback: ${ROLLBACK_SH}"; then
   exit 1
 fi
-assert_live_db_connections
+if ! assert_live_db_connections "$PG_CONTAINER" "$PRODUCTION_DB_NAME" "$TEST_DB_NAME"; then
+  exit 1
+fi
+print_live_commit "$BACKEND"
 echo "DEPLOY OK $(git -C "$ROOT" rev-parse HEAD)"
