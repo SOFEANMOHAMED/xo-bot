@@ -4,14 +4,20 @@
  * A suite that is allowed to skip MUST print a `SKIPPED:` line (via skipSuite).
  * Silent exit 0 is a pass, not a skip.
  *
- * KNOWN_PENDING is an explicit allow-list in the runner (none marked yet)
+ * KNOWN_PENDING is an explicit allow-list in the runner
  * and/or a `KNOWN_PENDING:` stdout line. It is never counted as passed.
  */
 export const SKIPPED_LINE_PREFIX = 'SKIPPED:';
 export const KNOWN_PENDING_LINE_PREFIX = 'KNOWN_PENDING:';
 
-/** Suite npm script names reported as KNOWN_PENDING on failure. Empty on purpose. */
-export const KNOWN_PENDING_SUITES: readonly string[] = Object.freeze([]);
+/** Reconstructed regressions whose target production slices are not restored yet. */
+export const KNOWN_PENDING_SUITES: readonly string[] = Object.freeze([
+  'test-p0-cart-integrity',
+  'test-p0-color-focus',
+  'test-commerce-engine',
+  'test-pending-bot-question',
+  'test-verification-matrix-pending',
+]);
 
 export function skipSuite(reason: string): never {
   const text = reason.trim() || 'unspecified reason';

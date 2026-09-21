@@ -4,6 +4,34 @@
 
 ---
 
+## 2026-09-21 10:30 UTC — PHASE 1A / regression spec + baseline — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** مواصفات انحدار مستعادة من `dist.bak-20260920T212631Z` كـ TypeScript فقط؛ السلوك الإنتاجي الحالي لا يمرّها. بوابة صريحة عبر `KNOWN_PENDING_SUITES` + سطر `KNOWN_PENDING:`.
+- **الملفات / الدوال:**
+  - `backend/src/services/salesgpt/realTestCatalog.ts` — كتالوج الاختبار الثابت
+  - `test_pipeline_harness_state.ts` / `test_pipeline_hooks.ts` — stub كتالوج + `generateJSON` عبر `module.register`
+  - `test_p0_cart_integrity.ts` (يشمل `playground-2026-09-21`) / `test_p0_color_focus.ts` / `test_commerce_engine.ts` / `test_pending_bot_question.ts`
+  - `test_verification_matrix_pending.ts` — M24–M35
+  - `package.json` — سكربتات الاختبار الجديدة
+  - `testSkip.ts` — `KNOWN_PENDING_SUITES`
+  - `docs/CHANGELOG_BRAIN.md` — هذا السجل
+- **اختبارات (`npm run typecheck` + `npm run test-all`):** typecheck PASS. **14 passed، 0 failed، 0 skipped، 5 known_pending من 19.**
+  - خط الأساس (تجميع سبب الفشل):
+    1. **وحدات غائبة عن main:** `commerceEngine` / `pendingBotQuestion` (وواجهاتهما) — commerce + pending + أجزاء P0.
+    2. **حالة السلة/اللون في المسار الحي:** playground T5–T11 — لا يُسجَّل أسود على الساعة؛ صورة تُرفَق رغم الرفض؛ بعد «بدي ضيف القميص كمان» سطر واحد بدل اثنين؛ ملخص بلا عملات منفصلة.
+    3. **تركيز اللون / grounding:** P0 color-focus — ادّعاءات ألوان/موبايل غير مقيَّدة.
+    4. **M24–M35:** قدرات مستعادة ناقصة (سعر grounding، handoff، memory، نبرة منطوقة، إلخ).
+- **أثر السلوك:** لا تغيير إنتاجي. لا deploy/pm2.
+- **حدود معروفة / تشخيص قراءة فقط (بلا إصلاح):**
+  - (a) إزالة الساعة عند إضافة القميص: انظر `processWithSalesGPT` → `shouldSyncMultiProductCart` + `replaceCartItems` (`index.ts` ~560–582، `conversationCart.ts:shouldSyncMultiProductCart:737`، `replaceCartItems:427`) — إعادة بناء السلة من المنتجات المذكورة فقط تمسح ما لم يُذكر.
+  - (b) لون «اسود» على القميص: `canonicalizeLineColor` (`conversationCart.ts:132`) يعيد اللون الخام إن لم يكن للمنتج ألوان؛ `buildCartItemFromDraft` / `fillCartVariantsFromDraft` / `lockDraftIntoCart` تنسخ مسودة اللون.
+  - (c) صورة مرتين + فشل التحميل: `agent.ts` يفضّل `send_image` بعد عرض صورة عند رد لون (~399–447)؛ `index.ts` يرفق `[IMAGE:]` عند `next_action===send_image` (~899–937). الرابط يُبنى مطلقاً عبر `BACKEND_URL||BASE_URL||https://xo-bot.com` + `/api/products/:id/image` (`index.ts:convertImageUrlForBot:183`، `resolve-product-image.ts:buildBotImageUrl:83`) فيُتجاهل `imageUrl` الخارجي — المتصفح يفشل إن لم يخدم الـ API الصورة.
+  - (d) تكرار «ممكن أطلب عنوانك»: مسار playground يمرّ `conversationIngressQueue.enqueue` ثم `handleIncomingMessage` ثم `appendMessage` مرة لكل دفعة (`ai.controller.ts` ~163–280). الـ dedup يعتمد `externalMessageId`؛ الـ playground يولّد id فريداً كل طلب فلا يمنع النقر المزدوج. التكرار الأرجح دورَا LLM منفصلان (`collect_info`) لا دمج طابور.
+  - `getRecentMessages` ASC/DESC — ما زال كما في STEP D.
+
+---
+
 ## 2026-09-21 10:02 UTC — STEP D final touch / PHASE 0 — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
