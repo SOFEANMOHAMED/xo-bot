@@ -11,6 +11,8 @@ import {
   mentionedColorOutsideCatalog,
   resolveWantedCatalogColor,
 } from './orderColorPolicy.js';
+import { extractBareColorAnswer } from './pendingBotQuestion.js';
+import { isSellableProduct } from './resolveFocus.js';
 
 export type VariantChangeResolution =
   | {
@@ -86,15 +88,13 @@ function pickTargetProductId(input: ResolveVariantChangeInput): string | null {
 }
 
 /**
- * Resolve a color/size correction against the target product's real catalog colors.
- * Returns `none` when the message is not a variant correction or no actionable color.
+ * Resolve a color/size correction or bare color pick against the target
+ * product's real catalog colors.
+ * Returns `none` when there is no actionable positive color.
  */
 export function resolveVariantChange(
   input: ResolveVariantChangeInput
 ): VariantChangeResolution {
-  if (!isInterimVariantCorrectionIntent(input.messageText)) {
-    return { kind: 'none' };
-  }
   if (!input.cartLines.length) {
     return { kind: 'none' };
   }
@@ -103,6 +103,10 @@ export function resolveVariantChange(
   if (!productId) return { kind: 'none' };
 
   const product = productById(input.products, productId);
+  if (!isSellableProduct(product)) {
+    return { kind: 'none' };
+  }
+
   const catalogColors = product?.colors || [];
   const wanted = resolveWantedCatalogColor(input.messageText, catalogColors);
   const unavailable = wanted
@@ -110,6 +114,15 @@ export function resolveVariantChange(
     : mentionedColorOutsideCatalog(input.messageText, catalogColors);
 
   if (!wanted && !unavailable) {
+    return { kind: 'none' };
+  }
+
+  const isCorrection = isInterimVariantCorrectionIntent(input.messageText);
+  const isBarePick = Boolean(
+    wanted && extractBareColorAnswer(input.messageText, catalogColors)
+  );
+  // Corrections («لا ما بدي اسود بدي احمر») or bare picks («بدي الأحمر» / «الأسود»).
+  if (!isCorrection && !isBarePick && !unavailable) {
     return { kind: 'none' };
   }
 

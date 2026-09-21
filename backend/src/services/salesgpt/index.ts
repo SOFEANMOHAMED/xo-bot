@@ -63,6 +63,7 @@ import {
     violatesNoMatchGrounding,
     buildNoMatchFallbackMessage,
     isGenuineCatalogNoMatch,
+    validateCatalogReplyGrounding,
 } from './catalogGrounding.js';
 import { isExplicitPhotoRequest } from './turnIntent.js';
 import {
@@ -115,6 +116,12 @@ import {
     buildVariantUpdatedMessage,
     resolveVariantChange,
 } from './resolveVariantChange.js';
+import {
+    buildGroundedCatalogFallback,
+    buildOutOfStockMessage,
+    isSellableProduct,
+    resolveFocus,
+} from './resolveFocus.js';
 
 // Re-export confirmation helpers so channel controllers keep a stable import path
 export {
@@ -362,15 +369,12 @@ export const processWithSalesGPT = async (
         language
     });
 
-    // ==================== STEP 1: Product Search ====================
-    // Active product = focus for deep details. Catalog overview is ALWAYS attached
-    // so the model can answer alternatives truthfully without keyword gates.
+    // ==================== STEP 1: Product focus (resolveFocus) ====================
     let products: Product[] = [];
-    let activeProductId: string | null = conversationState.last_recommended_products?.[0] || null;
-    /** True when a real catalog hit came from strategies -1, 0a, 0, 1, or 2 — not Strategy 3. */
+    let activeProductId: string | null = null;
+    /** True when a real catalog hit came from the current message / pending / last bot / cart. */
     let searchMatchedQuery = false;
 
-    // Prefetch a wide catalog slice for name→message matching (images + multi-buy).
     const catalogForMention = await getTopProducts(merchantId, 40);
     const mentionedInMessage = findProductsMentionedInText(messageText, catalogForMention);
     const hadSpecificSearchIntent = hasSpecificProductSearchIntent({
@@ -379,86 +383,102 @@ export const processWithSalesGPT = async (
         productQuery: conversationState.extracted_entities?.product_query,
     });
 
-    // Strategy -1: seeded product from ad/post/comment acquisition (recommended start, not exclusive)
-    const seededProductId = conversationState.extracted_entities?.product_id;
-    if (seededProductId) {
-        const seeded = await getProductById(merchantId, seededProductId);
-        if (seeded) {
-            products = [seeded];
-            activeProductId = seeded.id;
-            searchMatchedQuery = true;
-            console.log('🎯 SalesGPT: Using acquisition-seeded product:', seeded.name);
-        }
-    }
-
-    // Strategy 0a: products named in the CURRENT message win (fixes wrong photo / focus).
-    if (mentionedInMessage.length > 0) {
-        products = mentionedInMessage;
-        activeProductId = mentionedInMessage[0].id;
-        searchMatchedQuery = true;
-        console.log('🎯 SalesGPT: Products mentioned in message:', {
-            names: mentionedInMessage.map((p) => p.name),
-        });
-    }
-
-    // Strategy 0: explicit entity query has highest priority for switching focus
-    if (mentionedInMessage.length === 0 && conversationState.extracted_entities?.product_query) {
-        products = await searchProducts(merchantId, conversationState.extracted_entities.product_query, undefined, 5);
-        if (products[0]) {
-            activeProductId = products[0].id;
-            searchMatchedQuery = true;
-        }
-    }
-
-    // Strategy 1: keyword extraction when we still have no focus product
-    if (products.length === 0) {
+    // Keyword search only expands "named in message" candidates — never overrides resolveFocus order.
+    let namedInMessage = mentionedInMessage;
+    if (namedInMessage.length === 0 && hadSpecificSearchIntent) {
         const smartKeywords = extractProductKeywords(messageText);
-        const meaningfulKeywords = smartKeywords.filter(k => k.length >= 3);
-        if (meaningfulKeywords.length > 0) {
-            const sortedKeywords = [...meaningfulKeywords].sort((a, b) => b.length - a.length);
-            for (const keyword of sortedKeywords) {
-                const searchResults = await searchProducts(merchantId, keyword, { inStockOnly: false }, 5);
-                if (searchResults.length > 0) {
-                    products = searchResults;
-                    activeProductId = searchResults[0]?.id || activeProductId;
-                    searchMatchedQuery = true;
-                    console.log('✅ SalesGPT: Found products from keywords:', {
-                        keyword,
-                        count: products.length,
-                        topProduct: searchResults[0]?.name
-                    });
-                    break;
-                }
+        const meaningfulKeywords = smartKeywords.filter((k) => k.length >= 3);
+        const sortedKeywords = [...meaningfulKeywords].sort((a, b) => b.length - a.length);
+        for (const keyword of sortedKeywords) {
+            const searchResults = await searchProducts(
+                merchantId,
+                keyword,
+                { inStockOnly: false },
+                5
+            );
+            if (searchResults.length > 0) {
+                namedInMessage = searchResults;
+                console.log('✅ SalesGPT: Found products from keywords:', {
+                    keyword,
+                    count: searchResults.length,
+                    topProduct: searchResults[0]?.name,
+                });
+                break;
             }
         }
     }
 
-    // Strategy 1b: photo request with no product name → prefer last discussed product
-    // by scanning recent user turns for catalog names (not stale wrong products[0]).
+    // Photo with no product name → recent user mention counts as named-in-message.
     const asksForPhoto = isExplicitPhotoRequest(messageText);
-    if (asksForPhoto && mentionedInMessage.length === 0) {
+    if (asksForPhoto && namedInMessage.length === 0) {
         for (let i = recentMessages.length - 1; i >= 0 && i >= recentMessages.length - 8; i--) {
             const msg = recentMessages[i];
             if (msg.role !== 'user') continue;
             const fromHistory = findProductsMentionedInText(msg.content || '', catalogForMention);
             if (fromHistory.length > 0) {
-                products = fromHistory;
-                activeProductId = fromHistory[0].id;
+                namedInMessage = fromHistory;
                 console.log('📸 SalesGPT: Photo focus from recent user mention:', fromHistory[0].name);
                 break;
             }
         }
     }
 
-    // Strategy 2: From conversation history
-    if (products.length === 0 && conversationState.last_recommended_products?.[0]) {
-        const productId = conversationState.last_recommended_products[0];
-        const product = await getProductById(merchantId, productId);
-        if (product) {
-            products = [product];
-            activeProductId = product.id;
+    const lastBotText = lastAssistantContent(recentMessages);
+    const lastBotProducts = findProductsMentionedInText(lastBotText, catalogForMention);
+    const storedPendingEarly = readPendingFromState(conversationState);
+    const pendingKindEarly = resolveIncomingPendingBotQuestion({
+        stored: storedPendingEarly.pending_bot_question,
+        lastBotReply: lastBotText,
+    });
+    const pendingProductIdEarly = resolveIncomingPendingProductId({
+        pending: pendingKindEarly,
+        mentionedProductId: namedInMessage[0]?.id ?? null,
+        lastBotProductId: lastBotProducts[0]?.id ?? null,
+        storedProductId: storedPendingEarly.pending_bot_question_product_id,
+    });
+
+    async function productById(id: string | null | undefined): Promise<Product | null> {
+        if (!id) return null;
+        const fromCatalog = catalogForMention.find((p) => p.id === id);
+        if (fromCatalog) return fromCatalog;
+        return getProductById(merchantId, id);
+    }
+
+    const pendingProduct = await productById(pendingProductIdEarly);
+    const cartLinesEarly = getCartItems(conversationState);
+    const cartFocusId =
+        conversationState.last_recommended_products?.[0] ||
+        cartLinesEarly[0]?.productId ||
+        null;
+    const cartFocusProduct = await productById(cartFocusId);
+    // Ad-seed is the draft product_id — resolveFocus uses it only as last resort.
+    const seededProduct = await productById(
+        conversationState.extracted_entities?.product_id || null
+    );
+
+    const focused = resolveFocus({
+        namedInMessage,
+        pendingProduct,
+        lastBotProduct: lastBotProducts[0] || null,
+        cartFocusProduct,
+        seededProduct,
+    });
+
+    if (focused.product) {
+        products = [focused.product];
+        activeProductId = focused.product.id;
+        // Seed alone is context, not proof the current message matched catalog.
+        if (focused.source !== 'seed' || namedInMessage.length > 0) {
             searchMatchedQuery = true;
-            console.log('📦 SalesGPT: Retrieved product from history:', product.name);
+        }
+        if (focused.source === 'message') {
+            console.log('🎯 SalesGPT: Products mentioned in message:', {
+                names: namedInMessage.map((p) => p.name),
+            });
+        } else if (focused.source === 'seed') {
+            console.log('🎯 SalesGPT: Using acquisition-seeded product:', focused.product.name);
+        } else {
+            console.log('📦 SalesGPT: Focus from', focused.source, focused.product.name);
         }
     }
 
@@ -468,12 +488,14 @@ export const processWithSalesGPT = async (
     );
 
     if (noMatchForSpecificQuery) {
-        // Genuine miss: do not treat a random top-catalog row as the "active" product.
         products = [];
         activeProductId = null;
     } else if (products.length === 0) {
-        // Strategy 3: Top products when still empty (browse / cold start)
-        products = catalogForMention.length > 0 ? catalogForMention.slice(0, 5) : await getTopProducts(merchantId, 5);
+        // Cold-start browse only — never a sticky seed substitute.
+        products =
+            catalogForMention.length > 0
+                ? catalogForMention.slice(0, 5)
+                : await getTopProducts(merchantId, 5);
         if (products[0]) activeProductId = products[0].id;
     }
 
@@ -785,7 +807,7 @@ export const processWithSalesGPT = async (
                   products.find((p) => p.id === pendingProductId)
                 : null) || null;
 
-        if (pendingKind && pendingProduct) {
+        if (pendingKind && pendingProduct && isSellableProduct(pendingProduct)) {
             const resolved = resolvePendingVariantAnswer({
                 pending: pendingKind,
                 userMessage: messageText,
@@ -1414,6 +1436,35 @@ export const processWithSalesGPT = async (
                 storeName,
                 catalogOverview,
             });
+        } else if (products[0] && !isSellableProduct(products[0])) {
+            // OOS focus: admit existence + unavailability; never offer colors/sizes.
+            salesResult.responseText = buildOutOfStockMessage(
+                language === 'english' ? 'english' : 'arabic',
+                products[0].name
+            );
+            salesResult.nextAction = 'present_product';
+            salesResult.collectedInfo = {
+                ...salesResult.collectedInfo,
+                color: undefined,
+                size: undefined,
+            };
+        } else {
+            const grounding = validateCatalogReplyGrounding({
+                responseText: salesResult.responseText,
+                products,
+                customerMessage: messageText,
+                catalogOverview,
+            });
+            if (!grounding.valid) {
+                logger.warn('SalesGPT: replaced reply with ungrounded catalog claims', {
+                    merchantId,
+                    reasons: grounding.reasons,
+                });
+                salesResult.responseText = buildGroundedCatalogFallback(
+                    products,
+                    language === 'english' ? 'english' : 'arabic'
+                );
+            }
         }
     } catch (error) {
         logger.error('SalesGPT agent failed', error as Error, { merchantId });
@@ -1507,22 +1558,26 @@ export const processWithSalesGPT = async (
     }
 
     // ==================== STEP 4: Build Updated Conversation State ====================
-    // Strict catalog-bound color — user history beats AI (prevents hallucinated overwrite)
+    // Strict catalog-bound color — never on OOS products; user history beats AI.
+    const focusProduct = products[0] && isSellableProduct(products[0]) ? products[0] : null;
     const colorResolution = resolveProductOrderColor({
-        product: products[0],
+        product: focusProduct || undefined,
         messageText,
         recentMessages,
         conversationState,
-        aiColor: salesResult.collectedInfo.color,
+        aiColor: focusProduct ? salesResult.collectedInfo.color : null,
         language,
         replyText: finalReplyText
     });
-    let resolvedColor = colorResolution.color;
+    let resolvedColor = focusProduct ? colorResolution.color : null;
     finalReplyText = colorResolution.replyText;
     if (resolvedColor) {
         salesResult.collectedInfo.color = resolvedColor;
-    } else if (products[0]?.colors?.length) {
+    } else if (focusProduct?.colors?.length) {
         salesResult.collectedInfo.color = undefined;
+    } else {
+        salesResult.collectedInfo.color = undefined;
+        salesResult.collectedInfo.size = undefined;
     }
 
     const storeCurrency = merchantConfig.storeCurrency || merchantConfig.currency;
@@ -1552,9 +1607,10 @@ export const processWithSalesGPT = async (
                 sanitizeCollectedText(salesResult.collectedInfo.product_id) ||
                 sanitizeCollectedText(focusedEntities.product_id),
             color: resolvedColor || undefined,
-            size:
-                sanitizeCollectedText(salesResult.collectedInfo.size) ||
-                sanitizeCollectedText(focusedEntities.size),
+            size: focusProduct
+                ? sanitizeCollectedText(salesResult.collectedInfo.size) ||
+                  sanitizeCollectedText(focusedEntities.size)
+                : undefined,
             quantity: (() => {
                 const fromAi = coerceSafeQuantity(
                     messageText,
@@ -1580,8 +1636,11 @@ export const processWithSalesGPT = async (
     applySalesGPTStage(updatedState, salesResult.stageId);
 
     // Write resolved color/size onto the matching cart line immediately (not only at confirm).
-    const filledVariants = fillCartVariantsFromDraft(updatedState, products[0]);
-    updatedState.cart = filledVariants.cart;
+    // Never create or mutate lines for out-of-stock products.
+    if (focusProduct) {
+        const filledVariants = fillCartVariantsFromDraft(updatedState, focusProduct);
+        updatedState.cart = filledVariants.cart;
+    }
 
     // Save product to history (draft focus)
     if (products.length > 0) {
@@ -1593,7 +1652,7 @@ export const processWithSalesGPT = async (
     // explicit customer finalization; otherwise await_confirmation.
     const confirmGate = gateConfirmWhenColorInvalid({
         nextAction: salesResult.nextAction,
-        product: products[0],
+        product: focusProduct || undefined,
         resolvedColor,
         language,
         replyText: finalReplyText,
@@ -1609,9 +1668,10 @@ export const processWithSalesGPT = async (
         (salesResult.customerRequest?.wantsAddAnother === true ||
             detectsAddAnotherIntent(messageText, salesResult.customerRequest?.wantsAddAnother));
     if (
+        focusProduct &&
         modelWantsAdd &&
         effectiveNextAction !== CONFIRM_ORDER_ACTION &&
-        (isDraftLineComplete(updatedState.extracted_entities, products[0]).complete ||
+        (isDraftLineComplete(updatedState.extracted_entities, focusProduct).complete ||
             cartHasItems(updatedState))
     ) {
         const qtySafe = coerceSafeQuantity(
@@ -1627,7 +1687,7 @@ export const processWithSalesGPT = async (
         };
         const locked = lockDraftIntoCart(
             stateForLock,
-            products[0],
+            focusProduct,
             merchantConfig.storeCurrency || merchantConfig.currency
         );
         if (locked.locked && locked.item) {
@@ -1646,12 +1706,13 @@ export const processWithSalesGPT = async (
 
     // Before await/confirm: promote complete draft into cart so ORDER_DATA is cart-backed.
     if (
-        effectiveNextAction === AWAIT_CONFIRMATION_ACTION ||
-        effectiveNextAction === CONFIRM_ORDER_ACTION
+        focusProduct &&
+        (effectiveNextAction === AWAIT_CONFIRMATION_ACTION ||
+            effectiveNextAction === CONFIRM_ORDER_ACTION)
     ) {
         const checkoutReady = ensureCartForCheckout(
             updatedState,
-            products[0],
+            focusProduct,
             merchantConfig.storeCurrency || merchantConfig.currency
         );
         updatedState.cart = checkoutReady.cart;
@@ -1709,9 +1770,11 @@ export const processWithSalesGPT = async (
     }
 
     // Ensure a color ask uses the deterministic template so pending binds cleanly.
-    const focusForPending = products[0];
+    // Never ask colors for OOS products or for products that have no real colors.
+    const focusForPending = focusProduct;
     if (
-        focusForPending?.colors?.length &&
+        focusForPending &&
+        focusForPending.colors?.length &&
         isDraftLineComplete(updatedState.extracted_entities, focusForPending).missing.includes(
             'color'
         )
@@ -1723,6 +1786,15 @@ export const processWithSalesGPT = async (
             );
             effectiveNextAction = 'collect_info';
         }
+    } else if (
+        focusForPending &&
+        !(focusForPending.colors && focusForPending.colors.length > 0) &&
+        /أي لون|الألوان المتاحة|which color|available colors/i.test(finalReplyText)
+    ) {
+        // Shirt etc. — strip invented color questions from the model.
+        finalReplyText = finalReplyText
+            .replace(/[^.!\n]*?(?:أي لون|الألوان المتاحة|which color|available colors)[^.!\n]*[.!]?\s*/gi, '')
+            .trim() || finalReplyText;
     }
 
     // Bind or clear pending_bot_question from the outbound template (never free LLM inference alone).

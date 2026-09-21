@@ -190,3 +190,136 @@ export function buildNoMatchFallbackMessage(params: NoMatchFallbackParams): stri
       : `What we actually carry:\n${list}`;
   return `${opener}\n${offer}`;
 }
+
+/** Common color words used for false-availability / ungrounded-color checks. */
+const COLOR_TERMS = [
+  'أحمر', 'احمر', 'أزرق', 'ازرق', 'أخضر', 'اخضر', 'أسود', 'اسود',
+  'أبيض', 'ابيض', 'أصفر', 'اصفر', 'بني', 'رمادي', 'وردي', 'ذهبي',
+  'فضي', 'بيج', 'كحلي',
+  'red', 'blue', 'green', 'black', 'white', 'yellow', 'brown', 'gray',
+  'grey', 'pink', 'gold', 'silver', 'beige', 'navy',
+] as const;
+
+function normalizeFact(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u064B-\u065F\u0670]/g, '')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+function sourceContainsFact(source: string, fact: string): boolean {
+  const normalizedFact = normalizeFact(fact);
+  if (!normalizedFact) return false;
+  return normalizeFact(source).includes(normalizedFact);
+}
+
+function factWindow(source: string, fact: string): string {
+  const hay = normalizeFact(source);
+  const needle = normalizeFact(fact);
+  if (!needle) return '';
+  const idx = hay.indexOf(needle);
+  if (idx < 0) return '';
+  return hay.slice(Math.max(0, idx - 28), idx + needle.length + 36);
+}
+
+function extractListedAvailableOptions(response: string): string[] {
+  const match = response.match(
+    /(?:الألوان المتاحة|الألوان المتوفرة|available colors)\s*[:：]?\s*([^\n]+)/i
+  );
+  if (!match?.[1]) return [];
+  return match[1]
+    .split(/[—,\n\/|]+/)
+    .map((part) => part.replace(/^\s*\d+\)\s*/, '').trim())
+    .filter((part) => part.length >= 2);
+}
+
+export type CatalogReplyGroundingInput = {
+  responseText: string;
+  products: Array<{
+    colors?: string[] | null;
+    sizes?: string[] | null;
+    stock?: number | null;
+    description?: string | null;
+    price?: number | null;
+  }>;
+  customerMessage?: string;
+  catalogOverview?: ProductOverviewRow[];
+  storeCurrencyLabels?: string[];
+  cartLines?: Array<{ quantity: number; unitPrice: number }>;
+  policyText?: string;
+};
+
+export type CatalogReplyGroundingResult = {
+  valid: boolean;
+  reasons: string[];
+};
+
+/**
+ * Deterministic checks for harmful catalog claims (color/stock).
+ * Used to rewrite replies that deny a real color or offer brand names as colors.
+ */
+export function validateCatalogReplyGrounding(
+  input: CatalogReplyGroundingInput
+): CatalogReplyGroundingResult {
+  const response = input.responseText || '';
+  const customerMessage = input.customerMessage || '';
+  const reasons = new Set<string>();
+
+  const allowedColorSource = [
+    ...input.products.flatMap((product) => product.colors || []),
+    customerMessage,
+  ].join(' ');
+  for (const color of COLOR_TERMS) {
+    if (
+      sourceContainsFact(response, color) &&
+      !sourceContainsFact(allowedColorSource, color)
+    ) {
+      reasons.add('ungrounded_color');
+      break;
+    }
+  }
+
+  if (input.products.length === 0) {
+    if (/الألوان المتاحة|الألوان المتوفرة|اختار لونا|أي لون|available colors|which color/i.test(response)) {
+      reasons.add('false_color_availability');
+    }
+  }
+
+  if (input.products.length === 1 && typeof input.products[0].stock === 'number' && input.products[0].stock <= 0) {
+    if (/الألوان المتاحة|الألوان المتوفرة|اختار لونا|أي لون|available colors|which color/i.test(response)) {
+      reasons.add('false_color_availability');
+    }
+  }
+
+  const catalogColorSource = input.products.flatMap((product) => product.colors || []).join(' ');
+  const unavailableCue = /غير\s*متوفر|نفد|مو موجود|not available|unavailable/i;
+  for (const color of COLOR_TERMS) {
+    if (!sourceContainsFact(response, color)) continue;
+    const inCatalog = sourceContainsFact(catalogColorSource, color);
+    const window = factWindow(response, color);
+    if (unavailableCue.test(window) && inCatalog) {
+      reasons.add('false_color_availability');
+      break;
+    }
+  }
+
+  const listedAvailable = extractListedAvailableOptions(response);
+  if (listedAvailable.length > 0 && input.products.length > 0) {
+    const sold = input.products.flatMap((product) => product.colors || []);
+    const mismatch = listedAvailable.some((option) => {
+      if (!option || option.length < 2) return false;
+      if (sold.length === 0) return true;
+      return !sold.some(
+        (color) => sourceContainsFact(color, option) || sourceContainsFact(option, color)
+      );
+    });
+    if (mismatch) reasons.add('false_color_availability');
+  }
+
+  return {
+    valid: reasons.size === 0,
+    reasons: [...reasons],
+  };
+}

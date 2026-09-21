@@ -4,6 +4,22 @@
 
 ---
 
+## 2026-09-21 13:55 UTC — PHASE 2D ITEM 1 / resolveFocus + OOS + color-focus — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** بذرة الإعلان وتركيز الموبايل النافد كانا يلصقان؛ سؤال اللون يعرض علامات تجارية من حقل `colors` للموبايل. أُضيف `resolveFocus` بترتيب ثابت؛ OOS لا يُختار للون/سلة؛ `validateCatalogReplyGrounding` يعيد كتابة الادعاءات الكاذبة.
+- **الملفات / الدوال:**
+  - `resolveFocus.ts` — `resolveFocus` / `isSellableProduct` / `buildOutOfStockMessage` / `buildGroundedCatalogFallback`
+  - `catalogGrounding.ts` — `validateCatalogReplyGrounding`
+  - `index.ts` — تركيز عبر resolveFocus؛ حراسة OOS؛ لا سؤال لون لمنتج بلا ألوان
+  - `resolveVariantChange.ts` — يتجاهل OOS؛ يقبل اختيار لون قصير
+  - `test_p0_color_focus.ts` يغادر KNOWN_PENDING · `testSkip.ts` · docs
+- **اختبارات:** typecheck PASS. `test-p0-color-focus` **35/35 PASS**.
+- **أثر السلوك:** الموبايل النافد يُقرّ بعدم التوفر بلا سطر سلة؛ الساعة ترث ألوانها فقط؛ القميص بلا سؤال لون.
+- **حدود معروفة:** collect-info-order ما زال معلّقاً (ITEM 2).
+
+---
+
 ## 2026-09-21 12:50 UTC — PHASE 2C ITEM 2 / resolveVariantChange + interim negation — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

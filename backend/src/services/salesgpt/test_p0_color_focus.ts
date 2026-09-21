@@ -312,8 +312,6 @@ if (grounding) {
 console.log(`P0 color-focus: ${passed} passed, ${failed} failed`);
 if (failures.length > 0) {
   for (const item of failures) console.error(`FAIL: ${item}`);
-  console.log(
-    'KNOWN_PENDING: product-scoped pending questions and full catalog claim validation are absent from the current source snapshot',
-  );
   process.exit(1);
 }
+process.exit(0);

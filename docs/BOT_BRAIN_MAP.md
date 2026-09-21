@@ -225,25 +225,27 @@ flowchart TD
 
 ## 8. بحث المنتج وتركيز الكتالوج (قبل الـ Agent)
 
-الملف: `services/salesgpt/index.ts` — STEP 1
+الملف: `services/salesgpt/resolveFocus.ts` + `index.ts` — STEP 1
 
-| الترتيب | الاستراتيجية | متى |
-|---------|--------------|-----|
-| −1 | منتج مُزرع من إعلان/تعليق (`extracted_entities.product_id`) | acquisition |
-| 0a | أسماء منتجات مذكورة في **الرسالة الحالية** | الأعلى لأولوية التركيز/الصورة |
-| 0 | `product_query` من الـ state | تبديل التركيز |
-| 1 | كلمات مفتاحية من الرسالة (`productKeywords`) | بحث |
-| 1b | طلب صورة بلا اسم → آخر ذكر منتج في رسائل المستخدم الحديثة | تركيز صورة |
-| 2 | `last_recommended_products[0]` | استمرار السياق |
-| 3 | Top products (تصفح / بداية باردة) | فقط إن لم يكن «عدم تطابق حقيقي» |
+`resolveFocus` — ترتيب ثابت (أول إصابة تفوز):
+
+| # | المصدر | ملاحظة |
+|---|--------|--------|
+| 1 | منتج مذكور في **الرسالة الحالية** (أسماء / كلمات مفتاحية / ذكر صورة من تاريخ المستخدم) | يشمل OOS للإقرار بعدم التوفر |
+| 2 | منتج `pending_bot_question` | **sellable فقط** |
+| 3 | منتج مذكور في **آخر رد بوت** | **sellable فقط** |
+| 4 | تركيز السلة / `last_recommended_products` | **sellable فقط** |
+| 5 | بذرة إعلان `extracted_entities.product_id` | **فقط إن لم يوجد شيء أعلاه** — بلا لصق |
+
+**OOS:** لا يصبح هدف لون/مقاس ولا سطر سلة؛ الرد: «موجود لكن غير متوفر». خيارات اللون/المقاس دائماً من المنتج المركّز القابل للبيع فقط.
 
 **عدم تطابق حقيقي (`noMatchForSpecificQuery`):**
 
 `hadSpecificSearchIntent && !searchMatchedQuery`
 
-عندها: لا يُعتبر صف عشوائي من التوب «المنتج النشط»، ولا تُرفق صورة عشوائية، ويُفعَّل فحص `catalogGrounding`.
+عندها: لا يُعتبر صف عشوائي من التوب «المنتج النشط»، ولا تُرفق صورة عشوائية، ويُفعَّل فحص `catalogGrounding` (`validateCatalogReplyGrounding` يرفض إنكار لون حقيقي أو عرض علامات تجارية كألوان).
 
-دائماً يُرفق: `getProductsOverview` + `getCatalogMeta` كـ `CatalogAwareness` حتى يجيب النموذج بصدق عن البدائل.
+دائماً يُرفق: `getProductsOverview` + `getCatalogMeta` كـ `CatalogAwareness`.
 
 ---
 

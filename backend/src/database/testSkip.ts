@@ -13,7 +13,6 @@ export const KNOWN_PENDING_LINE_PREFIX = 'KNOWN_PENDING:';
 /** Reconstructed regressions whose target production slices are not restored yet. */
 export const KNOWN_PENDING_SUITES: readonly string[] = Object.freeze([
   'test-p0-cart-integrity',
-  'test-p0-color-focus',
   'test-commerce-engine',
   'test-verification-matrix-pending',
   'test-collect-info-order',
