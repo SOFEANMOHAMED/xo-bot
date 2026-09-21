@@ -4,6 +4,28 @@
 
 ---
 
+## 2026-09-21 09:44 UTC — STEP D / PHASE 0 — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:**
+  - **D0a:** بعد نجاح المنطق علّقت السويتات على `pool.end()` حتى مهلة 60s. السبب الجذري: استيراد `conversation.controller` يسحب `sendMerchantReply` → `whatsappWeb/inbound` → `cacheService` الذي يبدأ `setInterval` على مستوى الوحدة (بلا `unref`)، فيبقى الـ event loop حياً بعد التنظيف ولا يخرج العملية (نجاح يُحسب FAIL). في `test-conversation-state` كان هناك أيضاً عميل `pool.connect()` محتجَز بينما المساعدات تستعير من نفس الـ pool فيؤخر `end()`. الإصلاح (بنية اختبار فقط): `pool.query` بدل عميل محتجَز، و`endPoolAndExit` (سباق مهلة 2s ثم `process.exit`). `test-hybrid` كان يفترض ترتيباً ASC بينما SQL هو `ORDER BY created_at DESC`.
+  - **D0b:** `test-catalog-tool` كان يخرج 0 عند «no products» فيُحسب PASS زائف. صار ينشئ تاجراً ومنتجات رميّة في `xobot_test` ويفشل إن تعذّر الـ fixture. التخطي عبر `skipSuite` فقط (`SKIPPED:`) ولا يُحسب PASS.
+  - **D1:** `scripts/deploy.sh` و`scripts/rollback.sh` مكتوبان ولم يُنفَّذا.
+- **الملفات / الدوال:**
+  - `backend/src/database/testDbFixtures.ts` — `insertThrowawayCatalogProducts`, `endPoolAndExit`, `deleteThrowawayMerchant` (يحذف `products`)
+  - `backend/src/database/test_conversation_state.ts` — بدون `pool.connect`؛ `endPoolAndExit`
+  - `backend/src/database/test_hybrid_orchestrator_helpers.ts` — ترتيب DESC؛ `endPoolAndExit`
+  - `backend/src/services/tools/test_catalog_tool.ts` — `runTest` مع fixture + إثباتات حقيقية
+  - `scripts/deploy.sh` — `refuse_dirty_git`, `refuse_unreachable_test_db`, `run_test_gate`, `build_dist_new`, `swap_live_dist`, `restart_pm2`, `wait_for_health`
+  - `scripts/rollback.sh` — `newest_backup`, `restore_newest_dist`
+  - `.gitignore` / `backend/.gitignore` — `dist.new`, `dist.bak-*`, `dist.commit`
+  - `docs/CHANGELOG_BRAIN.md` — هذا السجل
+- **اختبارات (`npm run test-all` مرة بعد الإصلاح):** typecheck PASS. **14 passed، 0 failed، 0 skipped، 0 known_pending من 14.** `test-conversation-state` و`test-hybrid-orchestrator-helpers` يخرجان 0 خلال ثوانٍ. `test-catalog-tool` يمر على منتجات رميّة.
+- **أثر السلوك:** لا تغيير لعقد عقل البوت الحي. لم يُنفَّذ build/deploy/pm2. لم يُكتب في `xobot_db`.
+- **حدود معروفة:** `getRecentMessages` ما زال SQL DESC بينما تعليقه يقول ASC — الاختبار يطابق SQL. H01–H06 داخل `test-verification-matrix` يدوية داخل سويت ناجحة وليست `SKIPPED`. سكربتات النشر لم تُشغَّل.
+
+---
+
 ## 2026-09-21 09:21 UTC — STEP C / PHASE 0 — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

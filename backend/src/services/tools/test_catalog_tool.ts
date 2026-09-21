@@ -1,188 +1,235 @@
 /**
- * Test script for Catalog Tool
- * Tests catalog tool with Shopify-synced data
+ * Catalog tool against throwaway merchant + products in xobot_test.
+ * Fixture failure is FAIL (non-zero). Never silent-exit 0 with «no products».
  */
 
 import pool from '../../database/connection.js';
 import toolRegistry from './toolRegistry.js';
 import { CatalogTool } from './catalogTool.js';
-import { logger } from '../../utils/logger.js';
+import type { ToolContext, ToolResult } from './tool.interface.js';
+import {
+  assertIsolatedTestDb,
+  deleteThrowawayMerchant,
+  endPoolAndExit,
+  insertThrowawayCatalogProducts,
+  insertThrowawayMerchant,
+  type ThrowawayCatalogProduct,
+} from '../../database/testDbFixtures.js';
+
+const WATCH_NAME = 'ThrowawayWatchFixture';
+const PHONE_NAME = 'ThrowawayPhoneFixture';
+const SHOPIFY_EXTERNAL_ID = 'throwaway-shopify-gid-1';
+const CATALOG_INTENTS = [
+  'browse',
+  'product_query',
+  'price',
+  'availability',
+  'comparison',
+  'order',
+] as const;
+
+const THROW_AWAY_PRODUCTS: readonly ThrowawayCatalogProduct[] = [
+  {
+    name: WATCH_NAME,
+    price: 199.5,
+    currency: 'USD',
+    category: 'watches',
+    stock: 4,
+    source: 'shopify',
+    externalId: SHOPIFY_EXTERNAL_ID,
+  },
+  {
+    name: PHONE_NAME,
+    price: 89,
+    currency: 'USD',
+    category: 'phones',
+    stock: 12,
+    source: 'manual',
+    externalId: null,
+  },
+];
+
+function exitCodeFromProcess(): number {
+  return process.exitCode === 1 ? 1 : 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object';
+}
+
+type CatalogProductRow = {
+  id: string;
+  name: string;
+  price: unknown;
+  currency: unknown;
+  stock: unknown;
+  source: unknown;
+  externalId: unknown;
+};
+
+function catalogProducts(data: unknown): CatalogProductRow[] {
+  if (!isRecord(data) || !Array.isArray(data.products)) {
+    return [];
+  }
+  const rows: CatalogProductRow[] = [];
+  for (const item of data.products) {
+    if (!isRecord(item) || typeof item.id !== 'string' || typeof item.name !== 'string') {
+      continue;
+    }
+    rows.push({
+      id: item.id,
+      name: item.name,
+      price: item.price,
+      currency: item.currency,
+      stock: item.stock,
+      source: item.source,
+      externalId: item.externalId,
+    });
+  }
+  return rows;
+}
+
+function productFromResult(result: ToolResult): CatalogProductRow {
+  if (!result.success) {
+    throw new Error(`Catalog lookup failed: ${result.error || 'unknown error'}`);
+  }
+  const data = result.data;
+  if (isRecord(data) && isRecord(data.product)) {
+    const product = data.product;
+    const id = product.id;
+    const name = product.name;
+    if (typeof id !== 'string' || typeof name !== 'string') {
+      throw new Error('Catalog product missing id or name');
+    }
+    return {
+      id,
+      name,
+      price: product.price,
+      currency: product.currency,
+      stock: product.stock,
+      source: product.source,
+      externalId: product.externalId,
+    };
+  }
+  const products = catalogProducts(data);
+  if (products.length === 0) {
+    throw new Error('Catalog lookup returned no product');
+  }
+  return products[0];
+}
 
 async function runTest() {
+  assertIsolatedTestDb();
+  let merchantId: string | undefined;
   try {
     console.log('Starting Catalog Tool test...\n');
 
-    // Register catalog tool
     toolRegistry.registerTool(new CatalogTool());
     console.log('✅ Catalog tool registered\n');
 
-    // Get a merchant with products (preferably with Shopify sync)
-    const merchantResult = await pool.query(
-      `SELECT DISTINCT merchant_id 
-       FROM products 
-       WHERE merchant_id IS NOT NULL 
-       LIMIT 1`
-    );
-
-    if (merchantResult.rows.length === 0) {
-      console.log('⚠️  No merchants with products found. Please add products first.');
-      process.exit(0);
+    merchantId = await insertThrowawayMerchant(pool, 'catalog_tool');
+    if (!merchantId) {
+      throw new Error('Failed to create throwaway merchant');
     }
-
-    const merchantId = merchantResult.rows[0].merchant_id;
-    console.log(`Testing with merchant ID: ${merchantId}\n`);
-
-    // Check if merchant has Shopify products
-    const shopifyProductsResult = await pool.query(
-      `SELECT COUNT(*) as count, 
-              COUNT(CASE WHEN source = 'shopify' THEN 1 END) as shopify_count
-       FROM products 
-       WHERE merchant_id = $1`,
-      [merchantId]
+    const productIds = await insertThrowawayCatalogProducts(
+      pool,
+      merchantId,
+      THROW_AWAY_PRODUCTS,
     );
+    if (productIds.length !== THROW_AWAY_PRODUCTS.length) {
+      throw new Error('Failed to create throwaway catalog products');
+    }
+    console.log(`Testing with throwaway merchant ID: ${merchantId}\n`);
 
-    const totalProducts = parseInt(shopifyProductsResult.rows[0].count);
-    const shopifyProducts = parseInt(shopifyProductsResult.rows[0].shopify_count);
-
-    console.log(`📊 Products for merchant:`);
-    console.log(`   Total: ${totalProducts}`);
-    console.log(`   Shopify-synced: ${shopifyProducts}`);
-    console.log(`   Manual: ${totalProducts - shopifyProducts}\n`);
-
-    // Test context
-    const ctx = {
+    const ctx: ToolContext = {
       merchantId,
       platform: 'test',
-      conversationId: 'test-conv-123'
+      conversationId: 'test-conv-catalog',
     };
 
-    // ==================== TEST 1: Search products ====================
-    console.log('--- Test 1: Search products ---');
+    console.log('--- Test 1: Search products (empty query → top products) ---');
     const searchResults = await toolRegistry.executeToolsForIntent(
       'browse',
       { query: '', limit: 3 },
-      ctx
+      ctx,
     );
-
-    if (searchResults.length > 0 && searchResults[0].success) {
-      const products = searchResults[0].data.products || [];
-      console.log(`✅ Found ${products.length} products:`);
-      products.forEach((p: any, i: number) => {
-        console.log(`   ${i + 1}. ${p.name} - ${p.price} ${p.currency} (Stock: ${p.stock}, Source: ${p.source})`);
-      });
-    } else {
-      console.log('❌ Search failed:', searchResults[0]?.error);
+    if (searchResults.length === 0 || !searchResults[0].success) {
+      throw new Error(`Search failed: ${searchResults[0]?.error || 'no catalog result'}`);
     }
-    console.log('');
-
-    // ==================== TEST 2: Get product by ID ====================
-    if (totalProducts > 0) {
-      console.log('--- Test 2: Get product by ID ---');
-      const productResult = await pool.query(
-        `SELECT id FROM products WHERE merchant_id = $1 LIMIT 1`,
-        [merchantId]
-      );
-
-      if (productResult.rows.length > 0) {
-        const productId = productResult.rows[0].id;
-        const byIdResult = await toolRegistry.executeTool(
-          'catalog',
-          { productId },
-          ctx
-        );
-
-        if (byIdResult.success) {
-          const product = byIdResult.data.product;
-          console.log(`✅ Product retrieved by ID:`);
-          console.log(`   Name: ${product.name}`);
-          console.log(`   Price: ${product.price} ${product.currency}`);
-          console.log(`   Stock: ${product.stock}`);
-          console.log(`   Source: ${product.source}`);
-          if (product.externalId) {
-            console.log(`   External ID: ${product.externalId}`);
-          }
-        } else {
-          console.log('❌ Get by ID failed:', byIdResult.error);
-        }
-      }
-      console.log('');
+    const topProducts = catalogProducts(searchResults[0].data);
+    const topNames = topProducts.map((p) => p.name);
+    if (!topNames.includes(WATCH_NAME) || !topNames.includes(PHONE_NAME)) {
+      throw new Error(`Top products missing fixtures: ${topNames.join(', ') || '(empty)'}`);
     }
+    console.log(`✅ Found ${topProducts.length} products`);
 
-    // ==================== TEST 3: Get product by external ID (Shopify) ====================
-    if (shopifyProducts > 0) {
-      console.log('--- Test 3: Get product by external ID (Shopify) ---');
-      const shopifyProductResult = await pool.query(
-        `SELECT external_id FROM products 
-         WHERE merchant_id = $1 AND source = 'shopify' AND external_id IS NOT NULL 
-         LIMIT 1`,
-        [merchantId]
-      );
-
-      if (shopifyProductResult.rows.length > 0) {
-        const externalId = shopifyProductResult.rows[0].external_id;
-        const byExternalIdResult = await toolRegistry.executeTool(
-          'catalog',
-          { externalId, source: 'shopify' },
-          ctx
-        );
-
-        if (byExternalIdResult.success) {
-          const product = byExternalIdResult.data.product;
-          console.log(`✅ Product retrieved by external ID:`);
-          console.log(`   Name: ${product.name}`);
-          console.log(`   External ID: ${product.externalId}`);
-          console.log(`   Source: ${product.source}`);
-        } else {
-          console.log('❌ Get by external ID failed:', byExternalIdResult.error);
-        }
-      }
-      console.log('');
+    console.log('\n--- Test 2: Get product by ID ---');
+    const byIdResult = await toolRegistry.executeTool(
+      'catalog',
+      { productId: productIds[0] },
+      ctx,
+    );
+    const byId = productFromResult(byIdResult);
+    if (byId.id !== productIds[0] || byId.name !== WATCH_NAME) {
+      throw new Error('Get by ID returned the wrong product');
     }
+    console.log(`✅ Product retrieved by ID: ${byId.name}`);
 
-    // ==================== TEST 4: Test different intents ====================
-    console.log('--- Test 4: Test different intents ---');
-    const intents = ['browse', 'product_query', 'price', 'availability', 'comparison', 'order'];
-    
-    for (const intent of intents) {
+    console.log('\n--- Test 3: Get product by external ID (Shopify) ---');
+    const byExternalIdResult = await toolRegistry.executeTool(
+      'catalog',
+      { externalId: SHOPIFY_EXTERNAL_ID, source: 'shopify' },
+      ctx,
+    );
+    const byExternal = productFromResult(byExternalIdResult);
+    if (byExternal.name !== WATCH_NAME) {
+      throw new Error('Get by external ID returned the wrong product');
+    }
+    console.log(`✅ Product retrieved by external ID: ${byExternal.name}`);
+
+    console.log('\n--- Test 4: Test different intents ---');
+    for (const intent of CATALOG_INTENTS) {
       const tools = toolRegistry.getToolsForIntent(intent);
-      const catalogTool = tools.find(t => t.name === 'catalog');
-      if (catalogTool) {
-        console.log(`✅ Catalog tool can handle intent: ${intent}`);
-      } else {
-        console.log(`❌ Catalog tool cannot handle intent: ${intent}`);
+      if (!tools.some((t) => t.name === 'catalog')) {
+        throw new Error(`Catalog tool cannot handle intent: ${intent}`);
       }
+      console.log(`✅ Catalog tool can handle intent: ${intent}`);
     }
-    console.log('');
 
-    // ==================== TEST 5: Search with query ====================
-    console.log('--- Test 5: Search with query ---');
+    console.log('\n--- Test 5: Search with query ---');
     const queryResults = await toolRegistry.executeTool(
       'catalog',
-      { query: 'product', limit: 3 },
-      ctx
+      { query: WATCH_NAME, limit: 3 },
+      ctx,
     );
-
-    if (queryResults.success) {
-      const products = queryResults.data.products || [];
-      console.log(`✅ Search with query returned ${products.length} products`);
-      if (products.length > 0) {
-        console.log(`   First product: ${products[0].name}`);
-      }
-    } else {
-      console.log('❌ Search with query failed:', queryResults.error);
+    if (!queryResults.success) {
+      throw new Error(`Search with query failed: ${queryResults.error || 'unknown error'}`);
     }
-    console.log('');
+    const queried = catalogProducts(queryResults.data);
+    if (!queried.some((p) => p.name === WATCH_NAME)) {
+      throw new Error(`Search with query did not return ${WATCH_NAME}`);
+    }
+    console.log(`✅ Search with query returned ${queried.length} products`);
 
-    console.log('✅ All tests completed successfully!');
-
-  } catch (error: any) {
-    console.error('❌ Test failed:', error.message);
+    console.log('\n✅ All tests completed successfully!');
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('❌ Test failed:', message);
     console.error(error);
-    process.exit(1);
+    process.exitCode = 1;
   } finally {
-    await pool.end();
+    try {
+      if (merchantId) {
+        await deleteThrowawayMerchant(pool, merchantId);
+        console.log('Deleted throwaway merchant:', merchantId);
+      }
+    } catch (cleanupError: unknown) {
+      const message = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+      console.error('Throwaway merchant cleanup failed:', message);
+      process.exitCode = 1;
+    }
+    await endPoolAndExit(pool, exitCodeFromProcess());
   }
 }
 
 runTest();
-

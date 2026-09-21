@@ -3,6 +3,8 @@
  * Run with: tsx src/database/test_conversation_state.ts
  *
  * Uses a throwaway merchant on xobot_test — never SELECT id FROM merchants LIMIT 1.
+ * Uses pool.query only (no pool.connect): holding a checked-out client while
+ * helpers also borrow from the same pool makes pool.end() wait forever.
  */
 
 import pool from './connection.js';
@@ -14,17 +16,21 @@ import {
 import {
   assertIsolatedTestDb,
   deleteThrowawayMerchant,
+  endPoolAndExit,
   insertThrowawayMerchant,
 } from './testDbFixtures.js';
 
+function exitCodeFromProcess(): number {
+  return process.exitCode === 1 ? 1 : 0;
+}
+
 async function testConversationState() {
   assertIsolatedTestDb();
-  const client = await pool.connect();
   let merchantId: string | undefined;
   try {
     console.log('🧪 Testing conversation state helpers...\n');
 
-    merchantId = await insertThrowawayMerchant(client, 'conversation_state');
+    merchantId = await insertThrowawayMerchant(pool, 'conversation_state');
     if (!merchantId) {
       throw new Error('Failed to create throwaway merchant');
     }
@@ -49,14 +55,17 @@ async function testConversationState() {
       conversationId = existingConv.id;
       console.log(`   ✅ Found existing conversation: ${conversationId}`);
     } else {
-      // Create new conversation
-      const createResult = await client.query(
+      const createResult = await pool.query<{ id: string }>(
         `INSERT INTO conversations (merchant_id, platform, user_id, user_name, stage)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING id`,
         [merchantId, platform, userId, 'Test User', 'discover']
       );
-      conversationId = createResult.rows[0].id;
+      const createdId = createResult.rows[0]?.id;
+      if (!createdId) {
+        throw new Error('Failed to create conversation');
+      }
+      conversationId = createdId;
       console.log(`   ✅ Created new conversation: ${conversationId}`);
     }
 
@@ -125,7 +134,7 @@ async function testConversationState() {
           mergeResult.conversationState.new_field) {
         console.log(`   ✅ Merge successful: preserved old fields and added new ones`);
       } else {
-        console.log(`   ⚠️  Merge may not have worked correctly`);
+        throw new Error('JSONB merge did not preserve existing fields');
       }
     } else {
       throw new Error('Failed to merge conversation state');
@@ -186,7 +195,12 @@ async function testConversationState() {
 
     // Test 7: Verify data in database
     console.log('\n7️⃣ Verifying data in database...');
-    const verifyConv = await client.query(
+    const verifyConv = await pool.query<{
+      conversation_state: unknown;
+      current_intent: string | null;
+      stage: string;
+      session_metadata: unknown;
+    }>(
       `SELECT 
         conversation_state,
         current_intent,
@@ -205,7 +219,14 @@ async function testConversationState() {
       console.log(`      Conversation State:`, JSON.stringify(row.conversation_state, null, 2));
     }
 
-    const verifyMessages = await client.query(
+    const verifyMessages = await pool.query<{
+      id: string;
+      role: string;
+      content: string;
+      intent: string | null;
+      metadata: unknown;
+      entities: unknown;
+    }>(
       `SELECT 
         id,
         role,
@@ -239,7 +260,7 @@ async function testConversationState() {
     try {
       if (merchantId) {
         console.log('\n🧹 Cleaning up throwaway merchant...');
-        await deleteThrowawayMerchant(client, merchantId);
+        await deleteThrowawayMerchant(pool, merchantId);
         console.log('   ✅ Throwaway merchant deleted');
       }
     } catch (cleanupError: unknown) {
@@ -247,10 +268,8 @@ async function testConversationState() {
       console.error('Throwaway merchant cleanup failed:', message);
       process.exitCode = 1;
     }
-    client.release();
-    await pool.end();
+    await endPoolAndExit(pool, exitCodeFromProcess());
   }
 }
 
 testConversationState();
-

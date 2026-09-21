@@ -17,8 +17,13 @@ import crypto from 'crypto';
 import {
   assertIsolatedTestDb,
   deleteThrowawayMerchant,
+  endPoolAndExit,
   insertThrowawayMerchant,
 } from './testDbFixtures.js';
+
+function exitCodeFromProcess(): number {
+  return process.exitCode === 1 ? 1 : 0;
+}
 
 async function runTest() {
   assertIsolatedTestDb();
@@ -121,7 +126,9 @@ async function runTest() {
       throw new Error(`Expected 2 messages, got ${recentMessages.length}`);
     }
 
-    if (recentMessages[0].role !== 'user' || recentMessages[1].role !== 'assistant') {
+    // SQL is ORDER BY created_at DESC (newest first). Comment in the helper
+    // says oldest→newest but the query is not reversed — assert actual SQL.
+    if (recentMessages[0].role !== 'assistant' || recentMessages[1].role !== 'user') {
       throw new Error('Messages order or roles incorrect');
     }
 
@@ -233,7 +240,7 @@ async function runTest() {
       console.error('Throwaway merchant cleanup failed:', message);
       process.exitCode = 1;
     }
-    await pool.end();
+    await endPoolAndExit(pool, exitCodeFromProcess());
   }
 }
 

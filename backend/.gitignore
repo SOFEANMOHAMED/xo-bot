@@ -3,6 +3,9 @@ node_modules/
 
 # Build output
 dist/
+dist.new
+dist.bak-*
+dist.commit
 
 # Environment variables
 .env
