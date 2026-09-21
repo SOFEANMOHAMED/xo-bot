@@ -9,6 +9,10 @@
 #   TEST_PASSWORD='...' ./scripts/setup-test-db.sh
 # If TEST_PASSWORD is unset, a password is generated and written only to
 # backend/.env.test (gitignored, chmod 600). It is never printed.
+#
+# WHY stdin \set + \gexec: psql -c / -v sends SQL to the server, which does not
+# interpolate :'var'. A piped client script can \set then format(%L)/gexec so
+# the password never appears in argv or `ps`.
 
 set -euo pipefail
 
@@ -18,7 +22,7 @@ TEST_DB="${TEST_DB:-xobot_test}"
 TEST_USER="${TEST_USER:-xobot_test}"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ENV_FILE="${ROOT}/backend/.env.test"
+ENV_FILE="${ENV_FILE:-${ROOT}/backend/.env.test}"
 
 ident_ok='^[a-z][a-z0-9_]*$'
 if [[ ! "$PROD_DB" =~ $ident_ok || ! "$TEST_DB" =~ $ident_ok || ! "$TEST_USER" =~ $ident_ok ]]; then
@@ -43,18 +47,32 @@ psql_super() {
   docker exec -i "$PG_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 "$@"
 }
 
+# Escape a value for psql \set '...' (double single-quotes).
+psql_single_quote() {
+  local s=$1
+  s=${s//\\/\\\\}
+  s=${s//\'/\'\'}
+  printf '%s' "$s"
+}
+
 if [[ -z "${TEST_PASSWORD:-}" ]]; then
-  TEST_PASSWORD="$(openssl rand -base64 33 | tr -d '\n')"
+  # hex: no quotes/spaces, still a secret — never printed.
+  TEST_PASSWORD="$(openssl rand -hex 32)"
 fi
 
 echo "==> Ensure role ${TEST_USER} (login, no superuser, no createdb)"
-# Password is a psql variable, not concatenated SQL. Never echoed.
-psql_super -d postgres -v test_password="${TEST_PASSWORD}" -c "\
-SELECT format('CREATE ROLE ${TEST_USER} LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT', :'test_password')
-WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${TEST_USER}')\\gexec
-SELECT format('ALTER ROLE ${TEST_USER} LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE', :'test_password')
-WHERE EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${TEST_USER}')\\gexec
-"
+{
+  printf "\\set test_password '%s'\n" "$(psql_single_quote "$TEST_PASSWORD")"
+  printf "\\set test_user '%s'\n" "$(psql_single_quote "$TEST_USER")"
+  cat <<'PSQL'
+SELECT format('CREATE ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE', :'test_user', :'test_password')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'test_user')
+\gexec
+SELECT format('ALTER ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE', :'test_user', :'test_password')
+WHERE EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'test_user')
+\gexec
+PSQL
+} | psql_super -d postgres >/dev/null
 
 echo "==> Recreate ${TEST_DB} and restore schema-only dump of ${PROD_DB} (no rows)"
 psql_super -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${TEST_DB}' AND pid <> pg_backend_pid();" >/dev/null
@@ -97,10 +115,9 @@ if [[ -z "$table_count" || "$table_count" == "0" ]]; then
 fi
 
 echo "==> PASS/FAIL: test role must not SELECT ${PROD_DB} tables"
+# Privilege probe as the role (no PGPASSWORD / no password on argv).
 set +e
-docker exec -e PGPASSWORD="${TEST_PASSWORD}" "$PG_CONTAINER" \
-  psql -U "$TEST_USER" -d "$PROD_DB" -v ON_ERROR_STOP=1 \
-  -c "SELECT 1 FROM merchants LIMIT 1" >/dev/null 2>&1
+psql_super -d "$PROD_DB" -c "SET SESSION AUTHORIZATION ${TEST_USER}; SELECT 1 FROM merchants LIMIT 1;" >/dev/null 2>&1
 select_status=$?
 set -e
 
