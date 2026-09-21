@@ -166,9 +166,25 @@ if (grounding) {
       state,
       recentMessages: history.slice(-8),
     });
+    if (index === 0) {
+      assert(
+        result.next_action !== 'collect_info',
+        `C1 browse catalog must not force collect_info, got ${result.next_action}`,
+      );
+      assert(
+        result.intent === 'product_query' ||
+          result.intent === 'browse' ||
+          result.intent === 'other',
+        `C1 browse intent not order-collect, got ${result.intent}`,
+      );
+    }
     if (index === 1) {
       assert(/غير متوفر|نفد|مو موجود/.test(result.replyText), 'C1 mobile is unavailable');
       assert(!hasMobileLine(result.updatedState), 'C1 OOS mobile is not a cart line');
+      assert(
+        result.next_action !== 'collect_info',
+        `C1 OOS availability must not force collect_info, got ${result.next_action}`,
+      );
     }
     if (index === 2) {
       const focused = result.updatedState as FocusState;
@@ -179,6 +195,11 @@ if (grounding) {
         'C1 pending color is scoped to watch',
       );
       assert(!MOBILE_BRAND_LEAK.test(result.replyText), 'C1 watch details do not leak mobile brands');
+      // Details already include an explicit color ask in the stub — not a silent collect hijack.
+      assert(
+        /200|ريال|أسود|أحمر/.test(result.replyText),
+        `C1 watch details keep product facts, got: ${result.replyText}`,
+      );
     }
     if (index === 3) {
       assert(watchColor(result.updatedState) === 'أسود', 'C1 الأسود binds black to watch');

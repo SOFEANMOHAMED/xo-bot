@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-09-21 20:55 UTC — HOTFIX 2E / browse must not force collect_info templates — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** بعد 2D، أي تركيز على منتج بلا لون كان يستبدل رد التحية/السعر بـ `buildAskColorMessage`، و`identityMissing` في `resolveOrderNextAction` كان يفرض `collect_info` حتى على `present_product`. أُضيفت بوابة `mayReplaceWithOrderTemplate`.
+- **الملفات / الدوال:**
+  - `deterministicReplyGate.ts` — `mayReplaceWithOrderTemplate`
+  - `index.ts` — فرض سؤال اللون فقط عند next_action طلبي
+  - `orderConfirmationPolicy.ts` — قوالب الهوية فقط عند collect/checkout مسرب
+  - `test_browse_not_collect.ts` + تأكيدات browse في P0 · `package.json` · docs
+- **اختبارات:** typecheck PASS. browse-not-collect 20؛ color-focus 39؛ collect-info PASS؛ P0 cart 44 hard.
+- **أثر السلوك:** «كم سعر ساعة؟» و«السلام عليكم» يبقيان رد النموذج؛ سؤال اللون يبقى عند «بدي اطلب الساعة».
+- **حدود معروفة:** commerceEngine / matrix-pending ما زالا معلّقين.
+
+---
+
 ## 2026-09-21 14:05 UTC — PHASE 2D ITEM 2 / deterministic collect_info order — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

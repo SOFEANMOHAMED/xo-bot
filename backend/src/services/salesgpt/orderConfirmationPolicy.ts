@@ -20,6 +20,7 @@ import { classifyInterimCancelIntent } from './interimCancelMatchers.js';
 import {
   buildIdentityCollectMessage,
 } from './collectInfoOrder.js';
+import { mayReplaceWithOrderTemplate } from './deterministicReplyGate.js';
 
 export const AWAIT_CONFIRMATION_ACTION = 'await_confirmation';
 export const CONFIRM_ORDER_ACTION = 'confirm_order';
@@ -602,20 +603,23 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
     };
   }
 
-  // Incomplete → never confirm; identity questions come from code templates only.
+  // Incomplete → never confirm. Identity templates only on order-ish turns
+  // (never browse/price/greeting — see mayReplaceWithOrderTemplate).
   if (!effectivelyComplete) {
     const triedCheckout =
       aiNextAction === CONFIRM_ORDER_ACTION ||
       aiNextAction === AWAIT_CONFIRMATION_ACTION ||
       aiNextAction === 'close_sale';
     const leakedCheckout = isPrematureCheckoutCopy(responseText);
-    const identityMissing = missingFields.some((f) =>
-      f === 'name' || f === 'phone' || f === 'address'
-    );
-    const collecting =
-      aiNextAction === 'collect_info' || triedCheckout || leakedCheckout || identityMissing;
+    const allowIdentityTemplate = mayReplaceWithOrderTemplate({
+      nextAction: aiNextAction,
+      turnIntent: turnIntent as TurnIntent,
+    });
 
-    if (collecting) {
+    if (
+      allowIdentityTemplate &&
+      (aiNextAction === 'collect_info' || triedCheckout || leakedCheckout)
+    ) {
       return {
         nextAction: 'collect_info',
         responseText: buildCollectMissingFieldsMessage(language, missingFields),

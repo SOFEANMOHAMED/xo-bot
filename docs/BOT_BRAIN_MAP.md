@@ -314,7 +314,7 @@ flowchart TD
 4. «لا» عند سؤال التأكيد (وليس سؤال إضافة) → توضيح غموض، يبقى `await_confirmation` (لا تأكيد).
 5. ~~لون بعد عرض صورة → `send_image`~~ **أُزيل** (`preferSendImage` / `variantAfterPhotoOffer`) — الصورة فقط عند طلب صريح في الرسالة الحالية.
 6. `allowedToFinalize` → `confirm_order` + رسالة شكر آمنة.
-7. غير مكتمل → `collect_info` + سؤال الحقل الناقص **من القالب الحتمي** (`collectInfoOrder`: اسم → هاتف → عنوان)؛ النموذج لا يختار الترتيب ولا يعيد سؤالاً مُجاباً.
+7. غير مكتمل → `collect_info` + سؤال الحقل الناقص **من القالب الحتمي** (`collectInfoOrder`: اسم → هاتف → عنوان) **فقط** عندما `mayReplaceWithOrderTemplate` (next_action طلبي / turnIntent cart|finalize) — لا على تحية أو سعر أو browse.
 8. مكتمل بلا إنهاء صريح → `await_confirmation` + ملخص إن لزم.
 9. وإلا تمرير `aiNextAction`.
 
@@ -393,6 +393,7 @@ flowchart TD
 |-------|---------|
 | الرسالة الحالية تطلب صورة صراحة (`isExplicitPhotoRequest`) وليست رفضاً (`isExplicitPhotoRefusal`) وليست no-match | إلحاق `[IMAGE: url]` بعد تنظيف التعليق |
 | اختيار اللون/المقاس رداً على `pending_bot_question` | **لا صورة** — يُسجَّل المتغير على سطر المنتج فقط |
+| فرض قالب «أي لون بتحب؟» عند نقص اللون | **فقط** إن `mayReplaceWithOrderTemplate` (طلب/سلة) — لا على تحية/سعر/تفاصيل |
 | رفض صريح («ما بدي الصورة») | لا صورة حتى لو ذكرت كلمة صورة |
 | اختيار المنتج للصورة | ذكر حالي → اسم في collectedInfo → activeProductId → products[0] |
 | لون مطلوب | `resolveProductImageForBot` (صورة بلون إن وُجدت) |

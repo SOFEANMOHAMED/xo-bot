@@ -418,12 +418,31 @@ if (commerce) {
     {
       message: 'السلام عليكم',
       llmText: 'وعليكم السلام، أهلاً وسهلاً فيك!',
-      check: (result, label) =>
-        assertHard(getCartItems(result.updatedState).length === 0, `${label} greeting keeps cart empty`),
+      check: (result, label) => {
+        assertHard(getCartItems(result.updatedState).length === 0, `${label} greeting keeps cart empty`);
+        assertHard(
+          result.next_action !== 'collect_info',
+          `${label} greeting must not force collect_info, got ${result.next_action}`,
+        );
+        assertHard(
+          !/أي لون بتحب/i.test(result.replyText),
+          `${label} greeting must not ask color, got: ${result.replyText}`,
+        );
+      },
     },
     {
       message: 'ممكن أعرف شو في عنكن منتجات',
       llmText: 'عنا ساعة بـ200 ريال، وقميص بـ553 دولار، والموبايل غير متوفر حالياً.',
+      check: (result, label) => {
+        assertHard(
+          result.next_action !== 'collect_info',
+          `${label} catalog browse must not force collect_info, got ${result.next_action}`,
+        );
+        assertHard(
+          /200|ساعة|قميص/.test(result.replyText),
+          `${label} catalog browse keeps product facts, got: ${result.replyText}`,
+        );
+      },
     },
     {
       message: 'شو تفاصيل الساعة والقميص',
@@ -550,7 +569,7 @@ if (hardFailures.length > 0) {
 if (pendingFailures.length > 0) {
   for (const item of pendingFailures) console.error(`PENDING: ${item}`);
   console.error(
-    'KNOWN_PENDING: commerceEngine module classification and collect-info-order field sequencing are not restored yet',
+    'KNOWN_PENDING: commerceEngine module classification is not restored yet',
   );
   process.exit(0);
 }

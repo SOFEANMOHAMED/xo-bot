@@ -122,6 +122,7 @@ import {
     isSellableProduct,
     resolveFocus,
 } from './resolveFocus.js';
+import { mayReplaceWithOrderTemplate } from './deterministicReplyGate.js';
 
 // Re-export confirmation helpers so channel controllers keep a stable import path
 export {
@@ -1769,10 +1770,14 @@ export const processWithSalesGPT = async (
         updatedState.awaiting_order_confirmation = false;
     }
 
-    // Ensure a color ask uses the deterministic template so pending binds cleanly.
-    // Never ask colors for OOS products or for products that have no real colors.
+    // Color ask template ONLY on order-ish turns — never greeting/price/browse.
+    // (HOTFIX 2E: unconditional force rewrote «كم سعر ساعة؟» / «السلام عليكم».)
     const focusForPending = focusProduct;
+    const mayForceColorAsk = mayReplaceWithOrderTemplate({
+        nextAction: effectiveNextAction,
+    });
     if (
+        mayForceColorAsk &&
         focusForPending &&
         focusForPending.colors?.length &&
         isDraftLineComplete(updatedState.extracted_entities, focusForPending).missing.includes(
