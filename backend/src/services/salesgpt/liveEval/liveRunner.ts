@@ -137,6 +137,7 @@ function classifyTurnType(turn: LiveTurnScript, userText: string): TurnType {
   if (turn.expectClass === 'order') return 'order';
   if (turn.expectClass === 'qa') return 'qa';
   if (turn.expectClass === 'browse') return 'browse';
+  if (turn.expectClass === 'photo') return 'browse';
   if (/اسم|هاتف|عنوان|\d{7,}/.test(userText)) return 'identity';
   return 'other';
 }
@@ -235,7 +236,21 @@ export async function runScenarioOnce(input: {
     }
 
     const afterCart = cartSnapshot(result.updatedState);
+    const beforeFocus = focusProductId(state);
+    const afterFocus = focusProductId(result.updatedState);
+    const beforeEntities = state.extracted_entities || {};
+    const afterEntities = result.updatedState.extracted_entities || {};
     const decisionClass = classifyDecision({
+      replyText: result.replyText,
+      userMessage,
+      beforeCart,
+      afterCart,
+      beforeColor: beforeEntities.color ?? null,
+      afterColor: afterEntities.color ?? null,
+      beforeSize: beforeEntities.size ?? null,
+      afterSize: afterEntities.size ?? null,
+      orderCreated: Boolean(result.updatedState.last_order),
+      awaitingConfirmation: Boolean(result.updatedState.awaiting_order_confirmation),
       nextAction: result.next_action || '',
       intent: result.intent,
     });
@@ -254,29 +269,33 @@ export async function runScenarioOnce(input: {
       userExplicitlyConfirmed: script.explicitConfirm === true,
     });
 
+    const customerTexts = [
+      ...recent.filter((m) => m.role === 'user').map((m) => m.content),
+      userMessage,
+    ];
     const factFailures = checkReplyFacts({
       userMessage,
       replyText: result.replyText,
       catalog: [...catalog],
       cart: afterCart,
+      focusProductId: afterFocus || beforeFocus,
+      customerTexts,
+      orderNumbers: result.updatedState.last_order
+        ? [result.updatedState.last_order.orderId]
+        : [],
       expectPriceForProductId: script.expectPriceProductId,
       expectOosProductId: script.expectOosProductId,
     });
 
     const stateFailures: string[] = [];
     // Soft state sanity: focus should exist after product-named turns when catalog matches.
-    if (script.expectPriceProductId && focusProductId(result.updatedState) === null) {
+    if (script.expectPriceProductId && afterFocus === null) {
       stateFailures.push('missing focus after price turn');
     }
 
+    // Soft-fail only when observed EFFECT differs from expected effect.
     const decisionUnexpected =
-      Boolean(script.expectClass) &&
-      script.expectClass !== decisionClass &&
-      // qa vs browse soft overlap for present_product
-      !(
-        (script.expectClass === 'qa' && decisionClass === 'browse') ||
-        (script.expectClass === 'browse' && decisionClass === 'qa')
-      );
+      Boolean(script.expectClass) && script.expectClass !== decisionClass;
 
     const hardFail =
       invariantFailures.length > 0 ||
@@ -307,7 +326,7 @@ export async function runScenarioOnce(input: {
       decisionClass,
       expectClass: script.expectClass,
       cart: cartLines(afterCart),
-      focusProductId: focusProductId(result.updatedState),
+      focusProductId: afterFocus,
       pendingQuestion,
       orderCreated,
       passed,
@@ -613,14 +632,11 @@ export function formatReportArabic(report: LiveReport): string {
   if (report.failures.length > 0) {
     lines.push('');
     lines.push(`— إخفاقات (${report.failures.length}) —`);
-    for (const f of report.failures.slice(0, 40)) {
+    for (const f of report.failures) {
       lines.push(
         `  [${f.rootCause}] ${f.scenarioId} r${f.runIndex} t${f.turnIndex}: ${f.details.join('; ')}`
       );
       lines.push(`    ${f.transcript.replace(/\n/g, ' | ')}`);
-    }
-    if (report.failures.length > 40) {
-      lines.push(`  … و${report.failures.length - 40} أخرى`);
     }
   }
   return lines.join('\n');
@@ -628,7 +644,9 @@ export function formatReportArabic(report: LiveReport): string {
 
 export function formatBaselineMarkdown(report: LiveReport): string {
   const lines: string[] = [];
-  lines.push('# BASELINE — live model measurement (PHASE 1B)');
+  lines.push('# BASELINE — live model measurement (PHASE 1C, valid scoring)');
+  lines.push('');
+  lines.push('Supersedes `docs/BASELINE_v1_INVALID.md` (contaminated harness scoring).');
   lines.push('');
   lines.push(`- **date (UTC):** ${report.dateUtc}`);
   lines.push(`- **commit:** \`${report.commitHash}\``);

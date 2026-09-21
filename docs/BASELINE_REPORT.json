@@ -1,0 +1,748 @@
+{
+  "dateUtc": "2026-09-21T22:14:26.133Z",
+  "commitHash": "9ad0d99ebd1c3ef7e18d3a1df80656af3ec2db21",
+  "overall": {
+    "passed": 128,
+    "total": 130,
+    "rate": 0.9846
+  },
+  "scenarios": [
+    {
+      "id": "S01_greeting",
+      "title": "تحية باردة",
+      "rate": {
+        "passed": 8,
+        "total": 8,
+        "rate": 1
+      }
+    },
+    {
+      "id": "S02_browse_catalog",
+      "title": "تصفح كتالوج",
+      "rate": {
+        "passed": 8,
+        "total": 8,
+        "rate": 1
+      }
+    },
+    {
+      "id": "S03_watch_price",
+      "title": "سؤال سعر الساعة",
+      "rate": {
+        "passed": 8,
+        "total": 8,
+        "rate": 1
+      }
+    },
+    {
+      "id": "S04_watch_details",
+      "title": "تفاصيل الساعة",
+      "rate": {
+        "passed": 3,
+        "total": 3,
+        "rate": 1
+      }
+    },
+    {
+      "id": "S05_photo_watch",
+      "title": "طلب صورة الساعة",
+      "rate": {
+        "passed": 3,
+        "total": 3,
+        "rate": 1
+      }
+    },
+    {
+      "id": "S06_order_ask_color",
+      "title": "طلب ساعة بلا لون → سؤال لون",
+      "rate": {
+        "passed": 8,
+        "total": 8,
+        "rate": 1
+      }
+    },
+    {
+      "id": "S07_select_color",
+      "title": "اختيار لون أسود بعد سؤال",
+      "rate": {
+        "passed": 8,
+        "total": 8,
+        "rate": 1
+      }
+    },
+    {
+      "id": "S08_refuse_photo",
+      "title": "رفض الصورة بعد اللون",
+      "rate": {
+        "passed": 3,
+        "total": 3,
+        "rate": 1
+      }
+    },
+    {
+      "id": "S09_collect_identity",
+      "title": "جمع الاسم ثم الهاتف",
+      "rate": {
+        "passed": 3,
+        "total": 3,
+        "rate": 1
+      }
+    },
+    {
+      "id": "S10_await_and_confirm",
+      "title": "تأكيد طلب مكتمل",
+      "rate": {
+        "passed": 8,
+        "total": 8,
+        "rate": 1
+      }
+    },
+    {
+      "id": "S11_add_shirt",
+      "title": "إضافة قميص لطلب الساعة",
+      "rate": {
+        "passed": 3,
+        "total": 3,
+        "rate": 1
+      }
+    },
+    {
+      "id": "S12_partial_cancel",
+      "title": "إلغاء سطر القميص",
+      "rate": {
+        "passed": 3,
+        "total": 3,
+        "rate": 1
+      }
+    },
+    {
+      "id": "S13_whole_cancel",
+      "title": "إلغاء الطلب كله",
+      "rate": {
+        "passed": 3,
+        "total": 3,
+        "rate": 1
+      }
+    },
+    {
+      "id": "S14_variant_correction",
+      "title": "تصحيح لون: لا أسود بدي أحمر",
+      "rate": {
+        "passed": 3,
+        "total": 3,
+        "rate": 1
+      }
+    },
+    {
+      "id": "S15_oos_mobile",
+      "title": "موبايل نافد",
+      "rate": {
+        "passed": 8,
+        "total": 8,
+        "rate": 1
+      }
+    },
+    {
+      "id": "S16_focus_mobile_to_watch",
+      "title": "تركيز: موبايل ثم ساعة ثم أسود",
+      "rate": {
+        "passed": 3,
+        "total": 3,
+        "rate": 1
+      }
+    },
+    {
+      "id": "S17_shirt_no_color",
+      "title": "قميص بلا ألوان",
+      "rate": {
+        "passed": 3,
+        "total": 3,
+        "rate": 1
+      }
+    },
+    {
+      "id": "S18_mixed_currency",
+      "title": "ساعة+قميص — عملات منفصلة",
+      "rate": {
+        "passed": 3,
+        "total": 3,
+        "rate": 1
+      }
+    },
+    {
+      "id": "S19_ten_catalog_browse",
+      "title": "تصفح كتالوج 10 منتجات",
+      "rate": {
+        "passed": 8,
+        "total": 8,
+        "rate": 1
+      }
+    },
+    {
+      "id": "S20_shoes_order",
+      "title": "طلب حذاء بمقاس",
+      "rate": {
+        "passed": 1,
+        "total": 3,
+        "rate": 0.3333
+      }
+    },
+    {
+      "id": "X_playground_2026_09_21",
+      "title": "playground-2026-09-21",
+      "rate": {
+        "passed": 3,
+        "total": 3,
+        "rate": 1
+      }
+    },
+    {
+      "id": "X_price_greeting_regression",
+      "title": "2E: سعر/تحية مع تركيز ساعة",
+      "rate": {
+        "passed": 8,
+        "total": 8,
+        "rate": 1
+      }
+    },
+    {
+      "id": "X_browse_all_phrasing",
+      "title": "browse-all حابب اعرف المنتجات",
+      "rate": {
+        "passed": 8,
+        "total": 8,
+        "rate": 1
+      }
+    },
+    {
+      "id": "X_invented_counts",
+      "title": "ساعتين — كمية",
+      "rate": {
+        "passed": 8,
+        "total": 8,
+        "rate": 1
+      }
+    },
+    {
+      "id": "X_false_black_apology",
+      "title": "لا اعتذار زائف عن الأسود",
+      "rate": {
+        "passed": 3,
+        "total": 3,
+        "rate": 1
+      }
+    }
+  ],
+  "byTurnType": {
+    "greeting": {
+      "passed": 24,
+      "total": 24,
+      "rate": 1
+    },
+    "browse": {
+      "passed": 33,
+      "total": 33,
+      "rate": 1
+    },
+    "price": {
+      "passed": 22,
+      "total": 22,
+      "rate": 1
+    },
+    "order": {
+      "passed": 129,
+      "total": 131,
+      "rate": 0.9847
+    },
+    "color": {
+      "passed": 17,
+      "total": 17,
+      "rate": 1
+    },
+    "other": {
+      "passed": 8,
+      "total": 8,
+      "rate": 1
+    },
+    "confirm": {
+      "passed": 8,
+      "total": 8,
+      "rate": 1
+    },
+    "cancel": {
+      "passed": 6,
+      "total": 6,
+      "rate": 1
+    },
+    "qa": {
+      "passed": 23,
+      "total": 23,
+      "rate": 1
+    }
+  },
+  "byInvariant": {
+    "I1": {
+      "passed": 270,
+      "total": 272,
+      "rate": 0.9926
+    },
+    "I2": {
+      "passed": 272,
+      "total": 272,
+      "rate": 1
+    },
+    "I3": {
+      "passed": 272,
+      "total": 272,
+      "rate": 1
+    },
+    "I4": {
+      "passed": 272,
+      "total": 272,
+      "rate": 1
+    },
+    "I5": {
+      "passed": 272,
+      "total": 272,
+      "rate": 1
+    }
+  },
+  "byRootCause": {
+    "keyword_classifier": 40,
+    "state_focus_drift": 0,
+    "llm_fact_violation": 0,
+    "template_override": 2
+  },
+  "budget": {
+    "calls": 216,
+    "promptTokens": 491063,
+    "completionTokens": 36878,
+    "estimatedUsd": 0.095786,
+    "aborted": false,
+    "abortReason": null
+  },
+  "failures": [
+    {
+      "scenarioId": "S02_browse_catalog",
+      "runIndex": 0,
+      "turnIndex": 1,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: حابب اعرف المنتجات الموجودة عنكن\nB: عندنا مجموعة من المنتجات! من ضمنها ساعة يد بسعر 200 ريال سعودي، وأيضاً قميص متوفر. حابب تعرف تفاصيل أكثر عن أي منتج معين؟",
+      "details": [
+        "decision expected=browse got=qa"
+      ]
+    },
+    {
+      "scenarioId": "S08_refuse_photo",
+      "runIndex": 0,
+      "turnIndex": 2,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: لا أنا ما بدي الصورة أنا بس أطلب الساعة السودا\nB: تمام، رح أرسلك صورة المنتج.",
+      "details": [
+        "decision expected=order got=qa"
+      ]
+    },
+    {
+      "scenarioId": "S10_await_and_confirm",
+      "runIndex": 0,
+      "turnIndex": 4,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: الحسينية دمشق\nB: أي لون بتحب؟ 🎨\n1) أسود — 2) أحمر",
+      "details": [
+        "decision expected=finalize got=order"
+      ]
+    },
+    {
+      "scenarioId": "S17_shirt_no_color",
+      "runIndex": 0,
+      "turnIndex": 0,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: شو تفاصيل القميص\nB: يا هلا! القميص اللي تسأل عنه يتميز بجودة عالية وتصميم أنيق، وهو متوفر في المخزون بعدد 529 قطعة. إذا حابب تفاصيل أكثر أو عندك أي استفسار ثاني، أنا هنا لمساعدتك! 😊",
+      "details": [
+        "decision expected=qa got=order"
+      ]
+    },
+    {
+      "scenarioId": "S20_shoes_order",
+      "runIndex": 0,
+      "turnIndex": 0,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: بدي الحذاء الرياضي\nB: يا هلا! أنا مساعد مبيعات في متجر قياس حي. حابب أساعدك في الحصول على الحذاء الرياضي. هل تفضل لون معين أو مقاس معين؟ الخيارات المتاحة هي: اللون الأبيض والأسود، والمقاسات 40، 41، 42، 43.",
+      "details": [
+        "decision expected=order got=qa"
+      ]
+    },
+    {
+      "scenarioId": "X_playground_2026_09_21",
+      "runIndex": 0,
+      "turnIndex": 1,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: ممكن أعرف شو في عنكن منتجات\nB: عندنا مجموعة من المنتجات، منها ساعة يد بسعر 200 ريال سعودي، وأيضاً قميص. حابب تعرف تفاصيل أكثر عن أي منتج معين أو عندك شيء معين تبحث عنه؟",
+      "details": [
+        "decision expected=browse got=qa"
+      ]
+    },
+    {
+      "scenarioId": "X_playground_2026_09_21",
+      "runIndex": 0,
+      "turnIndex": 5,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: لا أنا ما بدي الصورة أنا بس أطلب الساعة السودا\nB: تمام، رح أرسلك صورة المنتج.",
+      "details": [
+        "decision expected=order got=qa"
+      ]
+    },
+    {
+      "scenarioId": "X_invented_counts",
+      "runIndex": 0,
+      "turnIndex": 0,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: ساعتين\nB: يا هلا! أنا مساعد مبيعات في متجر قياس حي. حابب أساعدك في اختيار الساعة المناسبة. هل تبحث عن ساعة معينة أو تحتاج معلومات عن ساعة معينة؟",
+      "details": [
+        "decision expected=order got=browse"
+      ]
+    },
+    {
+      "scenarioId": "X_false_black_apology",
+      "runIndex": 0,
+      "turnIndex": 1,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: أنت قلت في أسود\nB: تمام، شو اسمك الكامل؟",
+      "details": [
+        "decision expected=qa got=order"
+      ]
+    },
+    {
+      "scenarioId": "S02_browse_catalog",
+      "runIndex": 1,
+      "turnIndex": 1,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: شو في عندكم منتجات؟\nB: عندنا مجموعة من المنتجات! من بينها ساعة يد بسعر 200 ريال سعودي، وأيضاً قميص. حابب تعرف تفاصيل أكثر عن أي منتج معين؟",
+      "details": [
+        "decision expected=browse got=qa"
+      ]
+    },
+    {
+      "scenarioId": "S06_order_ask_color",
+      "runIndex": 1,
+      "turnIndex": 0,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: بدي الساعة\nB: يا هلا! أنا مساعد مبيعات في متجر قياس حي. حابب أساعدك في الحصول على الساعة اللي تبيها. هل تفضل اللون الأسود أو الأحمر؟",
+      "details": [
+        "decision expected=order got=browse"
+      ]
+    },
+    {
+      "scenarioId": "S08_refuse_photo",
+      "runIndex": 1,
+      "turnIndex": 2,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: لا أنا ما بدي الصورة أنا بس أطلب الساعة السودا\nB: تمام، رح أرسلك صورة المنتج.",
+      "details": [
+        "decision expected=order got=qa"
+      ]
+    },
+    {
+      "scenarioId": "S17_shirt_no_color",
+      "runIndex": 1,
+      "turnIndex": 0,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: شو تفاصيل القميص\nB: يا هلا! القميص اللي تسأل عنه يتميز بجودة عالية وتصميم أنيق، وهو متوفر بسعر 553 ريال سعودي. إذا حابب تفاصيل أكثر عن القميص أو أي شيء ثاني، أنا هنا لمساعدتك! كيف أقدر أساعدك أكثر؟",
+      "details": [
+        "decision expected=qa got=order"
+      ]
+    },
+    {
+      "scenarioId": "S20_shoes_order",
+      "runIndex": 1,
+      "turnIndex": 0,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: بدي الحذاء الرياضي\nB: يا هلا! أنا مساعد مبيعات في متجر قياس حي. حابب أساعدك في الحصول على الحذاء الرياضي. هل تفضل لون معين أو مقاس معين؟ الخيارات المتاحة هي: اللون الأبيض والأسود، والمقاسات 40، 41، 42، 43.",
+      "details": [
+        "decision expected=order got=browse"
+      ]
+    },
+    {
+      "scenarioId": "S20_shoes_order",
+      "runIndex": 1,
+      "turnIndex": 1,
+      "rootCause": "template_override",
+      "transcript": "U: أبيض\nB: هذا اللون غير متوفر لهذا المنتج 🎨\n(«ابيض» غير متوفر لهذا المنتج.)\n\nالألوان المتاحة:\n1) أسود — 2) أحمر\n\nاختار لوناً من القائمة من فضلك.",
+      "details": [
+        "invariant I1",
+        "decision expected=order got=browse"
+      ]
+    },
+    {
+      "scenarioId": "X_playground_2026_09_21",
+      "runIndex": 1,
+      "turnIndex": 1,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: ممكن أعرف شو في عنكن منتجات\nB: عندنا مجموعة من المنتجات! من بينها ساعة يد بسعر 200 ريال سعودي، وأيضاً قميص. إذا حابب تفاصيل أكثر عن أي منتج أو عندك شيء معين تبحث عنه، خبرني! 😊",
+      "details": [
+        "decision expected=browse got=qa"
+      ]
+    },
+    {
+      "scenarioId": "X_playground_2026_09_21",
+      "runIndex": 1,
+      "turnIndex": 5,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: لا أنا ما بدي الصورة أنا بس أطلب الساعة السودا\nB: تمام، رح أرسلك صورة المنتج.",
+      "details": [
+        "decision expected=order got=qa"
+      ]
+    },
+    {
+      "scenarioId": "X_invented_counts",
+      "runIndex": 1,
+      "turnIndex": 0,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: بدي ساعتين\nB: يا هلا! أنا مساعد مبيعات في متجر قياس حي. حابب أساعدك في اختيار الساعتين اللي تحتاجها. هل عندك ألوان معينة في بالك؟ عندنا ساعة يد بسعر 200 ريال سعودي، متوفرة بلونين: أسود وأحمر.",
+      "details": [
+        "decision expected=order got=qa"
+      ]
+    },
+    {
+      "scenarioId": "X_false_black_apology",
+      "runIndex": 1,
+      "turnIndex": 1,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: أنت قلت في أسود\nB: تمام، شو اسمك الكامل؟",
+      "details": [
+        "decision expected=qa got=order"
+      ]
+    },
+    {
+      "scenarioId": "S02_browse_catalog",
+      "runIndex": 2,
+      "turnIndex": 1,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: وش عندكم من المنتجات؟\nB: عندنا مجموعة من المنتجات! من بينها ساعة يد بسعر 200 ريال سعودي، وكمان قميص. حابب تعرف تفاصيل أكثر عن أي منتج معين؟",
+      "details": [
+        "decision expected=browse got=qa"
+      ]
+    },
+    {
+      "scenarioId": "S06_order_ask_color",
+      "runIndex": 2,
+      "turnIndex": 0,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: ابغى الساعة\nB: يا هلا! أنا مساعد مبيعات في متجر قياس حي. حابب أساعدك في اختيار الساعة. هل تفضل لون معين؟ عندنا خيارات الأسود والأحمر.",
+      "details": [
+        "decision expected=order got=qa"
+      ]
+    },
+    {
+      "scenarioId": "S08_refuse_photo",
+      "runIndex": 2,
+      "turnIndex": 2,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: لا أنا ما بدي الصورة أنا بس أطلب الساعة السودا\nB: تمام، رح أرسلك صورة المنتج.",
+      "details": [
+        "decision expected=order got=qa"
+      ]
+    },
+    {
+      "scenarioId": "S17_shirt_no_color",
+      "runIndex": 2,
+      "turnIndex": 0,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: شو تفاصيل القميص\nB: يا هلا! القميص اللي تسأل عنه يتميز بجودة عالية وتصميم أنيق، وهو متوفر بسعر 553 ريال سعودي. إذا حابب تفاصيل أكثر أو عندك أي استفسار ثاني، أنا هنا لمساعدتك! 😊",
+      "details": [
+        "decision expected=qa got=order"
+      ]
+    },
+    {
+      "scenarioId": "S19_ten_catalog_browse",
+      "runIndex": 2,
+      "turnIndex": 0,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: وش عندكم من المنتجات؟\nB: يا هلا! أنا مساعد مبيعات في متجر قياس حي. عندنا مجموعة متنوعة من المنتجات مثل الساعات، القمصان، الأحذية الرياضية، الحقائب، العطور، والسماعات. كيف أقدر أساعدك اليوم؟",
+      "details": [
+        "decision expected=browse got=qa"
+      ]
+    },
+    {
+      "scenarioId": "S20_shoes_order",
+      "runIndex": 2,
+      "turnIndex": 0,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: بدي الحذاء الرياضي\nB: يا هلا! أنا مساعد مبيعات في متجر قياس حي. حابب أساعدك في الحصول على الحذاء الرياضي. هل تفضل لون معين أو مقاس محدد؟",
+      "details": [
+        "decision expected=order got=browse"
+      ]
+    },
+    {
+      "scenarioId": "S20_shoes_order",
+      "runIndex": 2,
+      "turnIndex": 1,
+      "rootCause": "template_override",
+      "transcript": "U: أبيض\nB: هذا اللون غير متوفر لهذا المنتج 🎨\n(«ابيض» غير متوفر لهذا المنتج.)\n\nالألوان المتاحة:\n1) أسود — 2) أحمر\n\nاختار لوناً من القائمة من فضلك.",
+      "details": [
+        "invariant I1",
+        "decision expected=order got=browse"
+      ]
+    },
+    {
+      "scenarioId": "X_playground_2026_09_21",
+      "runIndex": 2,
+      "turnIndex": 1,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: ممكن أعرف شو في عنكن منتجات\nB: عندنا في المتجر ساعة يد بسعر 200 ريال سعودي، متوفرة بلونين: أسود وأحمر. كمان عندنا قميص، إذا حابب تعرف تفاصيل أكثر عن أي منتج أو عندك شيء معين في بالك، خبرني! 😊",
+      "details": [
+        "decision expected=browse got=qa"
+      ]
+    },
+    {
+      "scenarioId": "X_playground_2026_09_21",
+      "runIndex": 2,
+      "turnIndex": 5,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: لا أنا ما بدي الصورة أنا بس أطلب الساعة السودا\nB: تمام، رح أرسلك صورة المنتج.",
+      "details": [
+        "decision expected=order got=qa"
+      ]
+    },
+    {
+      "scenarioId": "X_browse_all_phrasing",
+      "runIndex": 2,
+      "turnIndex": 0,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: وش عندكم من المنتجات؟\nB: يا هلا! أنا مساعد مبيعات في متجر قياس حي. عندنا مجموعة متنوعة من المنتجات مثل الساعات، القمصان، الأحذية الرياضية، الحقائب، العطور، والسماعات. كيف أقدر أساعدك اليوم؟",
+      "details": [
+        "decision expected=browse got=qa"
+      ]
+    },
+    {
+      "scenarioId": "X_invented_counts",
+      "runIndex": 2,
+      "turnIndex": 0,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: ساعتين\nB: يا هلا! أنا مساعد مبيعات في متجر قياس حي. حابب أساعدك في اختيار الساعة المناسبة. هل تبحث عن ساعة معينة أو تحتاج معلومات عن ساعة معينة؟",
+      "details": [
+        "decision expected=order got=browse"
+      ]
+    },
+    {
+      "scenarioId": "X_false_black_apology",
+      "runIndex": 2,
+      "turnIndex": 1,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: أنت قلت في أسود\nB: تمام، شو اسمك الكامل؟",
+      "details": [
+        "decision expected=qa got=order"
+      ]
+    },
+    {
+      "scenarioId": "S02_browse_catalog",
+      "runIndex": 6,
+      "turnIndex": 1,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: ابغى اشوف الموجود عندكم\nB: عندنا ساعة يد مميزة بسعر 200 ريال سعودي. متوفرة بلونين: أسود وأحمر. حابب تعرف تفاصيل أكثر عن الساعة أو تفضل تشوف خيارات أخرى؟",
+      "details": [
+        "decision expected=browse got=qa"
+      ]
+    },
+    {
+      "scenarioId": "X_invented_counts",
+      "runIndex": 6,
+      "turnIndex": 0,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: ابي ساعتين\nB: يا هلا! أنا مساعد مبيعات في متجر قياس حي. حابب أساعدك في اختيار الساعتين اللي تبيهم. هل عندك ألوان معينة في بالك؟ عندنا ساعة يد بسعر 200 ريال سعودي، متوفرة بلونين: أسود وأحمر.",
+      "details": [
+        "decision expected=order got=browse"
+      ]
+    },
+    {
+      "scenarioId": "S02_browse_catalog",
+      "runIndex": 7,
+      "turnIndex": 1,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: عايز اعرف المنتجات اللي عندكم\nB: عندنا مجموعة من المنتجات المميزة! من بينها ساعة يد بسعر 200 ريال سعودي، وأيضاً قميص. إذا حابب تفاصيل أكثر عن أي منتج أو عندك شيء معين في بالك، خبرني! 😊",
+      "details": [
+        "decision expected=browse got=qa"
+      ]
+    },
+    {
+      "scenarioId": "X_invented_counts",
+      "runIndex": 7,
+      "turnIndex": 0,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: ساعتين\nB: يا هلا! أنا مساعد مبيعات في متجر قياس حي. حابب أساعدك في اختيار الساعة المناسبة. هل تبحث عن ساعة معينة أو تحتاج معلومات عن ساعاتنا المتوفرة؟",
+      "details": [
+        "decision expected=order got=browse"
+      ]
+    },
+    {
+      "scenarioId": "S02_browse_catalog",
+      "runIndex": 8,
+      "turnIndex": 1,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: فيه ايه عندكم؟\nB: عندنا مجموعة من المنتجات المميزة! من بينها ساعة يد بسعر 200 ريال سعودي، وأيضاً قميص. حابب تعرف تفاصيل أكثر عن أي منتج معين؟",
+      "details": [
+        "decision expected=browse got=qa"
+      ]
+    },
+    {
+      "scenarioId": "S06_order_ask_color",
+      "runIndex": 8,
+      "turnIndex": 0,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: هطلب الساعة\nB: يا هلا! أنا مساعد مبيعات في متجر قياس حي. حابب أساعدك في طلب الساعة. هل تفضل لون معين؟ عندنا خيارات الأسود والأحمر.",
+      "details": [
+        "decision expected=order got=browse"
+      ]
+    },
+    {
+      "scenarioId": "X_invented_counts",
+      "runIndex": 8,
+      "turnIndex": 0,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: عايز ساعتين\nB: يا هلا! أنا مساعد مبيعات في متجر قياس حي. حابب أساعدك في اختيار الساعتين اللي تحتاجها. هل عندك ألوان معينة في بالك؟ عندنا ساعة يد بسعر 200 ريال سعودي، متوفرة بلونين: أسود وأحمر.",
+      "details": [
+        "decision expected=order got=qa"
+      ]
+    },
+    {
+      "scenarioId": "S02_browse_catalog",
+      "runIndex": 9,
+      "turnIndex": 1,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: ممكن أعرف شو في عنكن منتجات\nB: عندنا مجموعة من المنتجات! من بينها ساعة يد بسعر 200 ريال سعودي، وأيضاً قميص. حابب تعرف تفاصيل أكثر عن أي منتج منهم؟",
+      "details": [
+        "decision expected=browse got=qa"
+      ]
+    },
+    {
+      "scenarioId": "X_invented_counts",
+      "runIndex": 9,
+      "turnIndex": 0,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: اثنين ساعة\nB: يا هلا! أنا مساعد مبيعات في متجر قياس حي. حابب أساعدك في اختيار الساعة اللي تحتاجها. هل تبحث عن ساعة معينة أو تحتاج معلومات عن ساعة معينة؟",
+      "details": [
+        "decision expected=order got=browse"
+      ]
+    },
+    {
+      "scenarioId": "S02_browse_catalog",
+      "runIndex": 10,
+      "turnIndex": 1,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: عطني نظرة على المنتجات\nB: عندنا ساعة يد مميزة بسعر 200 ريال سعودي، متوفرة بلونين: أسود وأحمر. إذا حابب تفاصيل أكثر عن الساعة أو تحتاج مساعدة في اختيار اللون، خبرني! 😊",
+      "details": [
+        "decision expected=browse got=qa"
+      ]
+    },
+    {
+      "scenarioId": "X_invented_counts",
+      "runIndex": 10,
+      "turnIndex": 0,
+      "rootCause": "keyword_classifier",
+      "transcript": "U: ثنتين ساعة\nB: يا هلا! أنا مساعد مبيعات في متجر قياس حي. حابب أساعدك في اختيار ساعتين، عندنا ساعة يد مميزة بسعر 200 ريال سعودي. هل تفضل لون معين؟ عندنا خيارات الأسود والأحمر.",
+      "details": [
+        "decision expected=order got=qa"
+      ]
+    }
+  ]
+}

@@ -87,7 +87,7 @@ export const PLAN_SECTION6_SCENARIOS: readonly LiveScenario[] = Object.freeze([
     title: 'طلب صورة الساعة',
     catalog: 'real3',
     seedFocusProductId: REAL_TEST_WATCH.id,
-    turns: [{ text: 'ورجيني صورة الساعة', expectClass: 'browse' }],
+    turns: [{ text: 'ورجيني صورة الساعة', expectClass: 'photo' }],
   },
   {
     id: 'S06_order_ask_color',

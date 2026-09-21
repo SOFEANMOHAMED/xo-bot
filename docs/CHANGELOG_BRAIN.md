@@ -4,6 +4,24 @@
 
 ---
 
+## 2026-09-21 22:20 UTC — PHASE 1C / صلاحية القياس + إعادة BASELINE + تعديلات العقد — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** قياس 1B كان ملوّثاً (أرقام URL/هاتف، class باسم `next_action`، I3 على تغيّر اللون). أُصلح التسجيل في harness فقط، أُرشف v1، وأُعيد القياس، وحُدّث عقد المُفسّر.
+- **الملفات / الدوال:**
+  - `liveFacts.ts` — `stripNonFactNumberSources` / `buildNumberAllowlist` / `checkReplyFacts`
+  - `liveClassify.ts` — `classifyDecision` بالأثر (+ `photo`)
+  - `liveInvariants.ts` — I3 بهوية `productId` (تغيّر الخيار ليس فقداناً)
+  - `liveScenarios.ts` — `expectClass: 'photo'` لـ S05؛ `liveRunner.ts` / `test_live.ts` — تقرير JSON
+  - `docs/BASELINE_v1_INVALID.md` · `docs/BASELINE.md` · `docs/BASELINE_BREAKDOWN.md` · `docs/BASELINE_REPORT.json`
+  - `docs/INTERPRETER_CONTRACT.md` — evidence نصّي، top-N، ثقة مؤقتة، مدمِّر، تفسير واحد، offline قبل الظل، p95 1.5s، ترتيب ترحيل من 1C
+  - `docs/BRAIN_FIX_PLAN.md` · `test-live.thresholds.json` · `CHANGELOG_BRAIN.md`
+- **اختبارات:** `LIVE_LLM=1 npm run test-live` → **128/130 (98.5%)**؛ I1 99.3% · I2–I5 100%؛ صلب حقيقي: S20×2؛ typecheck PASS. لا تغيير سلوك إنتاج.
+- **أثر السلوك:** لا تغيير إنتاجي. القياس أصبح صالحاً للبوابة وترتيب Phase 4.
+- **حدود معروفة:** S20 تركيز الحذاء؛ soft حقيقي: رفض صورة، «ساعتين»، «أنت قلت في أسود»؛ بعض soft browse↔qa بسبب `present_product`.
+
+---
+
 ## 2026-09-21 21:45 UTC — PHASE 4-PREP / تحليل BASELINE + عقد المُفسّر — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

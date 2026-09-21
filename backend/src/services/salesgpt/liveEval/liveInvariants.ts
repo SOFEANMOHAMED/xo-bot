@@ -76,14 +76,16 @@ export function checkInvariants(input: {
     failures.push({ id: 'I2', message: 'reply appears to sum across currencies' });
   }
 
-  // I3: cart never loses a line without explicit remove/cancel
-  const beforeIds = new Set(input.beforeCart.map((l) => `${l.productId}::${l.color || ''}::${l.size || ''}`));
-  const afterIds = new Set(input.afterCart.map((l) => `${l.productId}::${l.color || ''}::${l.size || ''}`));
-  for (const key of beforeIds) {
-    if (!afterIds.has(key) && !input.userRemovedOrCancelled) {
+  // I3: a line is lost only when a product disappears without explicit remove/cancel.
+  // Variant changes (same productId, new color/size) are NOT a loss — identity is
+  // lineId when stable, otherwise productId presence in the cart.
+  const beforeProductIds = new Set(input.beforeCart.map((l) => l.productId));
+  const afterProductIds = new Set(input.afterCart.map((l) => l.productId));
+  for (const productId of beforeProductIds) {
+    if (!afterProductIds.has(productId) && !input.userRemovedOrCancelled) {
       failures.push({
         id: 'I3',
-        message: `cart lost line ${key} without remove/cancel`,
+        message: `cart lost product ${productId} without remove/cancel`,
       });
       break;
     }

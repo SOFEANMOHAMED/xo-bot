@@ -110,9 +110,30 @@ async function main(): Promise<void> {
 
   console.log(formatReportArabic(report));
 
+  const reportJsonPath = path.join(repoRoot, 'docs/BASELINE_REPORT.json');
   if (args.writeBaseline) {
     writeFileSync(baselinePath, `${formatBaselineMarkdown(report)}\n`, 'utf8');
     console.log(`wrote ${baselinePath}`);
+    writeFileSync(
+      reportJsonPath,
+      `${JSON.stringify(
+        {
+          dateUtc: report.dateUtc,
+          commitHash: report.commitHash,
+          overall: report.overall,
+          scenarios: report.scenarios,
+          byTurnType: report.byTurnType,
+          byInvariant: report.byInvariant,
+          byRootCause: report.byRootCause,
+          budget: report.budget,
+          failures: report.failures,
+        },
+        null,
+        2
+      )}\n`,
+      'utf8'
+    );
+    console.log(`wrote ${reportJsonPath}`);
     if (!args.gate) {
       writeThresholdsFromReport(report);
       console.log(`wrote ${thresholdsPath}`);
