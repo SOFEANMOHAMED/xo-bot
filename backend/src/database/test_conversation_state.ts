@@ -1,6 +1,8 @@
 /**
  * Test script for conversation state helper functions
  * Run with: tsx src/database/test_conversation_state.ts
+ *
+ * Uses a throwaway merchant on xobot_test — never SELECT id FROM merchants LIMIT 1.
  */
 
 import pool from './connection.js';
@@ -9,23 +11,23 @@ import {
   updateConversationState,
   appendMessage
 } from '../controllers/conversation.controller.js';
+import {
+  assertIsolatedTestDb,
+  deleteThrowawayMerchant,
+  insertThrowawayMerchant,
+} from './testDbFixtures.js';
 
 async function testConversationState() {
+  assertIsolatedTestDb();
   const client = await pool.connect();
+  let merchantId: string | undefined;
   try {
     console.log('🧪 Testing conversation state helpers...\n');
 
-    // Get a merchant ID (use first merchant in database)
-    const merchantResult = await client.query(
-      'SELECT id FROM merchants LIMIT 1'
-    );
-
-    if (merchantResult.rows.length === 0) {
-      console.error('❌ No merchants found in database. Please create a merchant first.');
-      process.exit(1);
+    merchantId = await insertThrowawayMerchant(client, 'conversation_state');
+    if (!merchantId) {
+      throw new Error('Failed to create throwaway merchant');
     }
-
-    const merchantId = merchantResult.rows[0].id;
     const platform = 'web';
     const userId = `test_user_${Date.now()}`;
 
@@ -74,8 +76,7 @@ async function testConversationState() {
       console.log(`      Conversation State:`, JSON.stringify(conv.conversationState, null, 2));
       console.log(`      Session Metadata:`, JSON.stringify(conv.sessionMetadata, null, 2));
     } else {
-      console.log('   ❌ Failed to retrieve conversation');
-      process.exit(1);
+      throw new Error('Failed to retrieve conversation');
     }
 
     // Test 3: Update conversation state (merge JSONB)
@@ -102,8 +103,7 @@ async function testConversationState() {
       console.log(`      Conversation State:`, JSON.stringify(updateResult.conversationState, null, 2));
       console.log(`      Session Metadata:`, JSON.stringify(updateResult.sessionMetadata, null, 2));
     } else {
-      console.log('   ❌ Failed to update conversation state');
-      process.exit(1);
+      throw new Error('Failed to update conversation state');
     }
 
     // Test 4: Merge additional data into conversation_state (should not overwrite)
@@ -128,8 +128,7 @@ async function testConversationState() {
         console.log(`   ⚠️  Merge may not have worked correctly`);
       }
     } else {
-      console.log('   ❌ Failed to merge conversation state');
-      process.exit(1);
+      throw new Error('Failed to merge conversation state');
     }
 
     // Test 5: Append message with metadata, intent, and entities
@@ -230,18 +229,24 @@ async function testConversationState() {
       console.log(`         Entities:`, JSON.stringify(msg.entities, null, 2));
     });
 
-    // Cleanup (optional - comment out if you want to keep test data)
-    console.log('\n🧹 Cleaning up test data...');
-    await client.query('DELETE FROM messages WHERE conversation_id = $1', [conversationId]);
-    await client.query('DELETE FROM conversations WHERE id = $1', [conversationId]);
-    console.log('   ✅ Test data cleaned up');
-
     console.log('\n✅ All tests passed successfully!');
-  } catch (error: any) {
-    console.error('\n❌ Test failed:', error.message);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('\n❌ Test failed:', message);
     console.error(error);
-    process.exit(1);
+    process.exitCode = 1;
   } finally {
+    try {
+      if (merchantId) {
+        console.log('\n🧹 Cleaning up throwaway merchant...');
+        await deleteThrowawayMerchant(client, merchantId);
+        console.log('   ✅ Throwaway merchant deleted');
+      }
+    } catch (cleanupError: unknown) {
+      const message = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+      console.error('Throwaway merchant cleanup failed:', message);
+      process.exitCode = 1;
+    }
     client.release();
     await pool.end();
   }

@@ -1,6 +1,8 @@
 /**
  * Test script for hybrid orchestrator conversation helpers
  * Tests: getOrCreateConversationHelper, appendMessage, patchConversationState, getRecentMessages, setConversationError
+ *
+ * Uses a throwaway merchant on xobot_test — never a hardcoded or LIMIT 1 production id.
  */
 
 import pool from './connection.js';
@@ -12,20 +14,28 @@ import {
   setConversationError
 } from '../controllers/conversation.controller.js';
 import crypto from 'crypto';
+import {
+  assertIsolatedTestDb,
+  deleteThrowawayMerchant,
+  insertThrowawayMerchant,
+} from './testDbFixtures.js';
 
 async function runTest() {
-  // Use a test merchant ID (you may need to adjust this)
-  const merchantId = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'; // Use a dummy merchant ID
+  assertIsolatedTestDb();
   const platform = 'test_platform';
-  const userId = crypto.randomBytes(16).toString('hex'); // Unique user ID for each test run
+  const userId = crypto.randomBytes(16).toString('hex');
   const userName = 'Test User';
 
-  console.log('Starting hybrid orchestrator helpers tests...');
-  console.log('Test parameters:', { merchantId, platform, userId, userName });
-
+  let merchantId: string | undefined;
   let conversationId: string | null = null;
 
   try {
+    merchantId = await insertThrowawayMerchant(pool, 'hybrid_orchestrator');
+    if (!merchantId) {
+      throw new Error('Failed to create throwaway merchant');
+    }
+    console.log('Starting hybrid orchestrator helpers tests...');
+    console.log('Test parameters:', { merchantId, platform, userId, userName });
     // ==================== TEST 1: getOrCreateConversationHelper ====================
     console.log('\n--- Test 1: getOrCreateConversationHelper (create new) ---');
     let conversation = await getOrCreateConversationHelper({
@@ -193,8 +203,8 @@ async function runTest() {
       throw new Error('Error not persisted in conversation');
     }
 
-    // Clear error
-    await setConversationError(conversationId, null as any);
+    // last_error is nullable in SQL; the helper is typed as string only.
+    await setConversationError(conversationId, null as unknown as string);
     const convAfterClear = await getOrCreateConversationHelper({
       merchantId,
       platform,
@@ -206,17 +216,22 @@ async function runTest() {
 
     console.log('\n✅ All tests passed successfully!');
 
-  } catch (error: any) {
-    console.error('\n❌ Test failed:', error.message);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('\n❌ Test failed:', message);
     console.error(error);
-    process.exit(1);
+    process.exitCode = 1;
   } finally {
-    // Clean up: Delete created conversation and messages
-    if (conversationId) {
-      console.log('\n--- Cleaning up test data ---');
-      await pool.query('DELETE FROM messages WHERE conversation_id = $1', [conversationId]);
-      await pool.query('DELETE FROM conversations WHERE id = $1', [conversationId]);
-      console.log('Cleaned up conversation and messages for ID:', conversationId);
+    try {
+      if (merchantId) {
+        console.log('\n--- Cleaning up throwaway merchant ---');
+        await deleteThrowawayMerchant(pool, merchantId);
+        console.log('Deleted throwaway merchant:', merchantId);
+      }
+    } catch (cleanupError: unknown) {
+      const message = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+      console.error('Throwaway merchant cleanup failed:', message);
+      process.exitCode = 1;
     }
     await pool.end();
   }
