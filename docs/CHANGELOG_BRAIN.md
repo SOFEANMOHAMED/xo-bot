@@ -4,6 +4,24 @@
 
 ---
 
+## 2026-09-21 10:02 UTC — STEP D final touch / PHASE 0 — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** عميل pm2 المولود أثناء القفل قد يرث FD 9 ويبقي `/tmp/xobot-deploy.lock`؛ `newest_backup` قد يستعيد نسخة pinned في `dist.keep`؛ `docs/BOT_BRAIN_MAP.md` كان غير متتبَّع فيمنع `refuse_dirty_git` / DRY_RUN.
+- **الملفات / الدوال:**
+  - `scripts/deploy-lib.sh` — `pm2_unlocked` (`pm2 … 9>&-`)
+  - `scripts/deploy.sh` / `scripts/rollback.sh` — كل استدعاءات pm2 عبر `pm2_unlocked`
+  - `scripts/rollback.sh` — `newest_backup` يتخطّى `dist.keep` ويرفض إن بقيت pinned فقط
+  - `scripts/test_deploy_lock_fd.sh` / `scripts/test_newest_backup_skip_pin.sh` — stubs إثبات
+  - `backend/dist.keep` — تعليق: لا prune ولا auto-restore
+  - `docs/BOT_BRAIN_MAP.md` — أُضيف للفهرس لتنظيف الشجرة
+  - `docs/CHANGELOG_BRAIN.md` — هذا السجل
+- **اختبارات:** `bash -n` + `shellcheck -x` على السكربتات المعدّلة؛ stub القفل وstub newest_backup نجحا. لم يُنفَّذ deploy/rollback/pm2.
+- **أثر السلوك:** لا تغيير لعقد عقل البوت.
+- **حدود معروفة:** استعادة النسخة المثبتة تتطلب تدخلاً يدوياً صريحاً (ليست عبر `rollback.sh`).
+
+---
+
 ## 2026-09-21 09:55 UTC — STEP D re-review / PHASE 0 — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

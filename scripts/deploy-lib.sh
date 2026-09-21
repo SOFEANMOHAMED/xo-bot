@@ -115,6 +115,13 @@ print_live_commit() {
   fi
 }
 
+# Run pm2 without inheriting the deploy lock FD.
+# WHY 9>&-: a pm2 daemon spawned while FD 9 holds the flock would keep the
+# lock forever after the parent exits.
+pm2_unlocked() {
+  pm2 "$@" 9>&-
+}
+
 # True if basename of bak path is listed in dist.keep (comments/blank ignored).
 backup_is_kept() {
   local bak_path=$1

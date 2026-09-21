@@ -196,14 +196,15 @@ swap_live_dist() {
 
 restart_pm2() {
   unset NODE_ENV
-  pm2 restart "$PM2_APP" --update-env
-  pm2 status
+  # WHY 9>&- via pm2_unlocked: daemon must not inherit /tmp/xobot-deploy.lock.
+  pm2_unlocked restart "$PM2_APP" --update-env
+  pm2_unlocked status
   local err_log="${HOME}/.pm2/logs/${PM2_APP}-error.log"
   if [[ -f "$err_log" ]]; then
     echo "==> last 100 lines of ${err_log} (error/warn)"
     tail -n 100 "$err_log" | grep -E 'error|Error|ERROR|FATAL|WARN' || true
   fi
-  pm2 logs "$PM2_APP" --err --lines 100 --nostream || true
+  pm2_unlocked logs "$PM2_APP" --err --lines 100 --nostream || true
 }
 
 refuse_dirty_git
