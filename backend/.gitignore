@@ -5,6 +5,7 @@ node_modules/
 dist/
 dist.new
 dist.bak-*
+dist.failed-*
 dist.commit
 
 # Environment variables

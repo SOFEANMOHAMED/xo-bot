@@ -2,6 +2,7 @@ node_modules/
 dist/
 backend/dist.new
 backend/dist.bak-*
+backend/dist.failed-*
 backend/dist.commit
 backups/
 logs/

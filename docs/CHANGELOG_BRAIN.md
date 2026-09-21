@@ -4,6 +4,22 @@
 
 ---
 
+## 2026-09-21 09:49 UTC — STEP D fix / PHASE 0 — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** مراجعة STEP D: كلمة السر ظهرت في argv عبر `docker exec -e PGPASSWORD`؛ typecheck داخل `if` قد يُتخطى بسبب تعطيل errexit؛ لا نسخ احتياطي إلزامي قبل المبادلة؛ rollback كان ينقل النسخة الاحتياطية فيستهلكها. إصلاحات سكربت فقط (لم تُنفَّذ).
+- **الملفات / الدوال:**
+  - `scripts/deploy-lib.sh` — `dotenv_get`, `resolve_health_port`, `wait_for_health` (مشترك)
+  - `scripts/deploy.sh` — `refuse_unreachable_test_db` (psql كـ postgres بلا سر)، `run_test_gate` (`typecheck && test-all`)، `build_dist_new` (rm قبل البناء)، `refuse_missing_live_extras`, `dump_production_db`, ERR trap بعد بدء المبادلة، `assert_live_db_connections`
+  - `scripts/rollback.sh` — `mv dist dist.failed-*` (آخر 2)، استعادة بـ `cp -a`، حذف `dist.commit` إن غاب `.deploy-commit`، `wait_for_health`
+  - `.gitignore` / `backend/.gitignore` — `dist.failed-*`
+  - `docs/CHANGELOG_BRAIN.md` — هذا السجل
+- **اختبارات:** لم يُعاد تشغيل `test-all` (تغيير سكربتات فقط؛ لا كود اختبار/إنتاج). `bash -n` على السكربتات الثلاثة = OK. لم يُنفَّذ deploy/rollback/build/pm2.
+- **أثر السلوك:** لا تغيير لعقد عقل البوت. `getRecentMessages` ما زال DESC بلا reverse — مسار القنوات الحية لا يستدعيه (انظر التقرير).
+- **حدود معروفة:** `refuse_dirty_git` ما زال يرفض شجرة متسخة؛ `public/sitemap.xml` قد يوسّخ الشجرة (يُولَّد بـ `npm run generate:sitemap` / `build`). لم يُمسّ الملف.
+
+---
+
 ## 2026-09-21 09:44 UTC — STEP D / PHASE 0 — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
