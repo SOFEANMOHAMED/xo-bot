@@ -109,6 +109,12 @@ import {
     resolveIncomingPendingProductId,
     resolvePendingVariantAnswer,
 } from './pendingBotQuestion.js';
+import {
+    buildAskWhichLineMessage,
+    buildVariantUnchangedMessage,
+    buildVariantUpdatedMessage,
+    resolveVariantChange,
+} from './resolveVariantChange.js';
 
 // Re-export confirmation helpers so channel controllers keep a stable import path
 export {
@@ -570,7 +576,196 @@ export const processWithSalesGPT = async (
         !catalogColorsForConfirm?.length ||
         isColorInProductCatalog(colorForFastPath, catalogColorsForConfirm);
 
-    // ——— Pending color/size answer FIRST (before cancel / agent / image) ———
+    // ——— Variant correction BEFORE pending (positive color wins over negation) ———
+    {
+        const liveItems = getCartItems(conversationState).map(ensureLineId);
+        const focusId =
+            conversationState.extracted_entities?.product_id ||
+            conversationState.last_recommended_products?.[0] ||
+            products[0]?.id ||
+            null;
+        const productPool: Product[] = [];
+        const seen = new Set<string>();
+        for (const p of [
+            ...mentionedInMessage,
+            ...products,
+            ...catalogForMention.filter((p) =>
+                liveItems.some((line) => line.productId === p.id)
+            ),
+        ]) {
+            if (!p?.id || seen.has(p.id)) continue;
+            seen.add(p.id);
+            productPool.push(p);
+        }
+        const variant = resolveVariantChange({
+            messageText,
+            cartLines: liveItems,
+            products: productPool,
+            focusProductId: focusId,
+            mentionedProductIds: mentionedInMessage.map((p) => p.id),
+        });
+
+        if (variant.kind === 'apply') {
+            const nextItems = updateCartLineById(liveItems, variant.lineId, {
+                color: variant.color,
+            }).map(ensureLineId);
+            const cart = normalizeCart(
+                { items: nextItems, status: 'building' },
+                { storeCurrency: merchantConfig.storeCurrency || merchantConfig.currency }
+            );
+            const reply = buildVariantUpdatedMessage(
+                language === 'english' ? 'english' : 'arabic',
+                variant.color,
+                variant.productName
+            );
+            const updatedVariant: ConversationState = applyPendingToState(
+                {
+                    ...conversationState,
+                    cart,
+                    extracted_entities: {
+                        ...(conversationState.extracted_entities || {}),
+                        product_id: variant.productId,
+                        color: variant.color,
+                    },
+                    language,
+                    awaiting_order_confirmation: false,
+                    last_interaction: new Date().toISOString(),
+                    message_count: (conversationState.message_count || 0) + 1,
+                },
+                clearPendingBotQuestion()
+            );
+            applySalesGPTStage(updatedVariant, '7');
+            return {
+                replyText: reply,
+                intent: 'order' as Intent,
+                stage: 'close' as Stage,
+                entities: updatedVariant.extracted_entities || {},
+                missingFields: [],
+                products: productPool.filter((p) => p.id === variant.productId),
+                plan: {
+                    nextAction: 'recommend_products' as NextAction,
+                    oneQuestion: reply,
+                    ctaType: 'choose' as CtaType,
+                    recommendationStrategy: null as RecommendationStrategy,
+                    shouldOfferDiscount: false,
+                    handoffReason: '',
+                },
+                updatedState: updatedVariant,
+                aiCallsCount: 0,
+                language,
+                next_action: 'collect_info',
+            };
+        }
+
+        if (variant.kind === 'unchanged') {
+            const reply = buildVariantUnchangedMessage(
+                language === 'english' ? 'english' : 'arabic',
+                variant.color,
+                variant.productName
+            );
+            const updatedSame: ConversationState = applyPendingToState(
+                {
+                    ...conversationState,
+                    language,
+                    last_interaction: new Date().toISOString(),
+                    message_count: (conversationState.message_count || 0) + 1,
+                },
+                clearPendingBotQuestion()
+            );
+            return {
+                replyText: reply,
+                intent: 'order' as Intent,
+                stage: 'close' as Stage,
+                entities: updatedSame.extracted_entities || {},
+                missingFields: [],
+                products: productPool.filter((p) => p.id === variant.productId),
+                plan: {
+                    nextAction: 'recommend_products' as NextAction,
+                    oneQuestion: reply,
+                    ctaType: 'choose' as CtaType,
+                    recommendationStrategy: null as RecommendationStrategy,
+                    shouldOfferDiscount: false,
+                    handoffReason: '',
+                },
+                updatedState: updatedSame,
+                aiCallsCount: 0,
+                language,
+                next_action: 'collect_info',
+            };
+        }
+
+        if (variant.kind === 'unavailable') {
+            const reply = buildUnavailableColorMessage(
+                language === 'english' ? 'english' : 'arabic',
+                variant.catalogColors,
+                variant.rejected
+            );
+            const updatedBad: ConversationState = applyPendingToState(
+                {
+                    ...conversationState,
+                    language,
+                    last_interaction: new Date().toISOString(),
+                    message_count: (conversationState.message_count || 0) + 1,
+                },
+                clearPendingBotQuestion()
+            );
+            return {
+                replyText: reply,
+                intent: 'product_query' as Intent,
+                stage: 'offer' as Stage,
+                entities: updatedBad.extracted_entities || {},
+                missingFields: [],
+                products: productPool.filter((p) => p.id === variant.productId),
+                plan: {
+                    nextAction: 'recommend_products' as NextAction,
+                    oneQuestion: reply,
+                    ctaType: 'choose' as CtaType,
+                    recommendationStrategy: null as RecommendationStrategy,
+                    shouldOfferDiscount: false,
+                    handoffReason: '',
+                },
+                updatedState: updatedBad,
+                aiCallsCount: 0,
+                language,
+                next_action: 'collect_info',
+            };
+        }
+
+        if (variant.kind === 'ask_which') {
+            const reply = buildAskWhichLineMessage(
+                language === 'english' ? 'english' : 'arabic',
+                variant.productName
+            );
+            const updatedAsk: ConversationState = {
+                ...conversationState,
+                language,
+                last_interaction: new Date().toISOString(),
+                message_count: (conversationState.message_count || 0) + 1,
+            };
+            return {
+                replyText: reply,
+                intent: 'order' as Intent,
+                stage: 'close' as Stage,
+                entities: updatedAsk.extracted_entities || {},
+                missingFields: [],
+                products: productPool.filter((p) => p.id === variant.productId),
+                plan: {
+                    nextAction: 'recommend_products' as NextAction,
+                    oneQuestion: reply,
+                    ctaType: 'choose' as CtaType,
+                    recommendationStrategy: null as RecommendationStrategy,
+                    shouldOfferDiscount: false,
+                    handoffReason: '',
+                },
+                updatedState: updatedAsk,
+                aiCallsCount: 0,
+                language,
+                next_action: 'collect_info',
+            };
+        }
+    }
+
+    // ——— Pending color/size answer (before cancel / agent / image) ———
     {
         const storedPending = readPendingFromState(conversationState);
         const lastBot = lastAssistantContent(recentMessages);

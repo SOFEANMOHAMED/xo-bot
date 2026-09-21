@@ -4,9 +4,26 @@
 
 ---
 
-## 2026-09-21 12:40 UTC — PHASE 2C ITEM 1 / pending_bot_question + image policy — فرع `main`
+## 2026-09-21 12:50 UTC — PHASE 2C ITEM 2 / resolveVariantChange + interim negation — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** «لا ما بدي اسود بدي احمر» كان يُبقي الأسود (أول لون مذكور) أو يُتجاهل. أُضيفت `resolveWantedCatalogColor` (نفي محلي) + `resolveVariantChange` النقي + سكة في `index` تكتب عبر `cartLineOps`؛ كشف التصحيح في `interimCancelMatchers` (INTERIM).
+- **الملفات / الدوال:**
+  - `orderColorPolicy.ts` — `isCatalogColorNegated` / `resolveWantedCatalogColor` / `mentionedColorOutsideCatalog`
+  - `interimCancelMatchers.ts` — `isInterimVariantCorrectionIntent` + حالات اختبار
+  - `resolveVariantChange.ts` — `resolveVariantChange` / رسائل حدّثت / بدون تغيير / اسأل أي سطر
+  - `index.ts` — سكة تصحيح قبل pending
+  - `test_interim_cancel_matchers.ts` / `test_p0_cart_integrity.ts` (تصحيح اللون hard)
+  - `BOT_BRAIN_MAP.md` / `CHANGELOG_BRAIN.md`
+- **اختبارات:** typecheck PASS. interim 27؛ P0: 40 hard / 1 known_pending (commerceEngine فقط).
+- **أثر السلوك:** اللون الإيجابي يُثبَّت؛ «تم التحديث» فقط عند تغيّر حقيقي؛ لون غير متوفر → قائمة صادقة؛ سطران لنفس المنتج → سؤال أيهما.
+- **حدود معروفة:** `commerceEngine` الكامل وcollect-info-order ما زالا معلّقين.
+
+---
+
+## 2026-09-21 12:40 UTC — PHASE 2C ITEM 1 / pending_bot_question + image policy — فرع `main`
+
+- **الهاش:** `120ed1a2ad43e3b4f1e0b2252ab763418461e510`
 - **ماذا تغيّر والسبب الجذري:** رد «الأسود» بعد سؤال اللون كان يُفسَّر كطلب صورة من تاريخ العرض (`preferSendImage` / `variantAfterPhotoOffer` / عروض الصورة السابقة). أُضيفت حالة `pending_bot_question` مربوطة بـ `product_id` من قوالب السؤال الحتمية فقط، ومسار أولوية يُسجّل اللون على سطر ذلك المنتج بلا صورة؛ الرفض الصريح يكبت الصورة؛ الإرفاق فقط عند `isExplicitPhotoRequest` للرسالة الحالية.
 - **الملفات / الدوال:**
   - `pendingBotQuestion.ts` — `detectPendingBotQuestion` / `bindPendingBotQuestion` / `resolvePendingVariantAnswer` / `isExplicitPhotoRefusal` / …

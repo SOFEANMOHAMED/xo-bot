@@ -10,9 +10,10 @@ import {
     extractColorFromText,
     formatColorOptionsForDisplay,
     matchColorOption,
-    colorsMatch
+    colorsMatch,
+    normalizeColorToken,
   } from '../../catalog/color-options.js';
-  
+
   export function isColorInProductCatalog(
     color: string | null | undefined,
     catalogColors: string[] | null | undefined
@@ -20,7 +21,7 @@ import {
     if (!color?.trim() || !catalogColors?.length) return false;
     return matchColorOption(color, catalogColors).matched !== null;
   }
-  
+
   /**
    * Map numeric replies ("2", "رقم 2", "الخيار 2") to a catalog color option.
    */
@@ -30,13 +31,13 @@ import {
   ): string | null {
     if (!text?.trim() || !catalogColors.length) return null;
     const t = text.trim();
-  
+
     const pure = t.match(/^(\d{1,2})$/);
     if (pure) {
       const idx = parseInt(pure[1], 10) - 1;
       if (idx >= 0 && idx < catalogColors.length) return catalogColors[idx];
     }
-  
+
     const labeled = t.match(
       /(?:رقم|الخيار|اللون|option|number|#|no\.?)\s*(\d{1,2})\s*[).]?$/i
     );
@@ -44,23 +45,102 @@ import {
       const idx = parseInt(labeled[1], 10) - 1;
       if (idx >= 0 && idx < catalogColors.length) return catalogColors[idx];
     }
-  
+
     return null;
   }
-  
+
+  function stripLeadingAlToken(value: string): string {
+    return value.replace(/^ال/, '');
+  }
+
+  function catalogColorMentionIndex(messageText: string, option: string): number {
+    const hay = stripLeadingAlToken(normalizeColorToken(messageText)).replace(
+      /(^|\s)ال(?=\S)/g,
+      '$1'
+    );
+    const needle = stripLeadingAlToken(normalizeColorToken(option));
+    if (!needle || needle.length < 2) return -1;
+    return hay.indexOf(needle);
+  }
+
+  /** True when the catalog option sits under a local negation (ما بدي / مو / مش …). */
+  export function isCatalogColorNegated(messageText: string, option: string): boolean {
+    const hay = stripLeadingAlToken(normalizeColorToken(messageText)).replace(
+      /(^|\s)ال(?=\S)/g,
+      '$1'
+    );
+    const needle = stripLeadingAlToken(normalizeColorToken(option));
+    const idx = hay.indexOf(needle);
+    if (idx < 0) return false;
+    const before = hay.slice(0, idx).trim();
+    return /(?:ما\s*بدي|ما\s*ابي|ما\s*ابغى|ما\s*عاوز|بلاش|بدون|مو|مش|لا\s*بدي|لا\s*اريد|لا\s*أريد)\s*(?:ال)?$/i.test(
+      before
+    );
+  }
+
+  /**
+   * Color the customer WANTS, resolved only against this product's real catalog colors.
+   * Negated mentions lose; the last remaining positive mention wins.
+   */
+  export function resolveWantedCatalogColor(
+    messageText: string,
+    catalogColors: string[] | null | undefined
+  ): string | null {
+    if (!messageText?.trim() || !catalogColors?.length) return null;
+    const mentioned: Array<{ color: string; index: number }> = [];
+    for (const option of catalogColors) {
+      if (typeof option !== 'string' || !option.trim()) continue;
+      const index = catalogColorMentionIndex(messageText, option);
+      if (index >= 0 || colorsMatch(messageText, option)) {
+        mentioned.push({
+          color: option,
+          index: index >= 0 ? index : Number.MAX_SAFE_INTEGER,
+        });
+      }
+    }
+    if (mentioned.length === 0) {
+      const extracted = extractColorFromText(messageText, catalogColors);
+      if (!extracted || !isColorInProductCatalog(extracted, catalogColors)) return null;
+      if (isCatalogColorNegated(messageText, extracted)) return null;
+      return extracted;
+    }
+    mentioned.sort((a, b) => a.index - b.index);
+    const positive = mentioned.filter((row) => !isCatalogColorNegated(messageText, row.color));
+    if (positive.length === 0) return null;
+    return positive[positive.length - 1].color;
+  }
+
+  /** A color word was said that this product does not sell. */
+  export function mentionedColorOutsideCatalog(
+    messageText: string,
+    catalogColors: string[] | null | undefined
+  ): string | null {
+    if (!messageText?.trim() || !catalogColors?.length) return null;
+    if (resolveWantedCatalogColor(messageText, catalogColors)) return null;
+    const any = extractColorFromText(messageText);
+    if (!any) return null;
+    if (isColorInProductCatalog(any, catalogColors)) return null;
+    if (isCatalogColorNegated(messageText, any)) return null;
+    return any;
+  }
+
   /** Extract a catalog-bound color from a single user message (text or number). */
   export function extractColorFromUserText(
     text: string,
     catalogColors: string[]
   ): string | null {
     if (!text?.trim() || !catalogColors.length) return null;
-  
+
     const numeric = extractNumericColorChoice(text, catalogColors);
     if (numeric) return numeric;
-  
+
+    const wanted = resolveWantedCatalogColor(text, catalogColors);
+    if (wanted) return wanted;
+
     const fromText = extractColorFromText(text, catalogColors);
     if (!fromText) return null;
-  
+    if (isCatalogColorNegated(text, fromText)) return null;
+
     const match = matchColorOption(fromText, catalogColors);
     return match.matched;
   }

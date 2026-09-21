@@ -349,11 +349,14 @@ flowchart TD
 | `clearDraftOnFocusChange` | عند تغيّر المنتج المركّز: مسح product/color/size من المسودة (لا توريث بين SKUs) |
 | `canonicalizeLineColor` | لون السطر من كتالوج **نفس** المنتج فقط؛ إن لا ألوان → `null` |
 | `resolveLineCurrency` | عملة السطر من المنتج ثم عملة المتجر — بلا افتراض `USD` ثابت في `normalizeCart` |
-| `interimCancelMatchers.ts` | **INTERIM** تصنيف إلغاء كلي vs حذف سطر (أفعال: الغي/شيل/بلاش/احذف) — يُستبدل بمفسّر LLM لاحقاً |
+| `interimCancelMatchers.ts` | **INTERIM** إلغاء كلي / حذف سطر / كشف تصحيح متغير (`isInterimVariantCorrectionIntent`) — يُستبدل بمفسّر LLM لاحقاً |
+| `resolveVariantChange.ts` | قرار نقي: تطبيق لون إيجابي / بدون تغيير / غير متوفر / اسأل أي سطر؛ الكتابة عبر `updateCartLineById` |
 | `matchCartLinesForRemoval` | مطابقة أسماء/متغيرات **سطور السلة فقط** (بلا قوائم أسماء منتجات) |
 | `cartLineOps.removeCartLineById` | حذف السطر عبر معرّف السطر |
 
 **عقد اللون (PHASE 2A FIX 1):** اللون ملك السطر، لا المسودة العامة. منتج بلا `colors` لا يرث لوناً من مسودة/سلة منتج آخر.
+
+**تصحيح المتغير (PHASE 2C ITEM 2):** «لا ما بدي اسود بدي احمر» / «غيّر للأحمر» يختار اللون **الإيجابي** عبر `resolveWantedCatalogColor` (النفي في `orderColorPolicy`); «تم التحديث»/`حدّثت طلبك` فقط عند تغيّر السلة فعلياً؛ لونان لنفس المنتج → اسأل أي سطر.
 
 **اكتمال الدفع (`isCheckoutReady`):**
 

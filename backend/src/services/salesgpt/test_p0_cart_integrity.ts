@@ -366,9 +366,39 @@ if (commerce) {
   const watch = getCartItems(changed.updatedState).find(
     (item) => item.productId === REAL_TEST_WATCH.id,
   );
-  assertPending(
+  assertHard(
     watch?.color === 'أحمر',
     `pipeline correction changes watch to red, got ${watch?.color}`,
+  );
+  assertHard(
+    /حدّثت|تم التحديث|تحديث/.test(changed.replyText),
+    `update claim when cart changed: ${changed.replyText}`,
+  );
+
+  const same = await runTurn({
+    message: 'لا ما بدي اسود بدي احمر',
+    state: emptyState({
+      last_recommended_products: [REAL_TEST_WATCH.id],
+      extracted_entities: {
+        product_query: REAL_TEST_WATCH.name,
+        product_id: REAL_TEST_WATCH.id,
+        color: 'أحمر',
+      },
+      cart: {
+        items: [watchLine('أحمر')],
+        status: 'building',
+      },
+    }),
+    llmText: 'تم التحديث',
+    recentMessages: [{ role: 'assistant', content: 'تمام، حدّثت طلبك.' }],
+  });
+  const again = getCartItems(same.updatedState).find(
+    (item) => item.productId === REAL_TEST_WATCH.id,
+  );
+  assertHard(again?.color === 'أحمر', 'already-red stays أحمر');
+  assertHard(
+    !/حدّثت طلبك|تم التحديث/.test(same.replyText),
+    `no update claim when cart unchanged: ${same.replyText}`,
   );
 }
 
@@ -520,7 +550,7 @@ if (hardFailures.length > 0) {
 if (pendingFailures.length > 0) {
   for (const item of pendingFailures) console.error(`PENDING: ${item}`);
   console.error(
-    'KNOWN_PENDING: commerceEngine SetVariant / resolveVariantChange and collect-info-order field sequencing are not restored yet',
+    'KNOWN_PENDING: commerceEngine module classification and collect-info-order field sequencing are not restored yet',
   );
   process.exit(0);
 }
