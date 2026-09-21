@@ -344,7 +344,8 @@ flowchart TD
 | `lockDraftIntoCart` | نقل المسودة إلى سطر سلة ومسح حقول المنتج من المسودة |
 | `ensureCartForCheckout` | قبل await/confirm: ضمان وجود سطر سلة من المسودة |
 | `fillCartVariantsFromDraft` | كتابة اللون/المقاس على السطر المطابق فوراً؛ إن السلة فارغة والمسودة مكتملة تُرقّى لسطر |
-| `replaceCartItems` | تصحيح/مزامنة سلة متعددة المنتجات من الرسالة |
+| `replaceCartItems` | **دمج** المنتجات المذكورة في السلة (لا حذف السطور القائمة؛ الكميات لا تُصفَّر) عبر `cartLineOps.mergeCartLines` |
+| `cartLineOps.ts` | واجهة ضيقة: `addCartLine` / `mergeCartLines` / `updateCartLineById` / `removeCartLineById` |
 | `clearDraftOnFocusChange` | عند تغيّر المنتج المركّز: مسح product/color/size من المسودة (لا توريث بين SKUs) |
 | `canonicalizeLineColor` | لون السطر من كتالوج **نفس** المنتج فقط؛ إن لا ألوان → `null` |
 | `resolveLineCurrency` | عملة السطر من المنتج ثم عملة المتجر — بلا افتراض `USD` ثابت في `normalizeCart` |

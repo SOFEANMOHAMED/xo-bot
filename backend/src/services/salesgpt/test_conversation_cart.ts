@@ -190,7 +190,7 @@ function run(): void {
   assert(mid.extracted_entities?.color === 'اسود', 'fill keeps draft entities');
   passed++;
 
-  // 7) replaceCartItems keeps previously locked color on colorless rebuild.
+  // 7) replaceCartItems MERGES — existing lines stay when only a subset is re-mentioned.
   const preserved = replaceCartItems(
     state({
       cart: {
@@ -207,6 +207,34 @@ function run(): void {
     ]
   );
   assert(getCartItems(preserved).find((item) => item.productId === WATCH_ID)?.color === 'أسود', 'replace keeps color');
+  passed++;
+
+  // 7b) Sync that only names the shirt must NOT delete the watch (FIX 2).
+  const mergedOnlyShirt = replaceCartItems(
+    state({
+      cart: {
+        status: 'building',
+        items: [
+          line({ productId: WATCH_ID, productName: 'ساعات', unitPrice: 200, color: 'أسود', quantity: 2 }),
+        ],
+      },
+    }),
+    [line({ productId: SHIRT_ID, productName: 'قميص', unitPrice: 553, currency: 'USD' })]
+  );
+  const afterMerge = getCartItems(mergedOnlyShirt);
+  assert(afterMerge.length === 2, `merge keeps watch + adds shirt, got ${afterMerge.length}`);
+  assert(
+    afterMerge.find((item) => item.productId === WATCH_ID)?.quantity === 2,
+    'merge must not reset existing quantity'
+  );
+  assert(
+    afterMerge.find((item) => item.productId === WATCH_ID)?.color === 'أسود',
+    'merge keeps watch color'
+  );
+  assert(
+    afterMerge.some((item) => item.productId === SHIRT_ID),
+    'merge adds shirt line'
+  );
   passed++;
 
   // 8) Checkout is not ready while the focused colored SKU has a blank variant.

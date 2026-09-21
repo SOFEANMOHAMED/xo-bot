@@ -20,6 +20,16 @@ import {
 import { isColorInProductCatalog } from './orderColorPolicy.js';
 import { colorsMatch, matchColorOption } from '../../catalog/color-options.js';
 import { normalizeArabic } from '../../catalog/product-search.js';
+import { ensureLineId, mergeCartLines } from './cartLineOps.js';
+
+export {
+  addCartLine,
+  ensureLineId,
+  mergeCartLines,
+  removeCartLineById,
+  updateCartLineById,
+} from './cartLineOps.js';
+export type { CartLineId } from './cartLineOps.js';
 
 export const ADD_TO_CART_ACTION = 'add_to_cart';
 
@@ -363,7 +373,7 @@ export function addItemToCart(
       qtyMode: mode,
     });
   } else {
-    items.push(item);
+    items.push(ensureLineId(item));
   }
 
   return {
@@ -416,10 +426,10 @@ export function applyDraftToCart(
     }
   }
 
-  const items = [...normalized.items, item];
+  const items = [...normalized.items, ensureLineId(item)];
   return {
     cart: { items, status: 'building', updatedAt: new Date().toISOString() },
-    item,
+    item: ensureLineId(item),
     appended: true,
   };
 }
@@ -502,31 +512,24 @@ export function fillCartVariantsFromDraft(
   };
 }
 
-/** Replace entire cart contents (multi-buy / customer correction). Keeps variants already locked. */
+/** Merge mentioned products into the cart — existing lines stay; quantities are not reset. */
 export function replaceCartItems(
   state: ConversationState,
   items: CartItem[]
 ): ConversationState {
   const previous = getCartItems(state);
-  const preserved = items.map((item) => {
-    const prior = previous.find((row) => row.productId === item.productId);
-    if (!prior) return item;
-    return {
-      ...item,
-      color: specifiedVariant(item.color) || specifiedVariant(prior.color),
-      size: specifiedVariant(item.size) || specifiedVariant(prior.size),
-    };
-  });
+  // Use pure line ops so sync never deletes rows that were not re-mentioned.
+  const merged = mergeCartLines(previous, items);
 
   return {
     ...state,
     cart: {
-      items: normalizeCart({ items: preserved, status: 'building' }).items,
+      items: normalizeCart({ items: merged, status: 'building' }).items,
       status: 'building',
       updatedAt: new Date().toISOString(),
     },
     extracted_entities: clearProductDraftFields(state.extracted_entities),
-    last_recommended_products: preserved.map((i) => i.productId),
+    last_recommended_products: merged.map((i) => i.productId),
     awaiting_order_confirmation: false,
   };
 }

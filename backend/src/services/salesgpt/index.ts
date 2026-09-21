@@ -550,8 +550,8 @@ export const processWithSalesGPT = async (
         !catalogColorsForConfirm?.length ||
         isColorInProductCatalog(colorForFastPath, catalogColorsForConfirm);
 
-    // Multi-product order / cart correction: rebuild cart from named products (code-owned).
-    // Fixes: "التنين القميص والساعة" → two lines qty1; "قميص واحد وساعة" → replace cart.
+    // Multi-product order / cart correction: MERGE named products into cart (code-owned).
+    // Existing lines stay; mentioned products add lines; quantities are not reset.
     if (
         !askingProductInfo &&
         !asksForPhoto &&

@@ -4,6 +4,22 @@
 
 ---
 
+## 2026-09-21 10:45 UTC — PHASE 2A FIX 2 / cart merge never deletes lines — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** `replaceCartItems` كان يستبدل السلة بالمذكور فقط فيمسح الساعة عند «بدي ضيف القميص كمان». أصبح دمجاً عبر وحدة سطور نقية.
+- **الملفات / الدوال:**
+  - `cartLineOps.ts` — `addCartLine` / `mergeCartLines` / `updateCartLineById` / `removeCartLineById` / `ensureLineId`
+  - `conversationCart.ts` — `replaceCartItems` يستدعي `mergeCartLines`؛ الكميات لا تُصفَّر
+  - `index.ts` — تعليق المسار: merge لا rebuild
+  - `test_conversation_cart.ts` — دمج قميص فوق ساعة يُبقي سطرين + كمية
+  - `docs/BOT_BRAIN_MAP.md` — عقد الدمج
+- **اختبارات:** typecheck PASS. `test-all`: **14 passed، 0 failed، 5 known_pending من 19** (لا انحدار).
+- **أثر السلوك:** مزامنة متعددة المنتجات تضيف/تحدّث ولا تحذف سطور قائمة.
+- **حدود معروفة:** إزالة سطر صريحة ما زالت عبر commerceEngine (معلّق)؛ ملخص الأسعار/الصور معلّقان.
+
+---
+
 ## 2026-09-21 10:41 UTC — PHASE 2A FIX 1 / cart line color+currency — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
