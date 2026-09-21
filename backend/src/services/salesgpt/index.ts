@@ -50,6 +50,7 @@ import {
     botReplyAsksForConfirmation,
     botReplyAsksToAddMore,
     buildOrderConfirmedMessage,
+    buildAwaitConfirmationMessage,
     isProductInfoRequest,
     sanitizeCollectedText,
     AWAIT_CONFIRMATION_ACTION,
@@ -1140,6 +1141,25 @@ export const processWithSalesGPT = async (
                 size: primary.size,
                 quantity: primary.quantity,
             };
+            // Pre-confirmation copy must show priced per-currency lines from the cart.
+            if (effectiveNextAction === AWAIT_CONFIRMATION_ACTION) {
+                const e = updatedState.extracted_entities || {};
+                finalReplyText = buildAwaitConfirmationMessage(
+                    language,
+                    {
+                        name: e.name,
+                        phone: e.phone,
+                        address: e.address,
+                        product_name: primary.productName,
+                        color: primary.color,
+                        size: primary.size,
+                        quantity: primary.quantity,
+                    },
+                    formatCartSummary(items, language, {
+                        shippingPolicy: merchantConfig.shippingPolicy,
+                    })
+                );
+            }
         }
     }
 

@@ -21,6 +21,10 @@ import { isColorInProductCatalog } from './orderColorPolicy.js';
 import { colorsMatch, matchColorOption } from '../../catalog/color-options.js';
 import { normalizeArabic } from '../../catalog/product-search.js';
 import { ensureLineId, mergeCartLines } from './cartLineOps.js';
+import {
+  formatCartSummary as formatPricedCartSummary,
+  type CartSummaryOptions,
+} from './cartSummary.js';
 
 export {
   addCartLine,
@@ -30,6 +34,17 @@ export {
   updateCartLineById,
 } from './cartLineOps.js';
 export type { CartLineId } from './cartLineOps.js';
+
+export {
+  cartLineHasUnitPrice,
+  cartLineTotal,
+  computeCartTotalsByCurrency,
+  formatCartLine,
+  formatCartSubtotalLine,
+  formatCartSummary,
+} from './cartSummary.js';
+export type { CartSummaryOptions } from './cartSummary.js';
+export { formatCatalogMoney, formatGroupedInteger } from './moneyFormat.js';
 
 export const ADD_TO_CART_ACTION = 'add_to_cart';
 
@@ -655,25 +670,7 @@ export function cartItemsToOrderProducts(items: CartItem[]): Array<{
   }));
 }
 
-export function formatCartLine(item: CartItem, language: Language): string {
-  const parts = [item.productName];
-  if (item.color) parts.push(item.color);
-  if (item.size) parts.push(item.size);
-  const label = parts.join(' — ');
-  return language === 'arabic'
-    ? `• ${label} × ${item.quantity}`
-    : `• ${label} × ${item.quantity}`;
-}
-
-export function formatCartSummary(
-  items: CartItem[],
-  language: Language
-): string {
-  if (items.length === 0) {
-    return language === 'arabic' ? 'السلة فارغة' : 'Cart is empty';
-  }
-  return items.map((item) => formatCartLine(item, language)).join('\n');
-}
+// formatCartSummary / formatCartLine are re-exported from cartSummary.ts (priced).
 
 export function cartProductIds(items: CartItem[]): string[] {
   return [...new Set(items.map((i) => i.productId).filter(Boolean))];
@@ -868,46 +865,49 @@ export function detectsAddAnotherIntent(
 export function buildAddedToCartMessage(
   language: Language,
   item: CartItem,
-  cart: ConversationCart
+  cart: ConversationCart,
+  opts?: CartSummaryOptions
 ): string {
-  const summary = formatCartSummary(cart.items, language);
+  const summary = formatPricedCartSummary(cart.items, language, opts);
   if (language === 'arabic') {
+    // Neutral wording: no ✅, no تبي/تحب mixing.
     const label =
       cart.items.length > 1
-        ? 'تم تحديث سلتك ✅'
-        : `تمت إضافة ${item.productName} إلى سلتك ✅`;
+        ? 'تمام، حدّثت طلبك.'
+        : `تمام، أضفت ${item.productName} لطلبك.`;
     return (
       `${label}\n` +
       `${summary}\n\n` +
-      `تبي تضيف منتج ثاني، ولا نكمّل الطلب؟`
+      `نقدر نضيف منتج ثاني، أو نكمّل الطلب؟`
     );
   }
   const label =
     cart.items.length > 1
-      ? 'Your cart was updated ✅'
-      : `Added ${item.productName} to your cart ✅`;
+      ? 'Got it — your order is updated.'
+      : `Got it — I added ${item.productName} to your order.`;
   return (
     `${label}\n` +
     `${summary}\n\n` +
-    `Want to add another product, or shall we complete the order?`
+    `We can add another product, or finish the order.`
   );
 }
 
 export function buildCartSyncedMessage(
   language: Language,
-  cart: ConversationCart
+  cart: ConversationCart,
+  opts?: CartSummaryOptions
 ): string {
-  const summary = formatCartSummary(cart.items, language);
+  const summary = formatPricedCartSummary(cart.items, language, opts);
   if (language === 'arabic') {
     return (
-      `تم ضبط سلتك ✅\n` +
+      `تمام، هذا طلبك:\n` +
       `${summary}\n\n` +
-      `تبي تضيف شي تاني، ولا نكمّل الطلب؟`
+      `نقدر نضيف منتج ثاني، أو نكمّل الطلب؟`
     );
   }
   return (
-    `Your cart is set ✅\n` +
+    `Got it — this is your order:\n` +
     `${summary}\n\n` +
-    `Want to add anything else, or shall we complete the order?`
+    `We can add another product, or finish the order.`
   );
 }

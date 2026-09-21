@@ -4,6 +4,23 @@
 
 ---
 
+## 2026-09-21 10:52 UTC — PHASE 2B ITEM 1 / priced cartSummary — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** ملخص السلة كان «اسم × 1» بلا أسعار/عملات فيُسهّل اختراع مجموع عبر العملات. أُضيفت وحدة نقية مسعّرة ووُصلت لكل رسائل السلة وملخص ما قبل التأكيد.
+- **الملفات / الدوال:**
+  - `moneyFormat.ts` — `formatGroupedInteger` / `formatCatalogMoney`
+  - `cartSummary.ts` — `formatCartLine` / `formatCartSummary` / `computeCartTotalsByCurrency` / `formatCartSubtotalLine`
+  - `conversationCart.ts` — إعادة تصدير + `buildAddedToCartMessage` / `buildCartSyncedMessage` ب صياغة محايدة
+  - `index.ts` — حقن `buildAwaitConfirmationMessage` مع ملخص مسعّر عند `await_confirmation`
+  - `test_p0_cart_integrity.ts` — تأكيدات الأسعار/العملات أصبحت hard
+  - `docs/BOT_BRAIN_MAP.md` / `CHANGELOG_BRAIN.md`
+- **اختبارات:** typecheck PASS. P0: 23 hard-pass؛ الباقي known_pending (commerce/إلغاء/صورة).
+- **أثر السلوك:** رسائل السلة والتأكيد تعرض أسعاراً ومجموعات لكل عملة؛ سطر بلا سعر يُعلَن ناقصاً.
+- **حدود معروفة:** إلغاء جزئي وcommerceEngine ما زالا معلّقين (ITEM 2).
+
+---
+
 ## 2026-09-21 10:45 UTC — PHASE 2A FIX 2 / cart merge never deletes lines — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

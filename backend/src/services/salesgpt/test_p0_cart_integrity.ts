@@ -249,10 +249,10 @@ assertPending(
   assertHard(summary.includes('ساعة') && summary.includes('قميص'), 'summary keeps per-line identity');
   assertHard(/أسود/.test(summary), 'watch variant is present');
   assertHard(!/أسود/.test(shirtRow), 'shirt does not inherit watch color');
-  assertPending(/200/.test(summary) && /ريال/.test(summary), 'watch line is SAR 200');
-  assertPending(/553/.test(summary) && /دولار/.test(summary), 'shirt line is USD 553');
-  assertPending(!/753/.test(summary), 'mixed currencies are never summed as 753');
-  assertPending(
+  assertHard(/200/.test(summary) && /ريال/.test(summary), 'watch line is SAR 200');
+  assertHard(/553/.test(summary) && /دولار/.test(summary), 'shirt line is USD 553');
+  assertHard(!/753/.test(summary), 'mixed currencies are never summed as 753');
+  assertHard(
     /مجموع المنتجات/.test(summary) && /ريال/.test(summary) && /دولار/.test(summary),
     `summary has per-currency totals:\n${summary}`,
   );
@@ -427,16 +427,16 @@ assertPending(
           `${label} shirt line is colorless USD 553`,
         );
         const summary = formatCartSummary(items, 'arabic');
-        assertPending(
+        assertHard(
           /ساعة[\s\S]*200[\s\S]*ريال/.test(summary),
           `${label} summary prices watch line`,
         );
-        assertPending(
+        assertHard(
           /قميص[\s\S]*553[\s\S]*دولار/.test(summary),
           `${label} summary prices shirt line`,
         );
-        assertPending(!/753/.test(summary), `${label} summary keeps totals per currency`);
-        assertPending(
+        assertHard(!/753/.test(summary), `${label} summary keeps totals per currency`);
+        assertHard(
           /مجموع المنتجات/.test(summary) && /ريال/.test(summary) && /دولار/.test(summary),
           `${label} confirmation summary shows totals per currency`,
         );
@@ -473,7 +473,7 @@ if (hardFailures.length > 0) {
 if (pendingFailures.length > 0) {
   for (const item of pendingFailures) console.error(`PENDING: ${item}`);
   console.error(
-    'KNOWN_PENDING: commerceEngine, cancel/correction rails, image policy, and priced/per-currency cart summaries are not restored yet',
+    'KNOWN_PENDING: commerceEngine, cancel/correction rails, and image policy are not restored yet',
   );
   process.exit(0);
 }

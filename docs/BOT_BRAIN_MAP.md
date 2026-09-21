@@ -349,7 +349,8 @@ flowchart TD
 | `clearDraftOnFocusChange` | عند تغيّر المنتج المركّز: مسح product/color/size من المسودة (لا توريث بين SKUs) |
 | `canonicalizeLineColor` | لون السطر من كتالوج **نفس** المنتج فقط؛ إن لا ألوان → `null` |
 | `resolveLineCurrency` | عملة السطر من المنتج ثم عملة المتجر — بلا افتراض `USD` ثابت في `normalizeCart` |
-| `coerceSafeQuantity` | منع كمية 2 خاطئة عند صيغ «الاتنين / كلاهما» |
+| `formatCartSummary` / `cartSummary.ts` | ملخص مسعّر: سطر (اسم+متغير+كمية+سعر) + مجموع **لكل عملة**؛ سعر ناقص → «غير مكتمل» |
+| `buildAddedToCartMessage` | «تمام، أضفت {اسم} لطلبك.» + ملخص مسعّر (بلا ✅ / بلا تبي·تحب) |
 
 **عقد اللون (PHASE 2A FIX 1):** اللون ملك السطر، لا المسودة العامة. منتج بلا `colors` لا يرث لوناً من مسودة/سلة منتج آخر.
 
