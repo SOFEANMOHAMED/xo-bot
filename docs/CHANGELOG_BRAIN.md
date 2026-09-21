@@ -4,6 +4,26 @@
 
 ---
 
+## 2026-09-21 21:30 UTC — PHASE 1B / live-model measurement (`test-live`) — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** قياس حي للنموذج عبر العميل الإنتاجي بلا تغيير سلوك الإنتاج. طبقة الكتالوج م stub عبر نفس harness اختبارات الحالة؛ مفاتيح LLM فقط من `backend/.env` تحت `NODE_ENV=test`؛ سقف استدعاءات + تقدير تكلفة؛ سيناريوهات §6 + extras؛ ثوابت I1–I5؛ حقائق رد حتمية؛ paraphrase لهجات؛ جدول BASELINE وعتبات و`--gate`.
+- **الملفات / الدوال:**
+  - `liveEval/liveEnv.ts` — تحميل مفاتيح LLM فقط
+  - `liveEval/liveHooks.ts` / `liveLlmBridge.ts` — stub كتالوج + OpenAI حقيقي بميزانية
+  - `liveEval/liveBudget.ts` — سقف استدعاءات + تقدير USD
+  - `liveEval/liveScenarios.ts` / `liveParaphrases.ts` / `liveCatalog.ts` — سيناريوهات + ×8 لهجات + كتالوج 10
+  - `liveEval/liveInvariants.ts` / `liveFacts.ts` / `liveClassify.ts` — I1–I5 وحقائق وسبب جذر
+  - `liveEval/liveRunner.ts` — تشغيل متعدد الأدوار + تقرير + `evaluateGate`
+  - `test_live.ts` — نقطة الدخول `--gate` / كتابة BASELINE
+  - `package.json` (`test-live`) · `runAllTestSuites.ts` (استثناء من test-all)
+  - `docs/BRAIN_FIX_PLAN.md` §6 · `docs/BASELINE.md` · `backend/test-live.thresholds.json`
+- **اختبارات:** `LIVE_LLM=1 npm run test-live` → **113/130 (86.9%)** سيناريو-تشغيل؛ 215 استدعاء LLM؛ I1 98.9% · I2 100% · I3 98.9% · I4 100% · I5 100%. typecheck PASS. ليس جزءاً من `test-all`.
+- **أثر السلوك:** لا تغيير إنتاجي. **النشر يشترط نجاح** `npm run test-live -- --gate`.
+- **حدود معروفة:** S10/S14/S20 عند 0% في هذه القياس؛ S05 تأثر بtimestamps في URL الصورة (أُصلح الاستخراج لاحقاً في نفس الـ harness).
+
+---
+
 ## 2026-09-21 20:55 UTC — HOTFIX 2E / browse must not force collect_info templates — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

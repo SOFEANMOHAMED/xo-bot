@@ -48,6 +48,7 @@
     "test-pending-bot-question": "NODE_ENV=test tsx --import ./src/database/testPreflight.ts --import ./src/services/salesgpt/test_pipeline_hooks.ts src/services/salesgpt/test_pending_bot_question.ts",
     "test-connection-guard": "NODE_ENV=test tsx src/database/test_connection_guard.ts",
     "test-logger-isolation": "NODE_ENV=test tsx --import ./src/database/testPreflight.ts src/database/test_logger_isolation.ts",
+    "test-live": "NODE_ENV=test LIVE_LLM=1 tsx --import ./src/services/salesgpt/liveEval/liveEnv.ts --import ./src/services/salesgpt/liveEval/liveHooks.ts src/services/salesgpt/test_live.ts",
     "typecheck": "tsc --noEmit",
     "test-all": "NODE_ENV=test tsx --import ./src/database/testPreflight.ts src/database/runAllTestSuites.ts",
     "migrate-social-story-content": "tsx src/database/migrations/run_social_story_content_migration.ts",

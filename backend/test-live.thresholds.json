@@ -1,0 +1,21 @@
+{
+  "overall": 0.77,
+  "byTurnType": {
+    "greeting": 0.9,
+    "browse": 0.81,
+    "price": 0.9,
+    "order": 0.84,
+    "color": 0.9,
+    "other": 0,
+    "confirm": 0.9,
+    "cancel": 0.9,
+    "qa": 0.9
+  },
+  "byInvariant": {
+    "I1": 0.94,
+    "I2": 0.98,
+    "I3": 0.94,
+    "I4": 0.99,
+    "I5": 0.95
+  }
+}

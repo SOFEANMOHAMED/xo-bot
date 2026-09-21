@@ -29,8 +29,14 @@ const backendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 
 function loadSuiteNames(): string[] {
   const pkg = JSON.parse(readFileSync(path.join(backendRoot, 'package.json'), 'utf8')) as PackageJson;
+  // test-live is opt-in (LIVE_LLM=1) and must never run inside test-all.
   return Object.keys(pkg.scripts || {})
-    .filter((name) => name.startsWith('test-') && name !== TEST_ALL_SCRIPT)
+    .filter(
+      (name) =>
+        name.startsWith('test-') &&
+        name !== TEST_ALL_SCRIPT &&
+        name !== 'test-live'
+    )
     .sort();
 }
 
