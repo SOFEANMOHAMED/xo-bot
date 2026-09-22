@@ -62,6 +62,7 @@ import {
     coerceSafeQuantity,
     messageSignalsBothProducts,
     isCheckoutReady,
+    detectsAddAnotherIntent,
 } from './conversationCart.js';
 import {
     browseMediaCaptionFallback,
@@ -403,9 +404,16 @@ export class SalesGPTAgent {
         // previousUserAskedForPhoto / lastAssistantAskedColorChoice / isCatalogOrShortColorReply
         // heuristics that inferred photo intent from history.
         const lastBotReply = this.getLastAssistantHistoryText();
+        // Gate wantsAddAnother: model flag alone must not become cart_edit (S10 upsell).
+        const wantsAddAnotherTrusted =
+            customerRequest?.wantsAddAnother === true &&
+            detectsAddAnotherIntent(messageText);
+        const customerRequestForIntent = customerRequest
+            ? { ...customerRequest, wantsAddAnother: wantsAddAnotherTrusted }
+            : customerRequest;
         const turnIntent: TurnIntent = resolveTurnIntent({
             userMessage: messageText,
-            customerRequest,
+            customerRequest: customerRequestForIntent,
             asksProductInfo:
                 customerRequest?.asksProductInfo === true ||
                 isProductInfoRequest(messageText) ||
@@ -465,7 +473,7 @@ export class SalesGPTAgent {
         // also set wants_add_another after an upsell ask (S10 shirt-injection).
         if (
             turnIntent !== 'finalize' &&
-            (customerRequest?.wantsAddAnother || turnIntent === 'cart_edit')
+            (wantsAddAnotherTrusted || turnIntent === 'cart_edit')
         ) {
             if (
                 nextAction === 'await_confirmation' ||

@@ -877,23 +877,26 @@ export function shouldSyncMultiProductCart(
 
 /**
  * Customer wants to add another product (not finalize).
- * Model signal preferred; heuristic fallback for common phrases.
+ * WHY: model `wants_add_another` alone must NOT invent cart_edit — the LLM sets that
+ * flag while upselling after address (S10). Only the user message phrasing counts;
+ * `modelWantsAddAnother` is kept for call-site compat and ignored as a sole signal.
  */
 export function detectsAddAnotherIntent(
   messageText: string,
-  modelWantsAddAnother?: boolean
+  _modelWantsAddAnother?: boolean
 ): boolean {
-  if (modelWantsAddAnother === true) return true;
   if (!messageText?.trim()) return false;
 
   // Multi-product order phrases are handled by cart sync — not "add another" alone.
   if (messageSignalsBothProducts(messageText)) return false;
 
   const t = messageText.trim().toLowerCase();
+  // WHY no `\b` on Arabic tokens: JS word-boundary is ASCII-only, so «ضيف»/«كمان»
+  // never matched and the model flag used to be the only working signal (S10).
   const patterns: RegExp[] = [
-    /(كمان|كمان\s+بدي|برضه|برضو|بعدين|اضيف|أضيف|ضيف|زود|زيد)\b/i,
+    /(كمان|برضه|برضو|بعدين|اضيف|أضيف|ضيف|زود|زيد)/i,
     /(منتج\s*(ثاني|تاني|اخر|آخر|جديد)|سلعة\s*(ثانية|تانية))/i,
-    /(ابي|أبغى|ابغى|بدي|عاوز|أريد|اريد)\s+.+\s+(وكمان|وكمان|وبرضه)/i,
+    /(ابي|أبغى|ابغى|بدي|عاوز|أريد|اريد)\s+.+\s+(وكمان|وبرضه)/i,
     /\b(add\s+(another|more|one\s+more)|also\s+(want|need|add)|one\s+more\s+item)\b/i,
     /\b(something\s+else|another\s+product)\b/i,
   ];

@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-09-22 11:35 UTC — PHASE 5/6 / S10: لا تثق بـ wants_add_another وحده — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** بعد 01d2beb بقي الـ LLM يضع `wants_add_another` عند العنوان → `cart_edit` → upsell. و`detectsAddAnotherIntent` كان يصدّق العلم فوراً؛ أنماط العربية فشلت بسبب `\b` ASCII.
+- **الملفات:** `conversationCart.ts` · `agent.ts` · `index.ts` · `test_p0_cart_integrity.ts` · هذا السجل.
+- **اختبارات:** p0-cart 51 hard؛ conversation-cart؛ verification matrix PASS.
+- **أثر السلوك:** عنوان الهوية → await حتى لو علم النموذج upsell؛ «بدي ضيف القميص كمان» ما زال يضيف.
+- **حدود معروفة:** matcher إضافة ضيق موثّق؛ soft label browse/qa يبقى.
+
+---
+
 ## 2026-09-22 11:20 UTC — PHASE 5/6 / S10: منع upsell بدل await بعد اكتمال الهوية — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

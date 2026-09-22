@@ -444,15 +444,36 @@ if (commerce) {
     'S10 await reply must not keep upsell ask',
   );
 
+  const addressWithModelUpsellFlag = await runTurn({
+    message: 'الحسينية دمشق',
+    state: readyState,
+    llmText:
+      'شكرًا سفيان على المعلومات. عنوان التوصيل هو الحسينية دمشق. هل تود إضافة أي منتج آخر مثل القميص؟',
+    nextAction: 'present_product',
+    wantsAddAnother: true,
+    extractedInfo: { address: 'الحسينية دمشق' },
+    recentMessages: [
+      { role: 'assistant', content: 'تمام، شو عنوان التوصيل؟' },
+    ],
+  });
+  assertHard(
+    addressWithModelUpsellFlag.next_action === 'await_confirmation',
+    `S10 address+wantsAddAnother→await got ${addressWithModelUpsellFlag.next_action}`,
+  );
+  assertHard(
+    !/هل تود إضافة|منتج آخر/i.test(addressWithModelUpsellFlag.replyText),
+    'S10 model wants_add_another alone must not keep upsell ask',
+  );
+
   const confirmResult = await runTurn({
     message: 'نعم أكد',
-    state: addressResult.updatedState as TestState,
+    state: addressWithModelUpsellFlag.updatedState as TestState,
     llmText: 'تمام، أضفت القميص كمان.',
     nextAction: 'present_product',
     wantsAddAnother: true,
     recentMessages: [
       { role: 'user', content: 'الحسينية دمشق' },
-      { role: 'assistant', content: addressResult.replyText },
+      { role: 'assistant', content: addressWithModelUpsellFlag.replyText },
     ],
   });
   assertHard(

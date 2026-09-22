@@ -1683,8 +1683,7 @@ export const processWithSalesGPT = async (
     const modelWantsAdd =
         !affirmingCheckoutReady &&
         !shouldSyncMultiProductCart(messageText, mentionedInMessage) &&
-        (salesResult.customerRequest?.wantsAddAnother === true ||
-            detectsAddAnotherIntent(messageText, salesResult.customerRequest?.wantsAddAnother));
+        detectsAddAnotherIntent(messageText);
     if (
         focusProduct &&
         modelWantsAdd &&
