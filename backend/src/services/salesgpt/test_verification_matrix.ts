@@ -291,6 +291,73 @@ const MATRIX: MatrixRow[] = [
     },
   },
   {
+    id: 'M08b',
+    scenario: 'اكتمال العنوان + present_product (upsell) → await_confirmation',
+    channels: 'all',
+    layer: 'orderConfirmationPolicy',
+    run: () => {
+      const upsell =
+        'شكرًا سفيان. عنوان التوصيل الحسينية دمشق. هل تود إضافة أي منتج آخر مثل القميص؟';
+      const r = resolveOrderNextAction({
+        aiNextAction: 'present_product',
+        fieldsComplete: true,
+        fieldsWereCompleteBeforeTurn: false,
+        wasAwaitingConfirmation: false,
+        userMessage: 'الحسينية دمشق',
+        language: 'arabic',
+        collectedInfo: {
+          name: 'سفيان محمد',
+          phone: '09552222',
+          address: 'الحسينية دمشق',
+          product_name: 'ساعة',
+          color: 'أسود',
+        },
+        responseText: upsell,
+        lastBotReply: 'تمام، شو عنوان التوصيل؟',
+        turnIntent: 'other',
+        cartLinesSummary: '• ساعة — أسود — 200 ريال سعودي',
+      });
+      assert(r.nextAction === 'await_confirmation', `got ${r.nextAction}`);
+      assert(r.awaitingConfirmation, 'must set awaiting');
+      assert(
+        /جاهز للتأكيد|أكد|confirm/i.test(r.responseText),
+        `await copy missing confirm ask: ${r.responseText}`
+      );
+      assert(
+        !/هل تود إضافة|منتج آخر|القميص/i.test(r.responseText),
+        'must not keep cross-sell ask on await inject'
+      );
+    },
+  },
+  {
+    id: 'M08c',
+    scenario: '«نعم أكد» بعد سؤال إضافة المزيد → confirm_order (ليس cart_edit)',
+    channels: 'all',
+    layer: 'orderConfirmationPolicy',
+    run: () => {
+      assert(customerAffirmsOrder('نعم أكد'), 'نعم أكد affirms');
+      const r = resolveOrderNextAction({
+        aiNextAction: 'present_product',
+        fieldsComplete: true,
+        fieldsWereCompleteBeforeTurn: true,
+        wasAwaitingConfirmation: false,
+        userMessage: 'نعم أكد',
+        language: 'arabic',
+        collectedInfo: {
+          name: 'سفيان محمد',
+          phone: '09552222',
+          address: 'الحسينية دمشق',
+          product_name: 'ساعة',
+          color: 'أسود',
+        },
+        responseText: 'تمام، أضفت القميص',
+        lastBotReply: addMoreBot,
+        turnIntent: 'finalize',
+      });
+      assert(r.nextAction === 'confirm_order', `got ${r.nextAction}`);
+    },
+  },
+  {
     id: 'M09',
     scenario: '«إلغاء الطلب» → end_conversation',
     channels: 'all',

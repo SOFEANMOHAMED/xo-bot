@@ -461,7 +461,12 @@ export class SalesGPTAgent {
         }
 
         // Step 4.1c: Wants another product → present / discover (pipeline locks cart).
-        if (customerRequest?.wantsAddAnother || turnIntent === 'cart_edit') {
+        // WHY: never demote an explicit finalize turn («نعم أكد») even if the model
+        // also set wants_add_another after an upsell ask (S10 shirt-injection).
+        if (
+            turnIntent !== 'finalize' &&
+            (customerRequest?.wantsAddAnother || turnIntent === 'cart_edit')
+        ) {
             if (
                 nextAction === 'await_confirmation' ||
                 nextAction === 'confirm_order' ||

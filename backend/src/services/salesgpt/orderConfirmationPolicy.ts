@@ -636,7 +636,25 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
   }
 
   // Fields complete, customer has NOT finalized (or just completed last field this turn).
+  // WHY: LLM often returns present_product (cross-sell) on the turn that supplies the
+  // last identity field. Passing that through skips await_confirmation — S10 then
+  // treats «نعم أكد» as accepting the upsell. Only force-await when completeness
+  // is NEW this turn; already-complete + present_product may be real catalog Q&A.
+  if (turnIntent === 'cart_edit') {
+    return {
+      nextAction:
+        aiNextAction === 'send_image' || aiNextAction === 'end_conversation'
+          ? aiNextAction
+          : 'present_product',
+      responseText,
+      awaitingConfirmation: false,
+      reason: 'complete_cart_edit_pass_through',
+    };
+  }
+
+  const justBecameComplete = !fieldsWereCompleteBeforeTurn;
   const shouldAwait =
+    justBecameComplete ||
     aiNextAction === CONFIRM_ORDER_ACTION ||
     aiNextAction === AWAIT_CONFIRMATION_ACTION ||
     aiNextAction === 'close_sale' ||
@@ -656,7 +674,11 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
         ? responseText
         : buildAwaitConfirmationMessage(language, safeCollected, cartLinesSummary),
       awaitingConfirmation: true,
-      reason: keepAsk ? 'await_keep_model_ask' : 'await_inject_summary_ask'
+      reason: keepAsk
+        ? 'await_keep_model_ask'
+        : justBecameComplete
+          ? 'await_after_last_field'
+          : 'await_inject_summary_ask',
     };
   }
 
@@ -664,7 +686,7 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
     nextAction: aiNextAction,
     responseText,
     awaitingConfirmation: false,
-    reason: 'pass_through_complete_non_order'
+    reason: 'pass_through_complete_non_order',
   };
 }
 

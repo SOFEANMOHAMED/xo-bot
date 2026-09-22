@@ -1675,7 +1675,13 @@ export const processWithSalesGPT = async (
 
     // Model signaled add-another → lock draft into cart (deterministic write).
     // Skip when the message already named multiple products (handled by cart sync).
+    // WHY: affirming while checkout-ready must finalize, not lock an upsell SKU
+    // the model invented after «هل تود إضافة…؟» (S10 «نعم أكد» → قميص).
+    const affirmingCheckoutReady =
+        customerAffirmsOrder(messageText) &&
+        checkOrderCompleteness(updatedState, focusProduct).complete;
     const modelWantsAdd =
+        !affirmingCheckoutReady &&
         !shouldSyncMultiProductCart(messageText, mentionedInMessage) &&
         (salesResult.customerRequest?.wantsAddAnother === true ||
             detectsAddAnotherIntent(messageText, salesResult.customerRequest?.wantsAddAnother));

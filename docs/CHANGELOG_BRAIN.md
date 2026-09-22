@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-09-22 11:20 UTC — PHASE 5/6 / S10: منع upsell بدل await بعد اكتمال الهوية — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** من 49 soft، 5 فجوات سلوكية حقيقية في S10: بعد العنوان يعيد الـ LLM `present_product` (عرض قميص) فيتخطى `await_confirmation`؛ ثم «نعم أكد» + `wants_add_another` يحقن القميص. فرض await عند اكتمال الحقل الأخير؛ لا تخفيض finalize؛ لا قفل سلة عند affirm جاهز.
+- **الملفات / الدوال:**
+  - `orderConfirmationPolicy.ts` — `resolveOrderNextAction` (`await_after_last_field`)
+  - `agent.ts` — 4.1c يتجاهل wantsAddAnother عند `finalize`
+  - `index.ts` — تخطي `modelWantsAdd` عند affirm + checkout ready
+  - `test_verification_matrix.ts` M08b/M08c · `test_p0_cart_integrity.ts`
+- **اختبارات:** verification matrix 25/25؛ p0-cart 49 hard؛ golden/turn-intent PASS.
+- **أثر السلوك:** بعد الاسم/الهاتف/العنوان → ملخص تأكيد؛ «نعم أكد» يثبّت دون إضافة SKU من الـ upsell.
+- **حدود معروفة:** upsell صريح بطلب العميل (`cart_edit`) ما زال مسموحاً؛ soft label noise للمتصفح/ask-color يبقى.
+
+---
+
 ## 2026-09-22 08:00 UTC — PHASE 2F / إعادة قياس بعد الإصلاحات الأربعة — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

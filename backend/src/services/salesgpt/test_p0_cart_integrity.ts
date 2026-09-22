@@ -402,6 +402,70 @@ if (commerce) {
   );
 }
 
+// S10 gap: after identity complete, LLM upsell must not skip await; affirm must not add SKU.
+{
+  const readyState = emptyState({
+    salesgpt_stage_id: '7',
+    extracted_entities: {
+      product_id: REAL_TEST_WATCH.id,
+      product_query: REAL_TEST_WATCH.name,
+      color: 'أسود',
+      quantity: 1,
+      name: 'سفيان محمد',
+      phone: '09552222',
+    },
+    cart: {
+      items: [watchLine('أسود')],
+      status: 'building',
+      updatedAt: new Date().toISOString(),
+    },
+  });
+  const addressResult = await runTurn({
+    message: 'الحسينية دمشق',
+    state: readyState,
+    llmText:
+      'شكرًا سفيان على المعلومات. عنوان التوصيل هو الحسينية دمشق. هل تود إضافة أي منتج آخر مثل القميص؟',
+    nextAction: 'present_product',
+    extractedInfo: { address: 'الحسينية دمشق' },
+    recentMessages: [
+      { role: 'assistant', content: 'تمام، شو عنوان التوصيل؟' },
+    ],
+  });
+  assertHard(
+    addressResult.next_action === 'await_confirmation',
+    `S10 address→await got ${addressResult.next_action}`,
+  );
+  assertHard(
+    getCartItems(addressResult.updatedState).every((i) => i.productId === REAL_TEST_WATCH.id),
+    'S10 address turn must not add shirt',
+  );
+  assertHard(
+    !/هل تود إضافة|منتج آخر/i.test(addressResult.replyText),
+    'S10 await reply must not keep upsell ask',
+  );
+
+  const confirmResult = await runTurn({
+    message: 'نعم أكد',
+    state: addressResult.updatedState as TestState,
+    llmText: 'تمام، أضفت القميص كمان.',
+    nextAction: 'present_product',
+    wantsAddAnother: true,
+    recentMessages: [
+      { role: 'user', content: 'الحسينية دمشق' },
+      { role: 'assistant', content: addressResult.replyText },
+    ],
+  });
+  assertHard(
+    confirmResult.next_action === 'confirm_order',
+    `S10 نعم أكد→confirm got ${confirmResult.next_action}`,
+  );
+  assertHard(
+    getCartItems(confirmResult.updatedState).length === 1 &&
+      getCartItems(confirmResult.updatedState)[0]?.productId === REAL_TEST_WATCH.id,
+    'S10 نعم أكد must not inject shirt into cart',
+  );
+}
+
 // playground-2026-09-21 — exact reported conversation.
 {
   const history: { role: 'user' | 'assistant'; content: string }[] = [];
