@@ -152,20 +152,8 @@ export function isAvailabilityQuestion(text: string): boolean {
   return /موجود|متوفر|عندكم|عندك|in\s*stock|available/i.test(text);
 }
 
-/** Current-message refusal to receive a photo. */
-export function isExplicitPhotoRefusal(messageText: string): boolean {
-  if (!messageText?.trim()) return false;
-  const hasPhoto =
-    /صور(ة|ه)?/i.test(messageText) || /\b(photo|picture|image)\b/i.test(messageText);
-  if (!hasPhoto) return false;
-  return (
-    /(ما\s*بدي|ما\s*ابي|بلاش|بدون|لا\s*بدي|مو\s*بدي|مش\s*بدي)\s*.{0,12}صور/i.test(
-      messageText
-    ) ||
-    /لا\s*أنا\s*ما\s*بدي\s*الصور/i.test(messageText) ||
-    /\b(don'?t|do not)\s+want\s+(a\s+)?(photo|picture|image)\b/i.test(messageText)
-  );
-}
+/** Current-message refusal — re-exported; canonical definition is turnIntent.ts. */
+export { isExplicitPhotoRefusal } from './turnIntent.js';
 
 export function extractBareColorAnswer(
   text: string,

@@ -66,6 +66,7 @@ import {
 import {
     browseMediaCaptionFallback,
     isExplicitPhotoRequest,
+    isExplicitPhotoRefusal,
     nextActionForBrowseTurn,
     resolveTurnIntent,
     type TurnIntent,
@@ -436,9 +437,11 @@ export class SalesGPTAgent {
             }
         } else {
             // Model said send_image without an explicit photo ask in THIS message → demote.
+            // Refusal always demotes even if the model set wants_photo.
             const allowSendImage =
-                customerRequest?.wantsPhoto === true ||
-                isExplicitPhotoRequest(messageText);
+                !isExplicitPhotoRefusal(messageText) &&
+                (customerRequest?.wantsPhoto === true ||
+                    isExplicitPhotoRequest(messageText));
             if (nextAction === 'send_image' && !allowSendImage) {
                 nextAction = 'present_product';
                 intent = 'product_query';

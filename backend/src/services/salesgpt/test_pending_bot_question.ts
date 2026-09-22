@@ -261,6 +261,48 @@ for (const selection of ['أسود', 'الأسود', 'بدي الأسود', 'ا�
   assert(result.next_action !== 'confirm_order', `T1 ${selection} does not confirm order`);
 }
 
+// PHASE 2F: explicit photo refusal must not promise/send an image.
+{
+  const refusal = await runTurn({
+    message: 'لا أنا ما بدي الصورة أنا بس أطلب الساعة السودا',
+    state: watchCartState({
+      extracted_entities: {
+        product_id: REAL_TEST_WATCH.id,
+        product_query: REAL_TEST_WATCH.name,
+        color: 'أسود',
+      },
+      cart: {
+        items: [
+          {
+            productId: REAL_TEST_WATCH.id,
+            productName: REAL_TEST_WATCH.name,
+            quantity: 1,
+            unitPrice: 200,
+            currency: 'SAR',
+            color: 'أسود',
+            addedAt: '2026-09-21T00:00:00.000Z',
+          },
+        ],
+        status: 'building',
+      },
+    }),
+    llmText: 'تمام، رح أرسلك صورة المنتج.',
+    nextAction: 'send_image',
+    wantsPhoto: true,
+    recentMessages: [
+      { role: 'assistant', content: 'أي لون بتحب؟ 🎨\n1) أسود — 2) أحمر' },
+      { role: 'user', content: 'الأسود' },
+      { role: 'assistant', content: 'تمام، ثبتّ اللون أسود لـ ساعة.' },
+    ],
+  });
+  assert(!/\[IMAGE:/i.test(refusal.replyText), 'refusal does not attach IMAGE');
+  assert(
+    !/رح أرسلك صورة|سأرسل(?:ك| لك)?\s*صورة/i.test(refusal.replyText),
+    `refusal must not promise a photo, got: ${refusal.replyText}`,
+  );
+  assert(refusal.next_action !== 'send_image', `refusal next_action not send_image, got ${refusal.next_action}`);
+}
+
 console.log(`pending_bot_question T1: ${passed} passed, ${failed} failed`);
 if (failures.length > 0) {
   for (const item of failures) console.error(`FAIL: ${item}`);

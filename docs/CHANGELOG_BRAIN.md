@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-09-22 07:45 UTC — PHASE 2F / رفض الصورة لا يَعِد بإرسالها — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** رسالة الرفض تحتوي «صورة» فـ`isExplicitPhotoRequest` → `browse_media` → `browseMediaCaptionFallback` («رح أرسلك صورة»)، و`wants_photo` كان يبقى `send_image`؛ `stripFalseImageDeliveryClaims` أعاد النص الأصلي عند فراغ التنظيف.
+- **الملفات / الدوال:**
+  - `turnIntent.ts` — `isExplicitPhotoRefusal` + حراسة في `isExplicitPhotoRequest` / `resolveTurnIntent`
+  - `agent.ts` — demote `send_image` عند الرفض ولو `wants_photo`
+  - `image-caption.ts` — `stripFalseImageDeliveryClaims` لوعود المستقبل بلا استعادة النص
+  - `pendingBotQuestion.ts` — إعادة تصدير؛ اختبارات turn-intent / pending
+- **اختبارات:** turn-intent-golden 15؛ pending 43 PASS.
+- **أثر السلوك:** «لا أنا ما بدي الصورة…» لا يُرفَق IMAGE ولا وعد إرسال.
+- **حدود معروفة:** كمية ونزاع اللون في commits لاحقة.
+
+---
+
 ## 2026-09-22 07:30 UTC — PHASE 2F / S20 focus: mention matcher لا يلتقط «مساعد» كـ ساعة — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

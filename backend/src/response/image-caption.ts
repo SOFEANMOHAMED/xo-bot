@@ -81,6 +81,15 @@ export function stripFalseImageDeliveryClaims(text: string): string {
       /(?:أرسلت(?:لك|لِك|ها)?|ارسلت(?:لك|لِك|ها)?|بعت(?:لك)?|أرفقت|ارفقت)\s*(?:لك\s+)?(?:الصورة|الصوره|صورة|صور(?:ة)?(?:\s*المنتج)?)\s*!?\s*(?:📸)?/gi,
       ''
     )
+    // Future promises when no [IMAGE:] is attached («رح أرسلك صورة»).
+    .replace(
+      /[^.!?\n]*(?:رح|راح|سوف|حأ|ح)\s*(?:أرسلك|ارسلك|أبعث|ابعث|أبعت|ابعت|أرسل|ارسل)\s*(?:لك\s+)?(?:صورة|الصورة|صور(?:ة)?(?:\s*المنتج)?|صورة\s+المنتج)[^.!?\n]*[.!?۔]?\s*/gi,
+      ''
+    )
+    .replace(
+      /[^.!?\n]*(?:سأرسل|ساارسل|سأبعث)\s*(?:لك\s+)?(?:صورة|الصورة|صور(?:ة)?(?:\s*المنتج)?)[^.!?\n]*[.!?۔]?\s*/gi,
+      ''
+    )
     .replace(
       /(?:شوف(?:ي|وا)?|شوفيني|وريك)\s*(?:الصورة|الصوره)!?\s*(?:📸)?/gi,
       ''
@@ -94,11 +103,17 @@ export function stripFalseImageDeliveryClaims(text: string): string {
       /(?:i(?:'ve|\s+have)?\s+)?(?:sent|attached|shared)\s+(?:you\s+)?(?:the\s+)?(?:photo|image|picture)\s*!?\s*(?:📸)?/gi,
       ''
     )
+    .replace(
+      /[^.!?\n]*(?:i(?:'ll|\s+will)|gonna|going to)\s+(?:send|share|attach)\s+(?:you\s+)?(?:a\s+|the\s+)?(?:photo|image|picture)[^.!?\n]*[.!?]?\s*/gi,
+      ''
+    )
     .replace(/\s{2,}/g, ' ')
     .replace(/\s+([.!?،,])/g, '$1')
     .replace(/([.!?،,])\s*([.!?،,])/g, '$1')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
-  return cleaned || text.trim();
+  // Do NOT restore the original when cleaning removed the only (false) claim —
+  // empty means «no delivery promise left», which is the correct outcome.
+  return cleaned;
 }

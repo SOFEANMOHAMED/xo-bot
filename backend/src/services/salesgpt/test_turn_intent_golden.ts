@@ -14,9 +14,11 @@ import {
 } from './orderConfirmationPolicy.js';
 import {
   isExplicitPhotoRequest,
+  isExplicitPhotoRefusal,
   resolveTurnIntent,
   nextActionForBrowseTurn,
 } from './turnIntent.js';
+import { stripFalseImageDeliveryClaims } from '../../response/image-caption.js';
 import {
   applySalesGPTStage,
   applyFreshConversationStage,
@@ -52,6 +54,29 @@ function run(): void {
   assert(
     !isExplicitPhotoRequest('اسمي أحمد'),
     'identity is not a photo request'
+  );
+  // PHASE 2F: refusal mentions صورة but must not be a request / browse_media
+  const refusal = 'لا أنا ما بدي الصورة أنا بس أطلب الساعة السودا';
+  assert(isExplicitPhotoRefusal(refusal), 'detect photo refusal');
+  assert(!isExplicitPhotoRequest(refusal), 'refusal is not a photo request');
+  assert(
+    resolveTurnIntent({
+      userMessage: refusal,
+      customerRequest: {
+        wantsAlternatives: false,
+        asksProductInfo: false,
+        wantsPhoto: false,
+        readyToConfirm: false,
+        wantsAddAnother: false,
+      },
+    }) !== 'browse_media',
+    'refusal must not resolve to browse_media'
+  );
+  assert(
+    !/رح أرسلك صورة|سأرسل.*صورة/i.test(
+      stripFalseImageDeliveryClaims('تمام، رح أرسلك صورة المنتج.')
+    ),
+    'strip future image-delivery promises when no IMAGE attached'
   );
   passed++;
 

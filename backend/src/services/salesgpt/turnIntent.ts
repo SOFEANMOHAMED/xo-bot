@@ -23,9 +23,12 @@ export type TurnIntent =
 /**
  * True when the current user message is an explicit media/photo request.
  * Used as a hard gate — not prompt-only guidance.
+ *
+ * Refusal of a photo («ما بدي الصورة») is NOT a request — see isExplicitPhotoRefusal.
  */
 export function isExplicitPhotoRequest(messageText: string): boolean {
   if (!messageText?.trim()) return false;
+  if (isExplicitPhotoRefusal(messageText)) return false;
   const text = messageText.trim();
   // Must mention photo/image vocabulary (not every "ابعث" alone)
   const hasPhotoLexeme =
@@ -39,6 +42,25 @@ export function isExplicitPhotoRequest(messageText: string): boolean {
     /بعتلي|ابعث|ابعتلي|أرسلي|ارسلي|أرسل|ارسل/i.test(text) ||
     /\b(photo|picture|image|pic)\b/i.test(text) ||
     /\b(send|show)\s+(me\s+)?(a\s+)?(photo|picture|image)\b/i.test(text)
+  );
+}
+
+/**
+ * Current-message refusal to receive a photo (INTERIM matcher — documented phrases).
+ * WHY: messages that mention «صورة» while refusing were classified as browse_media
+ * and got browseMediaCaptionFallback «رح أرسلك صورة المنتج» (PHASE 2F).
+ */
+export function isExplicitPhotoRefusal(messageText: string): boolean {
+  if (!messageText?.trim()) return false;
+  const hasPhoto =
+    /صور(ة|ه)?/i.test(messageText) || /\b(photo|picture|image)\b/i.test(messageText);
+  if (!hasPhoto) return false;
+  return (
+    /(ما\s*بدي|ما\s*ابي|بلاش|بدون|لا\s*بدي|مو\s*بدي|مش\s*بدي)\s*.{0,12}صور/i.test(
+      messageText
+    ) ||
+    /لا\s*أنا\s*ما\s*بدي\s*الصور/i.test(messageText) ||
+    /\b(don'?t|do not)\s+want\s+(a\s+)?(photo|picture|image)\b/i.test(messageText)
   );
 }
 
@@ -69,8 +91,10 @@ export function resolveTurnIntent(input: ResolveTurnIntentInput): TurnIntent {
   } = input;
 
   // Current message only — never infer photo from prior bot/user turns.
+  // Refusal wins over wants_photo flag / lexeme mention of «صورة».
   const photo =
-    isExplicitPhotoRequest(userMessage) || customerRequest?.wantsPhoto === true;
+    !isExplicitPhotoRefusal(userMessage) &&
+    (isExplicitPhotoRequest(userMessage) || customerRequest?.wantsPhoto === true);
 
   // Finalize only when not clearly asking for a photo in the same breath
   if ((isFinalizing || customerRequest?.readyToConfirm) && !photo) {
