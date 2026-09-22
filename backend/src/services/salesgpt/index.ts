@@ -1679,7 +1679,7 @@ export const processWithSalesGPT = async (
     // the model invented after «هل تود إضافة…؟» (S10 «نعم أكد» → قميص).
     const affirmingCheckoutReady =
         customerAffirmsOrder(messageText) &&
-        checkOrderCompleteness(updatedState, focusProduct).complete;
+        checkOrderCompleteness(updatedState, focusProduct || undefined).complete;
     const modelWantsAdd =
         !affirmingCheckoutReady &&
         !shouldSyncMultiProductCart(messageText, mentionedInMessage) &&

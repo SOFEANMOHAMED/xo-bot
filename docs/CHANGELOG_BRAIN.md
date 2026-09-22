@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-09-22 15:55 UTC — DEPLOY prep / إصلاح typecheck قبل النشر — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** `tsc --noEmit` رفض النشر: `Product | null` لـ `checkOrderCompleteness`؛ ومقارنة `cart_edit` بعد تضييق النوع.
+- **الملفات:** `index.ts` · `orderConfirmationPolicy.ts` · هذا السجل.
+- **اختبارات:** typecheck يجب أن يمر قبل DRY_RUN/deploy.
+- **أثر السلوك:** لا تغيير سلوكي.
+- **حدود معروفة:** —
+
+---
+
 ## 2026-09-22 12:40 UTC — PHASE 5/6-SHORT / إغلاق التلميع + بوابة النشر — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
