@@ -434,6 +434,7 @@ export class SalesGPTAgent {
         const answeringIdentityAsk = isAnsweringIdentityTurn({
             lastBotReply,
             collectedBeforeIngest,
+            userMessage: messageText,
         });
         const customerRequestForIntent = customerRequest
             ? {

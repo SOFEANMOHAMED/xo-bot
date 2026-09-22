@@ -124,9 +124,12 @@ export function ingestIdentityAnswerFromBotAsk(input: {
   else if (
     missing === 'address' &&
     msg.length >= 4 &&
+    // Never treat a phone-number reply as an address (S10: «09552222» after name).
+    !/^\+?\d[\d\s-]{6,}$/.test(msg) &&
+    !/هاتف|phone/i.test(bot) &&
     !/^(نعم|لا|أيوه|ايوه|أكد|اكد|ok|yes|no)$/i.test(msg)
   ) {
-    // Last identity slot only — safe even when the ask was paraphrased.
+    // Last identity slot — only when the bot is not asking for phone.
     next.address = msg;
   }
 
@@ -137,9 +140,17 @@ export function ingestIdentityAnswerFromBotAsk(input: {
 export function isAnsweringIdentityTurn(input: {
   lastBotReply: string;
   collectedBeforeIngest: IdentitySnapshot;
+  userMessage?: string;
 }): boolean {
   const missing = firstMissingIdentityField(input.collectedBeforeIngest);
-  if (missing === 'address') return true;
+  const msg = (input.userMessage || '').trim();
+  // Phone digit replies while address is "missing" are phone answers, not address.
+  if (missing === 'address' && msg && !/^\+?\d[\d\s-]{6,}$/.test(msg)) return true;
+  if (missing === 'phone' || missing === 'name') {
+    return /شو اسمك|شو رقم هاتف|اسمك|هاتفك|full name|phone number/i.test(
+      input.lastBotReply || ''
+    );
+  }
   return /شو اسمك|شو رقم هاتف|شو عنوان|عنوان التوصيل|عنوانك|full name|phone number|delivery address/i.test(
     input.lastBotReply || ''
   );
