@@ -20,6 +20,7 @@ import {
 import { isColorInProductCatalog } from './orderColorPolicy.js';
 import { colorsMatch, matchColorOption } from '../../catalog/color-options.js';
 import { normalizeArabic } from '../../catalog/product-search.js';
+import { resolveQuantityFromMessage } from './arabicQuantityWords.js';
 import { ensureLineId, mergeCartLines } from './cartLineOps.js';
 import {
   formatCartSummary as formatPricedCartSummary,
@@ -810,28 +811,14 @@ export function quantityNearProductName(
   messageText: string,
   productName: string
 ): number {
-  const hay = normalizeArabic(messageText);
-  const name = normalizeArabic(productName);
-  if (!hay || !name) return 1;
-
-  const stem = name.replace(/(ات|ين|ون|ه)$/u, '');
-  const hayTokens = tokenizeArabic(hay);
-  let needle = name;
-  if (!hay.includes(name)) {
-    const forms = productNameSurfaceForms(name);
-    const hit = hayTokens.find((t) => forms.has(t) || forms.has(stripLeadingAl(t)));
-    needle = hit || (stem.length >= 3 ? stem : name);
+  const resolved = resolveQuantityFromMessage(messageText, productName);
+  if (resolved != null && resolved > 0) {
+    if (resolved === 2 && messageSignalsBothProducts(messageText)) {
+      return 1;
+    }
+    return Math.min(resolved, 99);
   }
-  const idx = hay.indexOf(needle);
-  if (idx < 0) return 1;
-
-  const window = hay.slice(Math.max(0, idx - 12), idx + needle.length + 12);
-  if (/(واحد|واحده|واحده|واحدة|\b1\b)/.test(window)) return 1;
-  if (/(ثلاث|ثلاثة|\b3\b)/.test(window)) return 3;
-  // Avoid treating "التنين" as qty 2 — only digit/كلمة ثنين away from both-products phrase
-  if (!messageSignalsBothProducts(messageText) && /(ثنين|اثنين|\b2\b)/.test(window)) {
-    return 2;
-  }
+  // Ambiguous plural without a number — keep 1; caller may ask explicitly later.
   return 1;
 }
 
@@ -863,7 +850,13 @@ export function shouldSyncMultiProductCart(
 ): boolean {
   if (mentioned.length < 1) return false;
 
+  // Dual / number-word qty≥2 on a named product is itself an order signal («ساعتين»).
+  const qtyOrderish =
+    mentioned.length === 1 &&
+    (resolveQuantityFromMessage(messageText, mentioned[0].name) ?? 0) >= 2;
+
   const orderish =
+    qtyOrderish ||
     messageSignalsBothProducts(messageText) ||
     messageSignalsCartCorrection(messageText) ||
     /(اطلب|اطلبها|اطلبهن|بدي|ابي|أبغى|ابغى|عاوز|أريد|اريد|احجز|اشتري|ضيف|أضيف|سله|سلة)/i.test(
@@ -878,6 +871,7 @@ export function shouldSyncMultiProductCart(
   if (messageSignalsCartCorrection(messageText) && /(و|and)/i.test(messageText)) {
     return true;
   }
+  if (qtyOrderish) return true;
   return false;
 }
 

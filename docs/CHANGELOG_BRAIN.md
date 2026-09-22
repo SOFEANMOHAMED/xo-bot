@@ -4,6 +4,21 @@
 
 ---
 
+## 2026-09-22 08:00 UTC — PHASE 2F / كمية عربية: «ساعتين» → qty=2 — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** لا مسار حتمي لتصريف المثنى/كلمات العدد؛ «ساعتين» سقطت لتصفح. أُضيفت خريطة ضيقة موثّقة + ربط بـ cart sync والكمية في الحالة.
+- **الملفات / الدوال:**
+  - `arabicQuantityWords.ts` — `resolveQuantityFromMessage` / `quantityFromProductInflection`
+  - `conversationCart.ts` — `quantityNearProductName` / `shouldSyncMultiProductCart`
+  - `index.ts` — كمية من الرسالة عند غياب AI
+  - `test_arabic_quantity_words.ts` · `package.json`
+- **اختبارات:** arabic-quantity-words 13 PASS؛ typecheck PASS.
+- **أثر السلوك:** «ساعتين»/«بدي ساعتين» تُزامَن كطلب ساعة بكمية 2.
+- **حدود معروفة:** جمع تكسير (قمصان) غير مدعوم؛ الغموض → null/افتراض 1.
+
+---
+
 ## 2026-09-22 07:45 UTC — PHASE 2F / رفض الصورة لا يَعِد بإرسالها — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

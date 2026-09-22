@@ -96,6 +96,7 @@ import {
     shouldSyncMultiProductCart,
     updateCartLineById,
 } from './conversationCart.js';
+import { resolveQuantityFromMessage } from './arabicQuantityWords.js';
 import { classifyInterimCancelIntent } from './interimCancelMatchers.js';
 import { matchCartLinesForRemoval } from './cartLineRemoval.js';
 import {
@@ -1619,6 +1620,16 @@ export const processWithSalesGPT = async (
                 );
                 if (fromAi !== undefined) return fromAi;
                 if (messageSignalsBothProducts(messageText)) return undefined;
+                const focusName =
+                    focusProduct?.name ||
+                    sanitizeCollectedText(salesResult.collectedInfo.product_name) ||
+                    sanitizeCollectedText(focusedEntities.product_query);
+                if (focusName) {
+                    const fromWords = resolveQuantityFromMessage(messageText, focusName);
+                    if (fromWords != null && fromWords > 0) {
+                        return coerceSafeQuantity(messageText, fromWords) ?? fromWords;
+                    }
+                }
                 return focusedEntities.quantity;
             })(),
             name:
