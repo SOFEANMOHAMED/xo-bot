@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-09-22 08:00 UTC — PHASE 2F / إعادة قياس بعد الإصلاحات الأربعة — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** بعد 2F-1…4 أُعيد `test-live`؛ الصلب السابق اختفى. تحديث BASELINE/thresholds/الخطة.
+- **الملفات:** `docs/BASELINE.md` · `docs/BASELINE_REPORT.json` · `test-live.thresholds.json` · `BRAIN_FIX_PLAN.md` · هذا السجل.
+- **اختبارات:** `LIVE_LLM=1 npm run test-live` → **130/130 (100%)**؛ I1–I5 100%؛ 0 hard؛ soft keyword_classifier 49 فقط.
+- **أثر السلوك:** لا تغيير إضافي في هذا الـ commit (توثيق قياس).
+- **حدود معروفة:** soft class (طلب لون قبل تثبيت سلة؛ نزاع قد يُصنَّف order من أثر الرد).
+
+---
+
 ## 2026-09-22 08:15 UTC — PHASE 2F / نزاع «أنت قلت في أسود» ليس إجابة هوية — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

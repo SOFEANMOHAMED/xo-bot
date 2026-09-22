@@ -2,11 +2,11 @@
 
 Supersedes `docs/BASELINE_v1_INVALID.md` (contaminated harness scoring).
 
-- **date (UTC):** 2026-09-21T22:14:26.133Z
-- **commit:** `9ad0d99ebd1c3ef7e18d3a1df80656af3ec2db21`
+- **date (UTC):** 2026-09-22T07:56:22.102Z
+- **commit:** `56f0c13cf2c049e3db61cedf982818a8bbb7994a`
 - **runs per scenario:** 3
-- **overall:** 128/130 (98.5%)
-- **LLM budget:** calls=216 promptTok=491063 completionTok=36878 estUsd≈0.095786
+- **overall:** 130/130 (100.0%)
+- **LLM budget:** calls=230 promptTok=525049 completionTok=39378 estUsd≈0.102384
 
 ## Per scenario
 
@@ -31,7 +31,7 @@ Supersedes `docs/BASELINE_v1_INVALID.md` (contaminated harness scoring).
 | S17_shirt_no_color | 3 | 3 | 100.0% | قميص بلا ألوان |
 | S18_mixed_currency | 3 | 3 | 100.0% | ساعة+قميص — عملات منفصلة |
 | S19_ten_catalog_browse | 8 | 8 | 100.0% | تصفح كتالوج 10 منتجات |
-| S20_shoes_order | 1 | 3 | 33.3% | طلب حذاء بمقاس |
+| S20_shoes_order | 3 | 3 | 100.0% | طلب حذاء بمقاس |
 | X_playground_2026_09_21 | 3 | 3 | 100.0% | playground-2026-09-21 |
 | X_price_greeting_regression | 8 | 8 | 100.0% | 2E: سعر/تحية مع تركيز ساعة |
 | X_browse_all_phrasing | 8 | 8 | 100.0% | browse-all حابب اعرف المنتجات |
@@ -45,7 +45,7 @@ Supersedes `docs/BASELINE_v1_INVALID.md` (contaminated harness scoring).
 | greeting | 24 | 24 | 100.0% |
 | browse | 33 | 33 | 100.0% |
 | price | 22 | 22 | 100.0% |
-| order | 129 | 131 | 98.5% |
+| order | 131 | 131 | 100.0% |
 | color | 17 | 17 | 100.0% |
 | other | 8 | 8 | 100.0% |
 | confirm | 8 | 8 | 100.0% |
@@ -56,7 +56,7 @@ Supersedes `docs/BASELINE_v1_INVALID.md` (contaminated harness scoring).
 
 | Invariant | Pass | Total | Rate |
 | --- | ---: | ---: | ---: |
-| I1 | 270 | 272 | 99.3% |
+| I1 | 272 | 272 | 100.0% |
 | I2 | 272 | 272 | 100.0% |
 | I3 | 272 | 272 | 100.0% |
 | I4 | 272 | 272 | 100.0% |
@@ -64,16 +64,13 @@ Supersedes `docs/BASELINE_v1_INVALID.md` (contaminated harness scoring).
 
 ## Failures by root cause
 
-- **keyword_classifier:** 40
+- **keyword_classifier:** 49
 - **state_focus_drift:** 0
 - **llm_fact_violation:** 0
-- **template_override:** 2
+- **template_override:** 0
 
 ## Notes
 
 - Measurement only: catalog DB stubbed; real LLM via production client shape.
-- Valid **1C** scoring: number allowlist, decision-by-effect (`photo`/`order`/`qa`/`browse`), I3 by productId.
-- Prior invalid run archived at `docs/BASELINE_v1_INVALID.md`.
-- Keys never printed. **Deploy requires** `LIVE_LLM=1 npm run test-live -- --gate` pass.
-- Paraphrase: key turns ×8 dialects; matrix = scenario ×3 + paraphrase expand under call cap.
-- Real residual: S20 focus (33%); soft but real: photo-refusal, «ساعتين», «أنت قلت في أسود» — see `BASELINE_BREAKDOWN.md`.
+- Keys never printed. Deploy requires `npm run test-live -- --gate` pass.
+- Paraphrase: key turns use dialect variants (×8 available); default matrix is scenario ×3 runs.

@@ -4,21 +4,20 @@ Living plan for cart / focus / reply regressions. Identifiers in English.
 
 ---
 
-## Status (2026-09-21 / 1C)
+## Status (2026-09-22 / 2F)
 
 | Phase | Status | Notes |
 | --- | --- | --- |
 | **0 / harness & gates** | Done | `test-all`, KNOWN_PENDING, logs-test |
-| **1A regression specs** | Done | P0 cart/color, pending, matrix, playground fixture |
-| **1B live measurement** | Done | first live run (scoring later invalidated) |
-| **1C measurement validity** | **Done** | harness scoring fixed; `BASELINE_v1_INVALID.md`; re-baseline **128/130 (98.5%)** |
-| **2B–2E brain rails** | Done | cancel/remove, pending, variant, resolveFocus, collect order, 2E gate |
-| **4-PREP analysis** | Done (docs) | breakdown + interpreter contract (amended in 1C) |
-| **Phase 4 interpreter** | **Next** | Offline → shadow → flip per TURN TYPE; start with focus/SKU (S20) |
+| **1A–1C measurement** | Done | valid scoring; v1 archived |
+| **2B–2E brain rails** | Done | cancel/remove, pending, variant, focus, collect, 2E |
+| **2F targeted fixes** | **Done** | S20 focus, photo refusal, qty dual, past-claim dispute → **test-live 130/130** |
+| **4-PREP analysis** | Done (docs) | interpreter contract |
+| **Phase 4 interpreter** | **Next** | Offline → shadow → flip; remaining soft class noise |
 
 **Deploy rule:** passing `LIVE_LLM=1 npm run test-live -- --gate` required.
 
-**Real residual failures (1C):** S20 shoes focus (hard); photo-refusal, «ساعتين», «أنت قلت في أسود» (soft effect / real behavior).
+**Baseline:** `docs/BASELINE.md` — 130/130 (100%), I1–I5 100%, 0 hard failures.
 
 ---
 
