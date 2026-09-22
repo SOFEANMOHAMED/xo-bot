@@ -1,12 +1,12 @@
-# BASELINE — live model measurement (PHASE 5/6-SHORT after S10 polish)
+# BASELINE — live model measurement (PHASE 1C, valid scoring)
 
-Supersedes `docs/BASELINE_v1_INVALID.md`. Prior 2F was 130/130; **5/6 reconfirmed 130/130** (multi-run).
+Supersedes `docs/BASELINE_v1_INVALID.md` (contaminated harness scoring).
 
-- **date (UTC):** 2026-09-22T09:27:49.536Z
-- **commit:** `91d7a8a1e6e8acc47e54de4cbbc66d60b0aaa486` (S10 upsell≠product_info; includes 5/6 gate+polish)
+- **date (UTC):** 2026-09-22T13:05:25.752Z
+- **commit:** `669022b9dd926f2bef105c913a41eeff09198ce3`
 - **runs per scenario:** 3
 - **overall:** 130/130 (100.0%)
-- **LLM budget:** calls=208 promptTok=474697 completionTok=35433 estUsd≈0.092464
+- **LLM budget:** calls=200 promptTok=456176 completionTok=33874 estUsd≈0.088751
 
 ## Per scenario
 
@@ -64,7 +64,7 @@ Supersedes `docs/BASELINE_v1_INVALID.md`. Prior 2F was 130/130; **5/6 reconfirme
 
 ## Failures by root cause
 
-- **keyword_classifier:** 34 (soft effect-class only; **0 hard**; **0 S10 upsell**)
+- **keyword_classifier:** 26
 - **state_focus_drift:** 0
 - **llm_fact_violation:** 0
 - **template_override:** 0
@@ -72,6 +72,5 @@ Supersedes `docs/BASELINE_v1_INVALID.md`. Prior 2F was 130/130; **5/6 reconfirme
 ## Notes
 
 - Measurement only: catalog DB stubbed; real LLM via production client shape.
-- **5/6 soft review:** ~34 label artifacts (ask-color→browse, catalog→qa). Real S10 upsell/نعم→shirt **fixed**.
-- **Deploy:** `scripts/deploy.sh` runs `LIVE_LLM=1 npm run test-live -- --gate` after typecheck+test-all (~**\$0.10**/deploy).
-- Keys never printed.
+- Keys never printed. Deploy requires `npm run test-live -- --gate` pass.
+- Paraphrase: key turns use dialect variants (×8 available); default matrix is scenario ×3 runs.
