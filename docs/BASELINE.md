@@ -1,9 +1,9 @@
-# BASELINE — live model measurement (PHASE 1C, valid scoring)
+# BASELINE — live model measurement (PHASE 2F after targeted fixes)
 
-Supersedes `docs/BASELINE_v1_INVALID.md` (contaminated harness scoring).
+Supersedes `docs/BASELINE_v1_INVALID.md`. Prior valid 1C was 128/130; **2F → 130/130**.
 
 - **date (UTC):** 2026-09-22T07:56:22.102Z
-- **commit:** `56f0c13cf2c049e3db61cedf982818a8bbb7994a`
+- **commit:** `56f0c13cf2c049e3db61cedf982818a8bbb7994a` (2F-4; measurement includes 2F-1…4)
 - **runs per scenario:** 3
 - **overall:** 130/130 (100.0%)
 - **LLM budget:** calls=230 promptTok=525049 completionTok=39378 estUsd≈0.102384
@@ -64,7 +64,7 @@ Supersedes `docs/BASELINE_v1_INVALID.md` (contaminated harness scoring).
 
 ## Failures by root cause
 
-- **keyword_classifier:** 49
+- **keyword_classifier:** 49 (soft effect-class only; **0 hard**)
 - **state_focus_drift:** 0
 - **llm_fact_violation:** 0
 - **template_override:** 0
@@ -72,5 +72,6 @@ Supersedes `docs/BASELINE_v1_INVALID.md` (contaminated harness scoring).
 ## Notes
 
 - Measurement only: catalog DB stubbed; real LLM via production client shape.
-- Keys never printed. Deploy requires `npm run test-live -- --gate` pass.
-- Paraphrase: key turns use dialect variants (×8 available); default matrix is scenario ×3 runs.
+- **2F fixed:** S20 shoe focus; photo-refusal promises; «ساعتين» qty; «أنت قلت في أسود» identity hijack.
+- Soft mismatches remain (e.g. ask-color turn classed browse before cart mutates; dispute replies classed order when prose nudges checkout) — not hard I*/fact fails.
+- Keys never printed. **Deploy requires** `LIVE_LLM=1 npm run test-live -- --gate` pass.
