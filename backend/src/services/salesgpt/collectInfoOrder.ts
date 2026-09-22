@@ -89,6 +89,9 @@ export function resolveIdentityCollectReply(input: {
  * When the last bot message asked for a specific identity field via our template,
  * treat the user reply as that field's value.
  * WHY: LLM often omits extracted_info.address while upselling in free text (S10).
+ *
+ * When name+phone already exist and only address is missing, bind the reply to
+ * address even if the bot paraphrased the ask (live paraphrase expansions).
  */
 export function ingestIdentityAnswerFromBotAsk(input: {
   lastBotReply: string;
@@ -103,18 +106,41 @@ export function ingestIdentityAnswerFromBotAsk(input: {
 
   const next: IdentitySnapshot = { ...input.collected };
   const bot = input.lastBotReply || '';
+  const missing = firstMissingIdentityField(next);
 
   const askedName =
-    /شو اسمك الكامل|what is your full name/i.test(bot) && !hasIdentityValue(next.name);
+    /شو اسمك الكامل|what is your full name|اسمك الكامل/i.test(bot) &&
+    !hasIdentityValue(next.name);
   const askedPhone =
-    /شو رقم هاتفك|what is your phone number/i.test(bot) && !hasIdentityValue(next.phone);
+    /شو رقم هاتفك|what is your phone number|رقم هاتف/i.test(bot) &&
+    !hasIdentityValue(next.phone);
   const askedAddress =
-    /شو عنوان التوصيل|what is the delivery address/i.test(bot) &&
+    /شو عنوان التوصيل|what is the delivery address|عنوان التوصيل|عنوانك/i.test(bot) &&
     !hasIdentityValue(next.address);
 
   if (askedAddress) next.address = msg;
   else if (askedPhone) next.phone = msg;
   else if (askedName) next.name = msg;
+  else if (
+    missing === 'address' &&
+    msg.length >= 4 &&
+    !/^(نعم|لا|أيوه|ايوه|أكد|اكد|ok|yes|no)$/i.test(msg)
+  ) {
+    // Last identity slot only — safe even when the ask was paraphrased.
+    next.address = msg;
+  }
 
   return next;
+}
+
+/** True when this turn is filling an identity slot (blocks false asks_product_info). */
+export function isAnsweringIdentityTurn(input: {
+  lastBotReply: string;
+  collectedBeforeIngest: IdentitySnapshot;
+}): boolean {
+  const missing = firstMissingIdentityField(input.collectedBeforeIngest);
+  if (missing === 'address') return true;
+  return /شو اسمك|شو رقم هاتف|شو عنوان|عنوان التوصيل|عنوانك|full name|phone number|delivery address/i.test(
+    input.lastBotReply || ''
+  );
 }

@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-09-22 12:15 UTC — PHASE 5/6 / S10: عنوان ناقص فقط = إجابة هوية (paraphrase) — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** توسعات paraphrase في test-live تسأل العنوان بصياغة حرّة؛ `asks_product_info` بقي يمرّر upsell. إذا كان الحقل الناقص الوحيد `address` → ملء + اعتبار الدور إجابة هوية.
+- **الملفات:** `collectInfoOrder.ts` · `agent.ts` · `orderConfirmationPolicy.ts` · هذا السجل.
+- **اختبارات:** matrix 26؛ p0-cart؛ harness بـ «وين نوصل لك؟» → await.
+- **أثر السلوك:** paraphrase address turns → ملخص تأكيد.
+- **حدود معروفة:** لا ملء اسم/هاتف بدون قالب صريح.
+
+---
+
 ## 2026-09-22 12:00 UTC — PHASE 5/6 / S10: تجاهل asks_product_info أثناء إجابة الهوية — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

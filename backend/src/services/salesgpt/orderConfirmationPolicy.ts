@@ -536,7 +536,8 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
   // WHY: LLM often sets asks_product_info while the customer is answering «شو عنوان
   // التوصيل؟» and then cross-sells — that must not skip await (S10 live residual).
   const answeringIdentityAsk =
-    /شو اسمك الكامل|شو رقم هاتفك|شو عنوان التوصيل|what is your full name|what is your phone number|what is the delivery address/i.test(
+    (!fieldsWereCompleteBeforeTurn && identityComplete) ||
+    /شو اسمك الكامل|شو رقم هاتفك|شو عنوان التوصيل|عنوان التوصيل|عنوانك|what is your full name|what is your phone number|what is the delivery address/i.test(
       lastBotReply
     );
   const asksProductInfo =

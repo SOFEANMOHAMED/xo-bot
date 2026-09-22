@@ -75,6 +75,7 @@ import {
 import { isPastBotClaimDispute } from './pastBotClaimDispute.js';
 import {
     ingestIdentityAnswerFromBotAsk,
+    isAnsweringIdentityTurn,
 } from './collectInfoOrder.js';
 
 /** Values the sales-response model may return in JSON `next_action` */
@@ -407,6 +408,7 @@ export class SalesGPTAgent {
         // previousUserAskedForPhoto / lastAssistantAskedColorChoice / isCatalogOrShortColorReply
         // heuristics that inferred photo intent from history.
         const lastBotReply = this.getLastAssistantHistoryText();
+        const collectedBeforeIngest = { ...this.state.collectedInfo };
         // Deterministic identity fill when bot asked via template and LLM omitted JSON.
         {
             const ingested = ingestIdentityAnswerFromBotAsk({
@@ -429,10 +431,10 @@ export class SalesGPTAgent {
         const wantsAddAnotherTrusted =
             customerRequest?.wantsAddAnother === true &&
             detectsAddAnotherIntent(messageText);
-        const answeringIdentityAsk =
-            /شو اسمك الكامل|شو رقم هاتفك|شو عنوان التوصيل|what is your full name|what is your phone number|what is the delivery address/i.test(
-                lastBotReply
-            );
+        const answeringIdentityAsk = isAnsweringIdentityTurn({
+            lastBotReply,
+            collectedBeforeIngest,
+        });
         const customerRequestForIntent = customerRequest
             ? {
                   ...customerRequest,
