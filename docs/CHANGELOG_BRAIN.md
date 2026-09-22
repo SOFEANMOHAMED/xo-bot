@@ -4,6 +4,19 @@
 
 ---
 
+## 2026-09-22 07:30 UTC — PHASE 2F / S20 focus: mention matcher لا يلتقط «مساعد» كـ ساعة — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** `findProductsMentionedInText` كان يستخدم `hay.includes(stem)` فـ«ساع» من «ساعة» تطابق داخل «مساعد»؛ رد البوت عن الحذاء يسرق التركيز للساعة ثم «أبيض» يُرفَض بألوان الساعة.
+- **الملفات / الدوال:**
+  - `conversationCart.ts` — `findProductsMentionedInText` / `productNameMentionedInTokens` / `productNameSurfaceForms`
+  - `test_conversation_cart.ts` · `test_p0_color_focus.ts` (S20 حذاء→أبيض)
+- **اختبارات:** conversation-cart 16؛ color-focus 43 PASS.
+- **أثر السلوك:** ذكر المنتجات بالتوكن/التصريف لا بالـ substring؛ تركيز الحذاء يثبت بعد سؤال اللون.
+- **حدود معروفة:** بقية bugs 2F (رفض صورة، كمية، نزاع لون) لاحقاً في commits منفصلة.
+
+---
+
 ## 2026-09-21 22:20 UTC — PHASE 1C / صلاحية القياس + إعادة BASELINE + تعديلات العقد — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

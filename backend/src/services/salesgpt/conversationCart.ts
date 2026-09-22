@@ -733,6 +733,10 @@ export function coerceSafeQuantity(
 /**
  * Match catalog products whose names appear in the user message (longest name first).
  * Tenant-scoped: caller must pass only this merchant's products.
+ *
+ * WHY token/stem matching (not hay.includes(stem)): stem «ساع» from «ساعة» is a
+ * substring of «مساعد», so last-bot replies that say «أنا مساعد مبيعات» falsely
+ * focused the watch and stole focus from shoes (S20 / PHASE 2F).
  */
 export function findProductsMentionedInText(
   messageText: string,
@@ -741,17 +745,13 @@ export function findProductsMentionedInText(
   if (!messageText?.trim() || !catalog.length) return [];
   const hay = normalizeArabic(messageText);
   if (!hay) return [];
+  const hayTokens = tokenizeArabic(hay);
 
   const scored = catalog
     .map((product) => {
       const name = normalizeArabic(product.name || '');
       if (name.length < 2) return null;
-      // Require full name token match, or stem without trailing ه/ات for plurals
-      const stem = name.replace(/(ات|ين|ون|ه)$/u, '');
-      const matched =
-        hay.includes(name) ||
-        (stem.length >= 3 && hay.includes(stem));
-      if (!matched) return null;
+      if (!productNameMentionedInTokens(name, hayTokens)) return null;
       return { product, score: name.length };
     })
     .filter((row): row is { product: Product; score: number } => !!row)
@@ -767,6 +767,44 @@ export function findProductsMentionedInText(
   return out;
 }
 
+function tokenizeArabic(text: string): string[] {
+  return text.split(/[^\p{L}\p{N}]+/u).filter((t) => t.length > 0);
+}
+
+function stripLeadingAl(token: string): string {
+  return token.replace(/^ال/, '');
+}
+
+/** Singular / dual / plural surface forms for a catalog name (documented interim). */
+function productNameSurfaceForms(name: string): Set<string> {
+  const base = stripLeadingAl(name);
+  const stem = base.replace(/(ات|ين|ون|ه)$/u, '');
+  const forms = new Set<string>([base, name]);
+  if (stem.length >= 2) {
+    for (const suffix of ['', 'ه', 'ة', 'ين', 'ات', 'ون', 'تين', 'تان', 'ان']) {
+      forms.add(stem + suffix);
+    }
+  }
+  return forms;
+}
+
+function productNameMentionedInTokens(name: string, hayTokens: string[]): boolean {
+  const nameTokens = tokenizeArabic(name).map(stripLeadingAl);
+  if (nameTokens.length === 0) return false;
+
+  // Multi-word names («حذاء رياضي»): every token must appear (ال-tolerant).
+  if (nameTokens.length > 1) {
+    const haySet = new Set(hayTokens.map(stripLeadingAl));
+    return nameTokens.every((tok) => haySet.has(tok));
+  }
+
+  const forms = productNameSurfaceForms(nameTokens[0]);
+  for (const raw of hayTokens) {
+    if (forms.has(raw) || forms.has(stripLeadingAl(raw))) return true;
+  }
+  return false;
+}
+
 /** Per-product quantity hints near the product name (default 1). */
 export function quantityNearProductName(
   messageText: string,
@@ -777,7 +815,13 @@ export function quantityNearProductName(
   if (!hay || !name) return 1;
 
   const stem = name.replace(/(ات|ين|ون|ه)$/u, '');
-  const needle = hay.includes(name) ? name : stem.length >= 3 ? stem : name;
+  const hayTokens = tokenizeArabic(hay);
+  let needle = name;
+  if (!hay.includes(name)) {
+    const forms = productNameSurfaceForms(name);
+    const hit = hayTokens.find((t) => forms.has(t) || forms.has(stripLeadingAl(t)));
+    needle = hit || (stem.length >= 3 ? stem : name);
+  }
   const idx = hay.indexOf(needle);
   if (idx < 0) return 1;
 

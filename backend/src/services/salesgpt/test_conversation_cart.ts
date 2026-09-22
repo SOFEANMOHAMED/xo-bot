@@ -13,6 +13,7 @@ import {
   clearDraftOnFocusChange,
   ensureCartForCheckout,
   fillCartVariantsFromDraft,
+  findProductsMentionedInText,
   getCartItems,
   isCheckoutReady,
   lockDraftIntoCart,
@@ -338,6 +339,45 @@ function run(): void {
   );
   assert(storeFallback.items[0].currency === 'SAR', 'normalizeCart falls back to store currency');
   passed++;
+
+  // PHASE 2F: «مساعد» must not mention watch; «الحذاء الرياضي» must name shoes.
+  {
+    const shoes: Product = {
+      id: 'shoes-sar-350',
+      name: 'حذاء رياضي',
+      price: 350,
+      currency: 'SAR',
+      stock: 40,
+      colors: ['أبيض', 'أسود'],
+    };
+    const watch: Product = {
+      id: 'watch-sar-200',
+      name: 'ساعة',
+      price: 200,
+      currency: 'SAR',
+      stock: 15,
+      colors: ['أسود', 'أحمر'],
+    };
+    const catalog = [watch, shoes];
+    const assistantLeak = findProductsMentionedInText(
+      'يا هلا! أنا مساعد مبيعات في متجر قياس حي. حابب أساعدك في الحصول على الحذاء الرياضي.',
+      catalog
+    );
+    assert(
+      !assistantLeak.some((p) => p.id === 'watch-sar-200'),
+      `مساعد must not match ساعة stem, got ${assistantLeak.map((p) => p.name).join(',')}`
+    );
+    assert(
+      assistantLeak.some((p) => p.id === 'shoes-sar-350'),
+      'assistant shoe blurb still names الحذاء الرياضي'
+    );
+    const customerShoe = findProductsMentionedInText('بدي الحذاء الرياضي', catalog);
+    assert(
+      customerShoe.length === 1 && customerShoe[0].id === 'shoes-sar-350',
+      `customer shoe phrase names shoes only, got ${customerShoe.map((p) => p.id).join(',')}`
+    );
+    passed += 3;
+  }
 
   console.log(`✅ conversation cart merge policy: ${passed} checks passed`);
 }

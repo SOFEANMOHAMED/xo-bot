@@ -16,6 +16,7 @@ import {
   REAL_TEST_SHIRT,
   REAL_TEST_WATCH,
 } from './realTestCatalog.js';
+import { LIVE_TEN_PRODUCT_CATALOG } from './liveEval/liveCatalog.js';
 import {
   resetHarness,
   setCatalog,
@@ -327,6 +328,87 @@ if (grounding) {
     size.updatedState.extracted_entities?.size == null ||
       size.updatedState.extracted_entities?.product_id !== REAL_TEST_MOBILE.id,
     'C4 size is not recorded on OOS mobile',
+  );
+}
+
+// PHASE 2F S20: shoe then «أبيض» must use shoe colors, not watch أسود/أحمر.
+{
+  const shoesId = 'shoes-sar-350';
+  async function runTen(input: {
+    message: string;
+    state: ConversationState;
+    llmText: string;
+    nextAction?: string;
+    recentMessages?: { role: 'user' | 'assistant'; content: string }[];
+  }): Promise<SalesGPTPipelineResult> {
+    resetHarness();
+    setCatalog(LIVE_TEN_PRODUCT_CATALOG);
+    setLlmReply({
+      response_text: input.llmText,
+      next_action: input.nextAction || 'present_product',
+      customer_request: {
+        wants_alternatives: false,
+        asks_product_info: false,
+        wants_photo: false,
+        ready_to_confirm: false,
+        wants_add_another: false,
+      },
+      extracted_info: {},
+    });
+    return processWithSalesGPT({
+      merchantId: merchantConfig().merchantId,
+      messageText: input.message,
+      recentMessages: input.recentMessages || [],
+      conversationState: input.state,
+      merchantConfig: merchantConfig(),
+      platform: 'playground',
+    });
+  }
+
+  const shoeAsk = await runTen({
+    message: 'بدي الحذاء الرياضي',
+    state: emptyState(),
+    llmText:
+      'يا هلا! أنا مساعد مبيعات في متجر قياس حي. حابب أساعدك في الحصول على الحذاء الرياضي. هل تفضل لون معين؟ الأبيض أو الأسود.',
+    nextAction: 'collect_info',
+  });
+  assert(
+    shoeAsk.updatedState.extracted_entities?.product_id === shoesId ||
+      shoeAsk.updatedState.last_recommended_products?.[0] === shoesId ||
+      getCartItems(shoeAsk.updatedState).some((item) => item.productId === shoesId),
+    `S20 focus after shoe ask is shoes, got product_id=${shoeAsk.updatedState.extracted_entities?.product_id}`,
+  );
+
+  const white = await runTen({
+    message: 'أبيض',
+    state: shoeAsk.updatedState,
+    llmText: 'تمام، ثبتّ اللون أبيض للحذاء.',
+    nextAction: 'collect_info',
+    recentMessages: [
+      { role: 'user', content: 'بدي الحذاء الرياضي' },
+      { role: 'assistant', content: shoeAsk.replyText },
+    ],
+  });
+  const offersWatchOnlyColors =
+    /الألوان المتاحة:/.test(white.replyText) &&
+    /أسود/.test(white.replyText) &&
+    /أحمر/.test(white.replyText) &&
+    !/أبيض|ابيض/.test(white.replyText);
+  assert(
+    !offersWatchOnlyColors,
+    `S20 أبيض must not offer watch-only أسود/أحمر, got: ${white.replyText}`,
+  );
+  assert(
+    !/غير متوفر لهذا المنتج/.test(white.replyText) || /أبيض|ابيض/.test(white.replyText),
+    `S20 must not reject أبيض as unavailable for shoes, got: ${white.replyText}`,
+  );
+  assert(
+    white.updatedState.extracted_entities?.product_id === shoesId ||
+      getCartItems(white.updatedState).some(
+        (item) => item.productId === shoesId && /أبيض|ابيض/.test(item.color || '')
+      ) ||
+      white.updatedState.last_recommended_products?.[0] === shoesId,
+    'S20 after أبيض focus remains shoes',
   );
 }
 
