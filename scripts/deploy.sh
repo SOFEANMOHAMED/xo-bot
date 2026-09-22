@@ -62,8 +62,10 @@ refuse_unreachable_test_db() {
   fi
 }
 
-# WHY typecheck && test-all: inside `if`, errexit is ignored — chain so typecheck
-# failure cannot be masked by a later green test-all.
+# WHY typecheck && test-all && live gate: inside `if`, errexit is ignored — chain so
+# typecheck failure cannot be masked by a later green test-all. Live gate catches
+# brain regressions that unit stubs miss.
+# Cost: test-live --gate adds ~\$0.10 USD per deploy (~220 LLM calls; see docs/BASELINE.md).
 run_test_gate() {
   if ! (
     export NODE_ENV=test
@@ -71,6 +73,18 @@ run_test_gate() {
     npm run typecheck && npm run test-all
   ); then
     echo "TEST GATE FAILED — live dist untouched, no rollback needed"
+    exit 1
+  fi
+  echo "==> LIVE LLM GATE (LIVE_LLM=1 npm run test-live -- --gate)"
+  echo "    Estimated extra cost ≈ \$0.10 USD per deploy (see docs/BASELINE.md LLM budget)"
+  if ! (
+    export NODE_ENV=test
+    export LIVE_LLM=1
+    cd "$BACKEND"
+    npm run test-live -- --gate
+  ); then
+    echo "LIVE LLM GATE FAILED — live dist untouched, no rollback needed"
+    echo "Fix brain regressions or lower thresholds only with an explicit baseline update."
     exit 1
   fi
 }
