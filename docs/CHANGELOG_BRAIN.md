@@ -4,6 +4,20 @@
 
 ---
 
+## 2026-09-22 08:15 UTC — PHASE 2F / نزاع «أنت قلت في أسود» ليس إجابة هوية — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** الإشارة لما قاله البوت سابقاً كانت تُلتقط كلون/طلب → `collect_info` يسأل الاسم. كُشف النزاع كـ product_qa وحُجب استخراج اللون/الهوية منه.
+- **الملفات / الدوال:**
+  - `pastBotClaimDispute.ts` — `isPastBotClaimDispute`
+  - `turnIntent.ts` / `agent.ts` / `pendingBotQuestion.ts` / `orderColorPolicy.ts`
+  - `test_past_bot_claim_dispute.ts` · `test_p0_color_focus.ts` · `package.json`
+- **اختبارات:** past-bot-claim-dispute 10؛ color-focus 45؛ turn-intent 15 PASS.
+- **أثر السلوك:** «أنت قلت في أسود» يبقى سؤال/نزاع منتج بلا ملء name/phone/address.
+- **حدود معروفة:** matcher مؤقت ضيق؛ يُستبدل بالمُفسّر لاحقاً.
+
+---
+
 ## 2026-09-22 08:00 UTC — PHASE 2F / كمية عربية: «ساعتين» → qty=2 — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

@@ -12,6 +12,7 @@ import {
   isColorInProductCatalog,
 } from './orderColorPolicy.js';
 import { isExplicitPhotoRequest } from './turnIntent.js';
+import { isPastBotClaimDispute } from './pastBotClaimDispute.js';
 
 export type PendingBotQuestionKind = 'color' | 'size';
 
@@ -161,6 +162,7 @@ export function extractBareColorAnswer(
 ): string | null {
   if (!text?.trim()) return null;
   if (looksLikeShowOrPhotoAsk(text) || isAvailabilityQuestion(text)) return null;
+  if (isPastBotClaimDispute(text)) return null;
   const colors = (catalogColors || []).filter((c) => typeof c === 'string' && c.trim());
   if (!colors.length) return null;
   return extractColorFromUserText(text, colors);

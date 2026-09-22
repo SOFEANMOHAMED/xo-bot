@@ -71,6 +71,7 @@ import {
     resolveTurnIntent,
     type TurnIntent,
 } from './turnIntent.js';
+import { isPastBotClaimDispute } from './pastBotClaimDispute.js';
 
 /** Values the sales-response model may return in JSON `next_action` */
 const SALESGPT_MODEL_NEXT_ACTIONS = new Set([
@@ -407,7 +408,8 @@ export class SalesGPTAgent {
             customerRequest,
             asksProductInfo:
                 customerRequest?.asksProductInfo === true ||
-                isProductInfoRequest(messageText),
+                isProductInfoRequest(messageText) ||
+                isPastBotClaimDispute(messageText),
             isFinalizing:
                 customerAffirmsOrder(messageText) ||
                 (customerDeclinesMoreItems(messageText) &&
@@ -609,18 +611,26 @@ export class SalesGPTAgent {
      * Merge new info into collected info (never overwrite with empty)
      */
     private mergeCollectedInfo(newInfo: Partial<SalesGPTState['collectedInfo']>): void {
+        const lastUser = [...this.state.conversationHistory]
+            .reverse()
+            .find((line) => line.startsWith('المستخدم:'));
+        const userText = lastUser
+            ? lastUser.replace(/^المستخدم:\s*/u, '').replace(/\s*<END_OF_TURN>\s*$/u, '')
+            : '';
+        const dispute = isPastBotClaimDispute(userText);
+
         for (const [key, value] of Object.entries(newInfo)) {
             if (isPlaceholderCollectedValue(value)) continue;
+            // Never fill identity / color from a dispute about a prior bot claim.
+            if (
+                dispute &&
+                (key === 'name' || key === 'phone' || key === 'address' || key === 'color')
+            ) {
+                continue;
+            }
             if (key === 'quantity') {
                 const n = typeof value === 'number' ? value : parseInt(String(value), 10);
                 if (!Number.isNaN(n) && n > 0) {
-                    // Quantity is sanitized against the latest user turn in history
-                    const lastUser = [...this.state.conversationHistory]
-                        .reverse()
-                        .find((line) => line.startsWith('المستخدم:'));
-                    const userText = lastUser
-                        ? lastUser.replace(/^المستخدم:\s*/u, '').replace(/\s*<END_OF_TURN>\s*$/u, '')
-                        : '';
                     const safe = coerceSafeQuantity(userText, n);
                     if (safe !== undefined) {
                         (this.state.collectedInfo as any).quantity = safe;

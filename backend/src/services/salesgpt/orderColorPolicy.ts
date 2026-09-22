@@ -13,6 +13,7 @@ import {
     colorsMatch,
     normalizeColorToken,
   } from '../../catalog/color-options.js';
+import { isPastBotClaimDispute } from './pastBotClaimDispute.js';
 
   export function isColorInProductCatalog(
     color: string | null | undefined,
@@ -130,6 +131,8 @@ import {
     catalogColors: string[]
   ): string | null {
     if (!text?.trim() || !catalogColors.length) return null;
+    // «أنت قلت في أسود» is a dispute, not a color selection.
+    if (isPastBotClaimDispute(text)) return null;
 
     const numeric = extractNumericColorChoice(text, catalogColors);
     if (numeric) return numeric;

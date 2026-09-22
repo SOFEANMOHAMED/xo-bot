@@ -11,6 +11,7 @@
  */
 
 import type { CustomerRequestSignals } from './customerRequest.js';
+import { isPastBotClaimDispute } from './pastBotClaimDispute.js';
 
 export type TurnIntent =
   | 'browse_media'
@@ -105,7 +106,12 @@ export function resolveTurnIntent(input: ResolveTurnIntentInput): TurnIntent {
     return 'browse_media';
   }
 
-  if (asksProductInfo || customerRequest?.asksProductInfo === true) {
+  // Disputing a prior bot claim («أنت قلت في أسود») is product Q&A, not checkout.
+  if (
+    isPastBotClaimDispute(userMessage) ||
+    asksProductInfo ||
+    customerRequest?.asksProductInfo === true
+  ) {
     return 'product_qa';
   }
 

@@ -286,6 +286,15 @@ if (grounding) {
       getCartItems(disputed.updatedState).some((item) => item.productId === REAL_TEST_WATCH.id),
     'C3 discussed product remains the watch',
   );
+  assert(
+    disputed.next_action !== 'collect_info' ||
+      !/شو اسمك الكامل|what is your full name/i.test(disputed.replyText),
+    `C3 dispute must not ask identity name, got action=${disputed.next_action} text=${disputed.replyText}`,
+  );
+  assert(
+    disputed.updatedState.extracted_entities?.name == null,
+    'C3 dispute must not fill name from «أنت قلت في أسود»',
+  );
 }
 
 // OOS product is never a variant target or cart line.
