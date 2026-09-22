@@ -533,10 +533,17 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
 
   // Product Q&A always wins over checkout rails — never inject order summary here.
   // Prefer model classification; heuristic is fallback only when the model omitted the flag.
+  // WHY: LLM often sets asks_product_info while the customer is answering «شو عنوان
+  // التوصيل؟» and then cross-sells — that must not skip await (S10 live residual).
+  const answeringIdentityAsk =
+    /شو اسمك الكامل|شو رقم هاتفك|شو عنوان التوصيل|what is your full name|what is your phone number|what is the delivery address/i.test(
+      lastBotReply
+    );
   const asksProductInfo =
-    typeof modelAsksProductInfo === 'boolean'
+    !answeringIdentityAsk &&
+    (typeof modelAsksProductInfo === 'boolean'
       ? modelAsksProductInfo
-      : isProductInfoRequest(userMessage);
+      : isProductInfoRequest(userMessage));
 
   if (asksProductInfo) {
     const safeAction =

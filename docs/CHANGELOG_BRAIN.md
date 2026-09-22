@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-09-22 12:00 UTC — PHASE 5/6 / S10: تجاهل asks_product_info أثناء إجابة الهوية — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** السبب الحي المتبقي: الـ LLM يضع `asks_product_info: true` عند «الحسينية دمشق» فيُخرج `resolveOrderNextAction` مبكراً بـ present_product ويُبقي نص الـ upsell.
+- **الملفات:** `orderConfirmationPolicy.ts` · `agent.ts` · `test_verification_matrix.ts` M08d · هذا السجل.
+- **اختبارات:** matrix 26/26؛ p0-cart 54 hard؛ إعادة إنتاج harness → await.
+- **أثر السلوك:** إجابة قالب الهوية لا تُصنَّف product_qa ولو علم النموذج خاطئ.
+- **حدود معروفة:** مطابقة قوالب ask الهوية فقط.
+
+---
+
 ## 2026-09-22 11:50 UTC — PHASE 5/6 / S10: ملء العنوان من قالب السؤال + منع upsell في الرد — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

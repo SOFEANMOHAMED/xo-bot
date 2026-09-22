@@ -429,16 +429,27 @@ export class SalesGPTAgent {
         const wantsAddAnotherTrusted =
             customerRequest?.wantsAddAnother === true &&
             detectsAddAnotherIntent(messageText);
+        const answeringIdentityAsk =
+            /شو اسمك الكامل|شو رقم هاتفك|شو عنوان التوصيل|what is your full name|what is your phone number|what is the delivery address/i.test(
+                lastBotReply
+            );
         const customerRequestForIntent = customerRequest
-            ? { ...customerRequest, wantsAddAnother: wantsAddAnotherTrusted }
+            ? {
+                  ...customerRequest,
+                  wantsAddAnother: wantsAddAnotherTrusted,
+                  // Same S10 hole: asks_product_info during identity answer → product_qa.
+                  asksProductInfo:
+                      answeringIdentityAsk ? false : customerRequest.asksProductInfo,
+              }
             : customerRequest;
         const turnIntent: TurnIntent = resolveTurnIntent({
             userMessage: messageText,
             customerRequest: customerRequestForIntent,
             asksProductInfo:
-                customerRequest?.asksProductInfo === true ||
-                isProductInfoRequest(messageText) ||
-                isPastBotClaimDispute(messageText),
+                !answeringIdentityAsk &&
+                (customerRequest?.asksProductInfo === true ||
+                    isProductInfoRequest(messageText) ||
+                    isPastBotClaimDispute(messageText)),
             isFinalizing:
                 customerAffirmsOrder(messageText) ||
                 (customerDeclinesMoreItems(messageText) &&
