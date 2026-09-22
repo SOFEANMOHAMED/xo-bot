@@ -73,6 +73,9 @@ import {
     type TurnIntent,
 } from './turnIntent.js';
 import { isPastBotClaimDispute } from './pastBotClaimDispute.js';
+import {
+    ingestIdentityAnswerFromBotAsk,
+} from './collectInfoOrder.js';
 
 /** Values the sales-response model may return in JSON `next_action` */
 const SALESGPT_MODEL_NEXT_ACTIONS = new Set([
@@ -404,6 +407,24 @@ export class SalesGPTAgent {
         // previousUserAskedForPhoto / lastAssistantAskedColorChoice / isCatalogOrShortColorReply
         // heuristics that inferred photo intent from history.
         const lastBotReply = this.getLastAssistantHistoryText();
+        // Deterministic identity fill when bot asked via template and LLM omitted JSON.
+        {
+            const ingested = ingestIdentityAnswerFromBotAsk({
+                lastBotReply,
+                userMessage: messageText,
+                collected: this.state.collectedInfo,
+                blockIngest: isPastBotClaimDispute(messageText),
+            });
+            if (ingested.name && !this.state.collectedInfo.name) {
+                this.state.collectedInfo.name = ingested.name;
+            }
+            if (ingested.phone && !this.state.collectedInfo.phone) {
+                this.state.collectedInfo.phone = ingested.phone;
+            }
+            if (ingested.address && !this.state.collectedInfo.address) {
+                this.state.collectedInfo.address = ingested.address;
+            }
+        }
         // Gate wantsAddAnother: model flag alone must not become cart_edit (S10 upsell).
         const wantsAddAnotherTrusted =
             customerRequest?.wantsAddAnother === true &&

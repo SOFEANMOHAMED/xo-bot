@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-09-22 11:50 UTC — PHASE 5/6 / S10: ملء العنوان من قالب السؤال + منع upsell في الرد — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** بقي upsell حي عندما يحذف الـ LLM `extracted_info.address`. ملء حتمي من قالب «شو عنوان التوصيل؟»؛ وفرض await إذا ردّ النموذج بسؤال إضافة منتج والطلب مكتمل.
+- **الملفات:** `collectInfoOrder.ts` · `agent.ts` · `orderConfirmationPolicy.ts` · `test_p0_cart_integrity.ts` · هذا السجل.
+- **اختبارات:** p0-cart 54 hard؛ collect-info-order؛ verification matrix PASS.
+- **أثر السلوك:** عنوان بلا JSON → await؛ رد upsell يُستبدل بملخص التأكيد.
+- **حدود معروفة:** القوالب الهوية فقط؛ باقي soft = ضوضاء تصنيف.
+
+---
+
 ## 2026-09-22 11:35 UTC — PHASE 5/6 / S10: لا تثق بـ wants_add_another وحده — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

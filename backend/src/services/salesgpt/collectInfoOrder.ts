@@ -84,3 +84,37 @@ export function resolveIdentityCollectReply(input: {
     complete: false,
   };
 }
+
+/**
+ * When the last bot message asked for a specific identity field via our template,
+ * treat the user reply as that field's value.
+ * WHY: LLM often omits extracted_info.address while upselling in free text (S10).
+ */
+export function ingestIdentityAnswerFromBotAsk(input: {
+  lastBotReply: string;
+  userMessage: string;
+  collected: IdentitySnapshot;
+  /** When true, do not fill identity from this message (dispute / non-answer). */
+  blockIngest?: boolean;
+}): IdentitySnapshot {
+  if (input.blockIngest) return { ...input.collected };
+  const msg = (input.userMessage || '').trim();
+  if (!msg) return { ...input.collected };
+
+  const next: IdentitySnapshot = { ...input.collected };
+  const bot = input.lastBotReply || '';
+
+  const askedName =
+    /شو اسمك الكامل|what is your full name/i.test(bot) && !hasIdentityValue(next.name);
+  const askedPhone =
+    /شو رقم هاتفك|what is your phone number/i.test(bot) && !hasIdentityValue(next.phone);
+  const askedAddress =
+    /شو عنوان التوصيل|what is the delivery address/i.test(bot) &&
+    !hasIdentityValue(next.address);
+
+  if (askedAddress) next.address = msg;
+  else if (askedPhone) next.phone = msg;
+  else if (askedName) next.name = msg;
+
+  return next;
+}

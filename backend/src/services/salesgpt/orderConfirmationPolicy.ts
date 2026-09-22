@@ -653,8 +653,13 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
   }
 
   const justBecameComplete = !fieldsWereCompleteBeforeTurn;
+  // WHY: even when completeness was already true, an unsolicited upsell reply
+  // must not pass through — replace with await summary (S10 residual live run).
+  const modelTriedUpsell =
+    botReplyAsksToAddMore(responseText) && turnIntent !== 'cart_edit';
   const shouldAwait =
     justBecameComplete ||
+    modelTriedUpsell ||
     aiNextAction === CONFIRM_ORDER_ACTION ||
     aiNextAction === AWAIT_CONFIRMATION_ACTION ||
     aiNextAction === 'close_sale' ||

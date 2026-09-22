@@ -485,6 +485,31 @@ if (commerce) {
       getCartItems(confirmResult.updatedState)[0]?.productId === REAL_TEST_WATCH.id,
     'S10 نعم أكد must not inject shirt into cart',
   );
+  const addressWithoutExtracted = await runTurn({
+    message: 'الحسينية دمشق',
+    state: readyState,
+    llmText:
+      'شكرًا سفيان على المعلومات. عنوان التوصيل هو الحسينية دمشق. هل ترغب في إضافة أي منتج آخر إلى طلبك؟ عندنا قميص.',
+    nextAction: 'present_product',
+    wantsAddAnother: true,
+    // LLM omitted address in JSON — ingest from bot ask template.
+    extractedInfo: {},
+    recentMessages: [
+      { role: 'assistant', content: 'تمام، شو عنوان التوصيل؟' },
+    ],
+  });
+  assertHard(
+    addressWithoutExtracted.next_action === 'await_confirmation',
+    `S10 address without extracted_info→await got ${addressWithoutExtracted.next_action}`,
+  );
+  assertHard(
+    !!addressWithoutExtracted.updatedState.extracted_entities?.address,
+    'S10 must ingest address from bot-ask template',
+  );
+  assertHard(
+    !/هل ترغب في إضافة|منتج آخر/i.test(addressWithoutExtracted.replyText),
+    'S10 omitted-JSON upsell must be replaced by await',
+  );
 }
 
 // playground-2026-09-21 — exact reported conversation.
