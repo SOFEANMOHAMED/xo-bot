@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-09-22 12:40 UTC — PHASE 5/6-SHORT / إغلاق التلميع + بوابة النشر — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** توثيق إعادة القياس (عدة تشغيلات 130/130)، مراجعة soft، ربط `--gate` في `deploy.sh`، تقرير نبرة/إعدادات تاجر بلا تنفيذ.
+- **الملفات:** `docs/BASELINE.md` · `BASELINE_REPORT.json` · `test-live.thresholds.json` · `BRAIN_FIX_PLAN.md` · `scripts/deploy.sh` (سابقاً `c3be66c`) · هذا السجل.
+- **اختبارات:** `LIVE_LLM=1 npm run test-live` → **130/130**؛ soft ≈34 label-only؛ S10 بدون upsell.
+- **أثر السلوك:** لا تغيير إضافي هنا (توثيق). تكلفة البوابة ≈ **\$0.10**/deploy.
+- **حدود معروفة:** soft class؛ تصميم merchant config بانتظار الموافقة.
+
+---
+
 ## 2026-09-22 12:35 UTC — PHASE 5/6 / S10: upsell في الرد ≠ product_info — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

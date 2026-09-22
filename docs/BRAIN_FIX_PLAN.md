@@ -4,20 +4,20 @@ Living plan for cart / focus / reply regressions. Identifiers in English.
 
 ---
 
-## Status (2026-09-22 / 2F)
+## Status (2026-09-22 / 5/6-SHORT)
 
 | Phase | Status | Notes |
 | --- | --- | --- |
 | **0 / harness & gates** | Done | `test-all`, KNOWN_PENDING, logs-test |
 | **1A–1C measurement** | Done | valid scoring; v1 archived |
-| **2B–2E brain rails** | Done | cancel/remove, pending, variant, focus, collect, 2E |
-| **2F targeted fixes** | **Done** | S20 focus, photo refusal, qty dual, past-claim dispute → **test-live 130/130** |
+| **2B–2F brain rails** | Done | cancel/remove, pending, variant, focus, collect, 2E, 2F |
+| **5/6-SHORT polish** | **Done** | multi-run 130/130; S10 await; deploy `--gate`; merchant design pending approval |
 | **4-PREP analysis** | Done (docs) | interpreter contract |
 | **Phase 4 interpreter** | **Next** | Offline → shadow → flip; remaining soft class noise |
 
-**Deploy rule:** passing `LIVE_LLM=1 npm run test-live -- --gate` required.
+**Deploy rule:** `scripts/deploy.sh` → typecheck + test-all + `LIVE_LLM=1 npm run test-live -- --gate` (~\$0.10 LLM/deploy).
 
-**Baseline:** `docs/BASELINE.md` — 130/130 (100%), I1–I5 100%, 0 hard failures.
+**Baseline:** `docs/BASELINE.md` — 130/130 (100%), I1–I5 100%, 0 hard; soft ≈34 label-only.
 
 ---
 

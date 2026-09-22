@@ -1,12 +1,12 @@
-# BASELINE — live model measurement (PHASE 2F after targeted fixes)
+# BASELINE — live model measurement (PHASE 5/6-SHORT after S10 polish)
 
-Supersedes `docs/BASELINE_v1_INVALID.md`. Prior valid 1C was 128/130; **2F → 130/130**.
+Supersedes `docs/BASELINE_v1_INVALID.md`. Prior 2F was 130/130; **5/6 reconfirmed 130/130** (multi-run).
 
-- **date (UTC):** 2026-09-22T07:56:22.102Z
-- **commit:** `56f0c13cf2c049e3db61cedf982818a8bbb7994a` (2F-4; measurement includes 2F-1…4)
+- **date (UTC):** 2026-09-22T09:27:49.536Z
+- **commit:** `91d7a8a1e6e8acc47e54de4cbbc66d60b0aaa486` (S10 upsell≠product_info; includes 5/6 gate+polish)
 - **runs per scenario:** 3
 - **overall:** 130/130 (100.0%)
-- **LLM budget:** calls=230 promptTok=525049 completionTok=39378 estUsd≈0.102384
+- **LLM budget:** calls=208 promptTok=474697 completionTok=35433 estUsd≈0.092464
 
 ## Per scenario
 
@@ -64,7 +64,7 @@ Supersedes `docs/BASELINE_v1_INVALID.md`. Prior valid 1C was 128/130; **2F → 1
 
 ## Failures by root cause
 
-- **keyword_classifier:** 49 (soft effect-class only; **0 hard**)
+- **keyword_classifier:** 34 (soft effect-class only; **0 hard**; **0 S10 upsell**)
 - **state_focus_drift:** 0
 - **llm_fact_violation:** 0
 - **template_override:** 0
@@ -72,6 +72,6 @@ Supersedes `docs/BASELINE_v1_INVALID.md`. Prior valid 1C was 128/130; **2F → 1
 ## Notes
 
 - Measurement only: catalog DB stubbed; real LLM via production client shape.
-- **2F fixed:** S20 shoe focus; photo-refusal promises; «ساعتين» qty; «أنت قلت في أسود» identity hijack.
-- Soft mismatches remain (e.g. ask-color turn classed browse before cart mutates; dispute replies classed order when prose nudges checkout) — not hard I*/fact fails.
-- Keys never printed. **Deploy requires** `LIVE_LLM=1 npm run test-live -- --gate` pass.
+- **5/6 soft review:** ~34 label artifacts (ask-color→browse, catalog→qa). Real S10 upsell/نعم→shirt **fixed**.
+- **Deploy:** `scripts/deploy.sh` runs `LIVE_LLM=1 npm run test-live -- --gate` after typecheck+test-all (~**\$0.10**/deploy).
+- Keys never printed.
