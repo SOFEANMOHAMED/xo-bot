@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-09-22 12:35 UTC — PHASE 5/6 / S10: upsell في الرد ≠ product_info — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** حالة نادرة: اكتمال مسبق + `asks_product_info` + رد upsell يمرّ من البوابة المبكرة. إذا `botReplyAsksToAddMore(responseText)` لا يُعامل كـ product Q&A.
+- **الملفات:** `orderConfirmationPolicy.ts` · `test_verification_matrix.ts` M08e · هذا السجل.
+- **اختبارات:** matrix 27/27؛ golden PASS.
+- **أثر السلوك:** أي رد «إضافة منتج آخر؟» مع اكتمال → await summary.
+- **حدود معروفة:** soft label browse/qa يبقى.
+
+---
+
 ## 2026-09-22 12:25 UTC — PHASE 5/6 / S10: لا تُعامل أرقام الهاتف كعنوان — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

@@ -393,6 +393,38 @@ const MATRIX: MatrixRow[] = [
     },
   },
   {
+    id: 'M08e',
+    scenario: 'طلب مكتمل مسبقاً + asks_product_info + upsell reply → await',
+    channels: 'all',
+    layer: 'orderConfirmationPolicy',
+    run: () => {
+      const upsell =
+        'شكرًا سفيان. عنوان التوصيل الحسينية دمشق. هل تود إضافة أي منتج آخر للسلة؟ عندنا قميص.';
+      const r = resolveOrderNextAction({
+        aiNextAction: 'present_product',
+        fieldsComplete: true,
+        fieldsWereCompleteBeforeTurn: true,
+        wasAwaitingConfirmation: false,
+        userMessage: 'الحسينية دمشق',
+        language: 'arabic',
+        collectedInfo: {
+          name: 'سفيان محمد',
+          phone: '09552222',
+          address: 'الحسينية دمشق',
+          product_name: 'ساعة',
+          color: 'أسود',
+        },
+        responseText: upsell,
+        modelAsksProductInfo: true,
+        lastBotReply: 'تمام سفيان، كمل بياناتك لو سمحت',
+        turnIntent: 'other',
+        cartLinesSummary: '• ساعة — أسود — 200 ريال سعودي',
+      });
+      assert(r.nextAction === 'await_confirmation', `got ${r.nextAction}`);
+      assert(!/هل تود إضافة|القميص/i.test(r.responseText), 'strip upsell');
+    },
+  },
+  {
     id: 'M09',
     scenario: '«إلغاء الطلب» → end_conversation',
     channels: 'all',

@@ -540,8 +540,10 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
     /شو اسمك الكامل|شو رقم هاتفك|شو عنوان التوصيل|عنوان التوصيل|عنوانك|what is your full name|what is your phone number|what is the delivery address/i.test(
       lastBotReply
     );
+  // Upsell copy is not product Q&A — never let asks_product_info keep it (S10 r9 residual).
   const asksProductInfo =
     !answeringIdentityAsk &&
+    !botReplyAsksToAddMore(responseText) &&
     (typeof modelAsksProductInfo === 'boolean'
       ? modelAsksProductInfo
       : isProductInfoRequest(userMessage));
