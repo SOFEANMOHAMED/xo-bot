@@ -2,11 +2,11 @@
 
 Supersedes `docs/BASELINE_v1_INVALID.md` (contaminated harness scoring).
 
-- **date (UTC):** 2026-09-23T08:58:41.224Z
-- **commit:** `f487f275d48dcae32d66300b67191961f8d67c31`
+- **date (UTC):** 2026-09-23T09:08:02.740Z
+- **commit:** `1ba131309c19a6ae16deb827032b465621af89ac`
 - **runs per scenario:** 3
 - **overall:** 133/133 (100.0%)
-- **LLM budget:** calls=201 promptTok=459279 completionTok=34117 estUsd≈0.089362
+- **LLM budget:** calls=201 promptTok=459302 completionTok=34308 estUsd≈0.08948
 
 ## Per scenario
 
@@ -65,7 +65,7 @@ Supersedes `docs/BASELINE_v1_INVALID.md` (contaminated harness scoring).
 
 ## Failures by root cause
 
-- **keyword_classifier:** 30
+- **keyword_classifier:** 31
 - **state_focus_drift:** 0
 - **llm_fact_violation:** 0
 - **template_override:** 0
