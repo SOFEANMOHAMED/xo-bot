@@ -198,7 +198,12 @@ export const PLAN_SECTION6_SCENARIOS: readonly LiveScenario[] = Object.freeze([
     turns: [
       { text: 'بدي اطلب الساعة', expectClass: 'order' },
       { text: 'أسود', expectClass: 'order' },
-      { text: 'لا ما بدي اسود بدي احمر', expectClass: 'order' },
+      {
+        text: 'لا ما بدي اسود بدي احمر',
+        expectClass: 'order',
+        // PHASE 2H-2: color mutation reply must include priced cart summary.
+        expectPriceProductId: REAL_TEST_WATCH.id,
+      },
     ],
   },
   {

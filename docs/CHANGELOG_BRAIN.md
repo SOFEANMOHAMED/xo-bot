@@ -4,6 +4,17 @@
 
 ---
 
+## 2026-09-23 — PHASE 2H / ITEM 2: ملخص سلة بعد تغيير اللون — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** `buildVariantUpdatedMessage` كان يؤكد تغيير اللون بلا `formatCartSummary` بخلاف add/remove. الآن يُلحق الملخص المسعّر (+ CTA)；ومسار pending color/size كذلك.
+- **الملفات:** `resolveVariantChange.ts` · `index.ts` · `test_variant_cart_summary.ts` · `test_p0_cart_integrity.ts` · `liveScenarios.ts` (S14 + expectPrice) · `package.json` · هذا السجل.
+- **اختبارات:** `npm run test-variant-cart-summary` PASS؛ typecheck + test-all بدون فشل جديد.
+- **أثر السلوك:** بعد تصحيح/تثبيت لون يظهر سطر المنتج باللون الجديد والسعر والمجموع.
+- **حدود معروفة:** لا تشغيل test-live كامل في هذا الـ commit (السيناريو جاهز للبوابة).
+
+---
+
 ## 2026-09-23 — PHASE 2H / ITEM 1: هوية جزئية متعددة الحقول — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

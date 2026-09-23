@@ -640,7 +640,9 @@ export const processWithSalesGPT = async (
             const reply = buildVariantUpdatedMessage(
                 language === 'english' ? 'english' : 'arabic',
                 variant.color,
-                variant.productName
+                variant.productName,
+                cart.items,
+                { shippingPolicy: merchantConfig.shippingPolicy }
             );
             const updatedVariant: ConversationState = applyPendingToState(
                 {
@@ -859,10 +861,18 @@ export const processWithSalesGPT = async (
                     { items, status: 'building' },
                     { storeCurrency: merchantConfig.storeCurrency || merchantConfig.currency }
                 );
-                const reply =
+                const summary = formatCartSummary(cart.items, language, {
+                    shippingPolicy: merchantConfig.shippingPolicy,
+                });
+                const lead =
                     language === 'arabic'
                         ? `تمام، ثبتّ${resolved.color ? ` اللون ${resolved.color}` : ''}${resolved.size ? ` المقاس ${resolved.size}` : ''} لـ ${pendingProduct.name}.`
                         : `Got it — recorded${resolved.color ? ` ${resolved.color}` : ''}${resolved.size ? ` size ${resolved.size}` : ''} for ${pendingProduct.name}.`;
+                const cta =
+                    language === 'arabic'
+                        ? 'نقدر نضيف منتج ثاني، أو نكمّل الطلب؟'
+                        : 'We can add another product, or finish the order.';
+                const reply = `${lead}\n${summary}\n\n${cta}`;
                 const updatedSelect: ConversationState = applyPendingToState(
                     {
                         ...stateForSelect,

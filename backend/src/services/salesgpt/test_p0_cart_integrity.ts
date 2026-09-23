@@ -374,6 +374,12 @@ if (commerce) {
     /حدّثت|تم التحديث|تحديث/.test(changed.replyText),
     `update claim when cart changed: ${changed.replyText}`,
   );
+  assertHard(
+    /أحمر/.test(changed.replyText) &&
+      /200/.test(changed.replyText) &&
+      /مجموع المنتجات/.test(changed.replyText),
+    `variant change must include priced cart summary: ${changed.replyText}`,
+  );
 
   const same = await runTurn({
     message: 'لا ما بدي اسود بدي احمر',

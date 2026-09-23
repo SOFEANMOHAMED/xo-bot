@@ -6,6 +6,10 @@
  */
 import type { CartItem, Product } from '../../core/types.js';
 import { ensureLineId } from './cartLineOps.js';
+import {
+  formatCartSummary,
+  type CartSummaryOptions,
+} from './cartSummary.js';
 import { isInterimVariantCorrectionIntent } from './interimCancelMatchers.js';
 import {
   mentionedColorOutsideCatalog,
@@ -190,16 +194,25 @@ export function stripFalseVariantUpdateClaims(replyText: string): string {
 export function buildVariantUpdatedMessage(
   language: 'arabic' | 'english',
   color: string,
-  productName?: string
+  productName: string | undefined,
+  cartItems: CartItem[],
+  opts?: CartSummaryOptions
 ): string {
-  if (language === 'arabic') {
-    return productName
-      ? `تمام، حدّثت طلبك — ${productName} باللون ${color}.`
-      : `تمام، حدّثت طلبك للون ${color}.`;
-  }
-  return productName
-    ? `Done — updated your order: ${productName} in ${color}.`
-    : `Done — updated your order to ${color}.`;
+  const lead =
+    language === 'arabic'
+      ? productName
+        ? `تمام، حدّثت طلبك — ${productName} باللون ${color}.`
+        : `تمام، حدّثت طلبك للون ${color}.`
+      : productName
+        ? `Done — updated your order: ${productName} in ${color}.`
+        : `Done — updated your order to ${color}.`;
+  // WHY: add/remove already show priced summary; color change must match (PHASE 2H-2).
+  const summary = formatCartSummary(cartItems, language, opts);
+  const cta =
+    language === 'arabic'
+      ? 'نقدر نضيف منتج ثاني، أو نكمّل الطلب؟'
+      : 'We can add another product, or finish the order.';
+  return `${lead}\n${summary}\n\n${cta}`;
 }
 
 export function buildVariantUnchangedMessage(
