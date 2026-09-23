@@ -958,7 +958,7 @@ const IntegrationsPanel: React.FC<IntegrationsPanelProps> = ({
   return (
     <div className="space-y-8 animate-fade-in pb-10 relative">
       <div>
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-white">الربط والتكامل</h2>
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-white">ربط الصفحات</h2>
         <p className="text-gray-500 dark:text-gray-400 mt-1">قم بربط متجرك وحسابات التواصل الاجتماعي في مكان واحد.</p>
       </div>
 

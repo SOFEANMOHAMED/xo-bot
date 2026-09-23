@@ -26,6 +26,11 @@ import {
   COMMENT_PUBLIC_REPLY_PRESETS,
   COMMENT_DM_AFTER_PRESETS,
 } from '../../constants/commentReplyPresets';
+import {
+  DEFAULT_COMMENT_REACTION,
+  parseCommentReactionOptionId,
+  type CommentReactionOptionId,
+} from '../../constants/commentReactions';
 
 /** Presets tuned for the official XO Bot page (signup / product education). */
 const PLATFORM_PUBLIC_PRESETS = [
@@ -56,6 +61,8 @@ const emptyPostSettings = {
   publicReplyText: '',
   sendDmOnComment: false,
   privateReplyText: '',
+  reactOnCommentEnabled: false,
+  commentReactionType: DEFAULT_COMMENT_REACTION as CommentReactionOptionId,
 };
 
 const postLabel = (p: any) => {
@@ -150,6 +157,8 @@ const AdminOfficialPageComments: React.FC = () => {
               publicReplyText: selected.public_reply_text || '',
               sendDmOnComment: !!selected.send_dm_on_comment,
               privateReplyText: selected.private_reply_text || '',
+              reactOnCommentEnabled: !!selected.react_on_comment_enabled,
+              commentReactionType: parseCommentReactionOptionId(selected.comment_reaction_type),
             });
           }
         }
@@ -249,6 +258,8 @@ const AdminOfficialPageComments: React.FC = () => {
       publicReplyText: p.public_reply_text || '',
       sendDmOnComment: !!p.send_dm_on_comment,
       privateReplyText: p.private_reply_text || '',
+      reactOnCommentEnabled: !!p.react_on_comment_enabled,
+      commentReactionType: parseCommentReactionOptionId(p.comment_reaction_type),
     });
     resetRuleForm();
     loadRulesForPost(p.id);
@@ -283,6 +294,8 @@ const AdminOfficialPageComments: React.FC = () => {
         publicReplyText: postSettings.publicReplyText,
         sendDmOnComment: postSettings.sendDmOnComment,
         privateReplyText: postSettings.privateReplyText,
+        reactOnCommentEnabled: postSettings.reactOnCommentEnabled,
+        commentReactionType: DEFAULT_COMMENT_REACTION,
       });
       showSuccess('تم حفظ إعدادات المنشور');
       await loadData({ preserveSelection: true });
@@ -465,12 +478,20 @@ const AdminOfficialPageComments: React.FC = () => {
                         </p>
                         <span
                           className={`inline-flex mt-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                            selectedPost.comment_reply_enabled
+                            selectedPost.comment_reply_enabled ||
+                            selectedPost.react_on_comment_enabled
                               ? 'bg-emerald-900/50 text-emerald-300'
                               : 'bg-slate-800 text-slate-400'
                           }`}
                         >
-                          {selectedPost.comment_reply_enabled ? 'مفعّل للرد' : 'غير مفعّل'}
+                          {selectedPost.comment_reply_enabled || selectedPost.react_on_comment_enabled
+                            ? [
+                                selectedPost.comment_reply_enabled ? 'رد' : null,
+                                selectedPost.react_on_comment_enabled ? 'تفاعل' : null,
+                              ]
+                                .filter(Boolean)
+                                .join(' + ')
+                            : 'غير مفعّل'}
                         </span>
                       </div>
                     </>
@@ -551,7 +572,14 @@ const AdminOfficialPageComments: React.FC = () => {
                                   {postLabel(p)}
                                 </p>
                                 <p className="text-[10px] text-slate-500 mt-1">
-                                  {p.comment_reply_enabled ? 'مفعّل للرد' : 'غير مفعّل'}
+                                  {p.comment_reply_enabled || p.react_on_comment_enabled
+                          ? [
+                              p.comment_reply_enabled ? 'رد' : null,
+                              p.react_on_comment_enabled ? 'تفاعل' : null,
+                            ]
+                              .filter(Boolean)
+                              .join(' + ')
+                          : 'غير مفعّل'}
                                 </p>
                               </div>
                               {selectedPostId === p.id && (
@@ -595,7 +623,14 @@ const AdminOfficialPageComments: React.FC = () => {
                       <div className="min-w-0 flex-1">
                         <p className="line-clamp-2 text-slate-100">{postLabel(p)}</p>
                         <p className="text-[10px] text-slate-500 mt-0.5">
-                          {p.comment_reply_enabled ? 'مفعّل للرد' : 'غير مفعّل'}
+                          {p.comment_reply_enabled || p.react_on_comment_enabled
+                          ? [
+                              p.comment_reply_enabled ? 'رد' : null,
+                              p.react_on_comment_enabled ? 'تفاعل' : null,
+                            ]
+                              .filter(Boolean)
+                              .join(' + ')
+                          : 'غير مفعّل'}
                         </p>
                       </div>
                     </div>
@@ -628,6 +663,31 @@ const AdminOfficialPageComments: React.FC = () => {
                       className="w-4 h-4 accent-indigo-500"
                     />
                   </label>
+
+                  <div className="space-y-2 p-3 border border-slate-800 rounded-xl bg-slate-950/50">
+                    <label className="flex items-center justify-between gap-3">
+                      <div>
+                        <span className="text-sm font-bold text-slate-200 block">
+                          لايك على التعليق
+                        </span>
+                        <span className="text-[10px] text-slate-500">
+                          الصفحة تعمل إعجاب (👍) على التعليق تلقائياً — الأنواع الأخرى غير مدعومة من فيسبوك عبر API
+                        </span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={postSettings.reactOnCommentEnabled}
+                        onChange={(e) =>
+                          setPostSettings((s) => ({
+                            ...s,
+                            reactOnCommentEnabled: e.target.checked,
+                            commentReactionType: DEFAULT_COMMENT_REACTION,
+                          }))
+                        }
+                        className="w-4 h-4 accent-indigo-500 flex-shrink-0"
+                      />
+                    </label>
+                  </div>
 
                   <div>
                     <label className="block text-xs font-medium text-slate-400 mb-1">

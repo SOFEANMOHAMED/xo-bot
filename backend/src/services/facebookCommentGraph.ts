@@ -1,9 +1,10 @@
 /**
- * Shared Graph API helpers for Facebook comment public + private replies.
+ * Shared Graph API helpers for Facebook comment public + private replies + reactions.
  * Used by merchant and platform (official page) comment automation.
  */
 
 import { logger } from '../utils/logger.js';
+import type { CommentReactionType } from './commentReactions.js';
 
 const GRAPH_VERSION = process.env.FACEBOOK_GRAPH_VERSION || 'v21.0';
 
@@ -82,6 +83,54 @@ export async function sendFacebookCommentReply(
     return true;
   } catch (error) {
     logger.error('Error sending Facebook comment reply', error as Error, { commentId });
+    return false;
+  }
+}
+
+/**
+ * Page like on a comment.
+ *
+ * Meta third-party apps cannot POST `/{comment-id}/reactions` (OAuthException #3:
+ * "Application does not have the capability to make this API call").
+ * Pages must use the Likes edge instead — this publishes a standard Like only.
+ *
+ * @see https://developers.facebook.com/docs/graph-api/reference/object/likes
+ */
+export async function reactToFacebookComment(
+  commentId: string,
+  reactionType: CommentReactionType,
+  accessToken: string
+): Promise<boolean> {
+  try {
+    if (reactionType !== 'LIKE') {
+      logger.warn(
+        'Facebook Page Graph only supports LIKE on comments; using /likes',
+        { commentId, requestedType: reactionType }
+      );
+    }
+
+    const url =
+      `https://graph.facebook.com/${GRAPH_VERSION}/${encodeURIComponent(commentId)}/likes` +
+      `?access_token=${encodeURIComponent(accessToken)}`;
+    const response = await fetch(url, { method: 'POST' });
+    const data = (await response.json()) as {
+      success?: boolean;
+      error?: { message?: string; code?: number };
+    };
+    if (!response.ok || data.error) {
+      logger.error(
+        'Facebook comment like failed',
+        new Error(JSON.stringify(data)),
+        { commentId, reactionType, graphCode: data?.error?.code }
+      );
+      return false;
+    }
+    return data.success !== false;
+  } catch (error) {
+    logger.error('Error liking Facebook comment', error as Error, {
+      commentId,
+      reactionType,
+    });
     return false;
   }
 }

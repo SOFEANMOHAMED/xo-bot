@@ -19,9 +19,14 @@ import {
 } from './socialCommentMention.js';
 import {
   fetchFacebookCommenterProfile,
+  reactToFacebookComment,
   sendFacebookCommentReply,
   sendFacebookPrivateReplyAfterComment,
 } from './facebookCommentGraph.js';
+import {
+  applyCommentReaction,
+  parseCommentReactionType,
+} from './commentReactions.js';
 import { ensurePlatformCommentTables } from './platformSocialPosts.js';
 import type { PlatformFacebookPage } from './platformFacebookPage.js';
 
@@ -32,6 +37,8 @@ type PostReplyRow = {
   public_reply_text: string | null;
   send_dm_on_comment: boolean;
   private_reply_text: string | null;
+  react_on_comment_enabled: boolean;
+  comment_reaction_type: string | null;
 };
 
 type KeywordRuleRow = {
@@ -83,18 +90,23 @@ async function alreadyHandled(
   return r.rows.length > 0;
 }
 
-async function loadEnabledPost(
+async function loadAutomationPost(
   pageId: string,
   externalPostId: string
 ): Promise<PostReplyRow | null> {
   const r = await pool.query(
     `SELECT id, external_post_id, comment_reply_enabled, public_reply_text,
-            send_dm_on_comment, private_reply_text
+            send_dm_on_comment, private_reply_text,
+            COALESCE(react_on_comment_enabled, false) AS react_on_comment_enabled,
+            comment_reaction_type
      FROM platform_social_posts
      WHERE page_id = $1
        AND platform = 'facebook'
        AND external_post_id = $2
-       AND comment_reply_enabled = true
+       AND (
+         comment_reply_enabled = true
+         OR COALESCE(react_on_comment_enabled, false) = true
+       )
      LIMIT 1`,
     [pageId, externalPostId]
   );
@@ -223,7 +235,7 @@ export async function processOfficialPageComment(
     return;
   }
 
-  const post = await loadEnabledPost(page.page_id, String(externalPostId));
+  const post = await loadAutomationPost(page.page_id, String(externalPostId));
   if (!post) {
     logger.debug('Official page comment skipped: post not enabled', {
       pageId: page.page_id,
@@ -245,56 +257,58 @@ export async function processOfficialPageComment(
   if (mention.commenterId) commenterId = mention.commenterId;
   if (mention.commenterName) commenterName = mention.commenterName;
 
-  const match = await findMatchingRule({
-    pageId: page.page_id,
-    accountRef: page.page_id,
-    externalPostId: post.external_post_id,
-    commentText,
-  });
-
   let publicText: string | null = null;
   let privateText: string | null = null;
   let sendPrivate = false;
   let matchedRuleId: string | null = null;
   let matchedKeyword: string | null = null;
 
-  if (match) {
-    matchedRuleId = match.rule.id;
-    matchedKeyword = match.matchedKeyword;
-    if (match.rule.public_reply_enabled) {
+  if (post.comment_reply_enabled) {
+    const match = await findMatchingRule({
+      pageId: page.page_id,
+      accountRef: page.page_id,
+      externalPostId: post.external_post_id,
+      commentText,
+    });
+
+    if (match) {
+      matchedRuleId = match.rule.id;
+      matchedKeyword = match.matchedKeyword;
+      if (match.rule.public_reply_enabled) {
+        publicText = clampSocialText(
+          applyCommentTemplate(
+            match.rule.public_reply_text,
+            post.public_reply_text || DEFAULT_COMMENT_REPLY,
+            { comment: commentText, name: displayName }
+          ).replace(/\{\{keyword\}\}/gi, match.matchedKeyword)
+        );
+      }
+      sendPrivate = match.rule.private_reply_enabled === true;
+      if (sendPrivate) {
+        privateText = clampSocialText(
+          applyCommentTemplate(
+            match.rule.private_reply_text,
+            post.private_reply_text || DEFAULT_DM_AFTER_COMMENT,
+            { comment: commentText, name: displayName }
+          ).replace(/\{\{keyword\}\}/gi, match.matchedKeyword)
+        );
+      }
+    } else {
       publicText = clampSocialText(
-        applyCommentTemplate(
-          match.rule.public_reply_text,
-          post.public_reply_text || DEFAULT_COMMENT_REPLY,
-          { comment: commentText, name: displayName }
-        ).replace(/\{\{keyword\}\}/gi, match.matchedKeyword)
-      );
-    }
-    sendPrivate = match.rule.private_reply_enabled === true;
-    if (sendPrivate) {
-      privateText = clampSocialText(
-        applyCommentTemplate(
-          match.rule.private_reply_text,
-          post.private_reply_text || DEFAULT_DM_AFTER_COMMENT,
-          { comment: commentText, name: displayName }
-        ).replace(/\{\{keyword\}\}/gi, match.matchedKeyword)
-      );
-    }
-  } else {
-    publicText = clampSocialText(
-      applyCommentTemplate(post.public_reply_text, DEFAULT_COMMENT_REPLY, {
-        comment: commentText,
-        name: displayName,
-      })
-    );
-    sendPrivate = post.send_dm_on_comment === true;
-    if (sendPrivate) {
-      privateText = clampSocialText(
-        applyCommentTemplate(post.private_reply_text, DEFAULT_DM_AFTER_COMMENT, {
+        applyCommentTemplate(post.public_reply_text, DEFAULT_COMMENT_REPLY, {
           comment: commentText,
           name: displayName,
         })
       );
+      sendPrivate = post.send_dm_on_comment === true;
+      if (sendPrivate) {
+        privateText = clampSocialText(
+          applyCommentTemplate(post.private_reply_text, DEFAULT_DM_AFTER_COMMENT, {
+            comment: commentText,
+            name: displayName,
+          })
+        );
+      }
     }
   }
 
@@ -308,6 +322,15 @@ export async function processOfficialPageComment(
       page.access_token
     );
   }
+
+  const reaction = await applyCommentReaction({
+    enabled: post.react_on_comment_enabled === true,
+    reactionType: parseCommentReactionType(post.comment_reaction_type),
+    platform: 'facebook',
+    commentId: String(commentId),
+    accessToken: page.access_token,
+    sendReaction: reactToFacebookComment,
+  });
 
   let conversationId: string | null = null;
   let privateReplied = false;
@@ -372,7 +395,18 @@ export async function processOfficialPageComment(
     publicReplied,
     privateReplied,
     conversationId,
-    metadata: { per_post: true, template_dm: true, social_post_id: post.id },
+    metadata: {
+      per_post: true,
+      template_dm: true,
+      social_post_id: post.id,
+      reaction: {
+        enabled: post.react_on_comment_enabled === true,
+        attempted: reaction.attempted,
+        success: reaction.success,
+        type: reaction.reactionType,
+        skipped: reaction.skippedReason || null,
+      },
+    },
   });
 
   logger.info('Official page comment automation finished', {
@@ -381,6 +415,8 @@ export async function processOfficialPageComment(
     externalPostId: post.external_post_id,
     publicReplied,
     privateReplied,
+    reacted: reaction.success,
+    reactionType: reaction.reactionType,
     matchedKeyword,
   });
 }

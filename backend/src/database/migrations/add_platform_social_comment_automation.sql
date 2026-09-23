@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS platform_social_posts (
   public_reply_text TEXT,
   send_dm_on_comment BOOLEAN NOT NULL DEFAULT false,
   private_reply_text TEXT,
+  react_on_comment_enabled BOOLEAN NOT NULL DEFAULT false,
+  comment_reaction_type VARCHAR(20) NOT NULL DEFAULT 'LIKE',
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

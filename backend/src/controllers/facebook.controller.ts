@@ -44,6 +44,7 @@ import {
 import { runCommentAutomation } from '../services/socialCommentAutomation.js';
 import {
   fetchFacebookCommenterProfile,
+  reactToFacebookComment,
   sendFacebookCommentReply,
   sendFacebookPrivateReplyAfterComment,
 } from '../services/facebookCommentGraph.js';
@@ -326,7 +327,8 @@ const processFacebookComment = async (pageId: string, value: any) => {
     commenterName,
     account: row,
     sendPublicReply: sendFacebookCommentReply,
-    sendPrivateReply: sendFacebookPrivateReplyAfterComment
+    sendPrivateReply: sendFacebookPrivateReplyAfterComment,
+    sendReaction: reactToFacebookComment
   });
   } catch (err) {
     logger.error('processFacebookComment uncaught error', err as Error, { pageId });

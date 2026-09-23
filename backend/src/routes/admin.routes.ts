@@ -95,6 +95,11 @@ import {
 } from '../controllers/adminAgency.controller.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { requireAdminGate } from '../middleware/adminGate.js';
+import {
+  listAdminTrackingLinks,
+  createAdminTrackingLink,
+  updateAdminTrackingLink,
+} from '../controllers/acquisition.controller.js';
 
 const router = express.Router();
 
@@ -116,6 +121,9 @@ router.get('/usage', getAdminUsageStats);
 router.get('/charts', getAdminChartData);
 router.get('/affiliates', getAdminAffiliateStats);
 router.get('/acquisition', getAdminAcquisitionStatsHandler);
+router.get('/acquisition/links', listAdminTrackingLinks);
+router.post('/acquisition/links', createAdminTrackingLink);
+router.patch('/acquisition/links/:id', updateAdminTrackingLink);
 
 // Users management
 router.get('/users', getAdminUsers);

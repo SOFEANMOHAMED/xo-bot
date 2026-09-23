@@ -118,3 +118,36 @@ export function buildGoogleAuthQuery(): string {
   const s = q.toString();
   return s ? `?${s}` : '';
 }
+
+export type UtmLinkParams = {
+  baseUrl: string;
+  path?: string;
+  utm_source?: string;
+  utm_medium?: string;
+  utm_campaign?: string;
+  utm_content?: string;
+  utm_term?: string;
+};
+
+/** Build a public tracking URL with standard UTM query params (admin link builder). */
+export function buildUtmTrackingUrl(params: UtmLinkParams): string {
+  const origin = (params.baseUrl || 'https://xo-bot.com').replace(/\/+$/, '');
+  let path = (params.path || '/signup').trim() || '/signup';
+  if (!path.startsWith('/')) path = `/${path}`;
+  path = path.replace(/\/{2,}/g, '/');
+
+  const q = new URLSearchParams();
+  const source = clean(params.utm_source, 64);
+  const medium = clean(params.utm_medium, 64);
+  const campaign = clean(params.utm_campaign, 128);
+  const content = clean(params.utm_content, 128);
+  const term = clean(params.utm_term, 128);
+  if (source) q.set('utm_source', source);
+  if (medium) q.set('utm_medium', medium);
+  if (campaign) q.set('utm_campaign', campaign);
+  if (content) q.set('utm_content', content);
+  if (term) q.set('utm_term', term);
+
+  const qs = q.toString();
+  return qs ? `${origin}${path}?${qs}` : `${origin}${path}`;
+}

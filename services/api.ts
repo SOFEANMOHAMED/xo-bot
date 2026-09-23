@@ -1498,6 +1498,8 @@ class ApiService {
     publicReplyText?: string | null;
     sendDmOnComment?: boolean;
     privateReplyText?: string | null;
+    reactOnCommentEnabled?: boolean;
+    commentReactionType?: string | null;
   }) {
     return this.request<{ message: string; post: any }>(
       '/integrations/social/posts/comment-settings',
@@ -2165,6 +2167,85 @@ class ApiService {
     }>('/admin/acquisition');
   }
 
+  async getAdminAcquisitionLinks() {
+    return this.request<
+      Array<{
+        id: string;
+        code: string;
+        name: string | null;
+        path: string;
+        source: string | null;
+        medium: string | null;
+        campaign: string | null;
+        content: string | null;
+        term: string | null;
+        clickCount: number;
+        signups: number;
+        paid: number;
+        isActive: boolean;
+        createdAt: string;
+        url: string;
+      }>
+    >('/admin/acquisition/links');
+  }
+
+  async createAdminAcquisitionLink(payload: {
+    name?: string;
+    code?: string;
+    path?: string;
+    utm_source?: string;
+    utm_medium?: string;
+    utm_campaign?: string;
+    utm_content?: string;
+    utm_term?: string;
+  }) {
+    return this.request<{
+      id: string;
+      code: string;
+      name: string | null;
+      path: string;
+      source: string | null;
+      medium: string | null;
+      campaign: string | null;
+      content: string | null;
+      term: string | null;
+      clickCount: number;
+      signups: number;
+      paid: number;
+      isActive: boolean;
+      createdAt: string;
+      url: string;
+    }>('/admin/acquisition/links', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateAdminAcquisitionLink(id: string, isActive: boolean) {
+    return this.request<{
+      id: string;
+      code: string;
+      isActive: boolean;
+      url: string;
+    }>(`/admin/acquisition/links/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isActive }),
+    });
+  }
+
+  async resolveAcquisitionLink(code: string) {
+    return this.request<{
+      code: string;
+      path: string;
+      source: string | null;
+      medium: string | null;
+      campaign: string | null;
+      content: string | null;
+      term: string | null;
+      destination: string;
+    }>(`/acquisition/go/${encodeURIComponent(code)}`, { method: 'GET' }, false);
+  }
+
   async getAffiliateStats() {
     return this.request<{
       referralCode: string;
@@ -2646,6 +2727,8 @@ class ApiService {
     publicReplyText?: string | null;
     sendDmOnComment?: boolean;
     privateReplyText?: string | null;
+    reactOnCommentEnabled?: boolean;
+    commentReactionType?: string | null;
   }) {
     return this.request<{ message: string; post: any }>(
       '/admin/facebook/official/posts/comment-settings',

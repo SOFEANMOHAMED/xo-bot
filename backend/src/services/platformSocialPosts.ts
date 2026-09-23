@@ -36,6 +36,8 @@ export async function ensurePlatformCommentTables(): Promise<void> {
       public_reply_text TEXT,
       send_dm_on_comment BOOLEAN NOT NULL DEFAULT false,
       private_reply_text TEXT,
+      react_on_comment_enabled BOOLEAN NOT NULL DEFAULT false,
+      comment_reaction_type VARCHAR(20) NOT NULL DEFAULT 'LIKE',
       metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -107,6 +109,15 @@ export async function ensurePlatformCommentTables(): Promise<void> {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_platform_comment_actions_page
       ON platform_comment_actions(page_id)
+  `);
+
+  await pool.query(`
+    ALTER TABLE platform_social_posts
+      ADD COLUMN IF NOT EXISTS react_on_comment_enabled BOOLEAN NOT NULL DEFAULT false
+  `);
+  await pool.query(`
+    ALTER TABLE platform_social_posts
+      ADD COLUMN IF NOT EXISTS comment_reaction_type VARCHAR(20) NOT NULL DEFAULT 'LIKE'
   `);
 
   commentTablesEnsured = true;

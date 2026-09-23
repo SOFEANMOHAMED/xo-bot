@@ -87,9 +87,20 @@ export const updateOfficialPagePostCommentSettings = async (
       publicReplyText,
       sendDmOnComment,
       privateReplyText,
+      reactOnCommentEnabled,
+      commentReactionType,
     } = req.body || {};
 
     if (!socialPostId) throw createError('socialPostId مطلوب', 400);
+
+    const { normalizeCommentReactionType } = await import('../services/commentReactions.js');
+
+    let reactionTypeParam: string | null = null;
+    if (commentReactionType !== undefined && commentReactionType !== null) {
+      const normalized = normalizeCommentReactionType(commentReactionType);
+      if (!normalized) throw createError('نوع التفاعل غير صالح', 400);
+      reactionTypeParam = normalized;
+    }
 
     const result = await pool.query(
       `UPDATE platform_social_posts SET
@@ -97,10 +108,13 @@ export const updateOfficialPagePostCommentSettings = async (
          public_reply_text = COALESCE($4, public_reply_text),
          send_dm_on_comment = COALESCE($5, send_dm_on_comment),
          private_reply_text = COALESCE($6, private_reply_text),
+         react_on_comment_enabled = COALESCE($7, react_on_comment_enabled),
+         comment_reaction_type = COALESCE($8, comment_reaction_type),
          updated_at = NOW()
        WHERE id = $1 AND page_id = $2
        RETURNING id, external_post_id, comment_reply_enabled, public_reply_text,
-                 send_dm_on_comment, private_reply_text`,
+                 send_dm_on_comment, private_reply_text,
+                 react_on_comment_enabled, comment_reaction_type`,
       [
         socialPostId,
         page.page_id,
@@ -108,6 +122,8 @@ export const updateOfficialPagePostCommentSettings = async (
         publicReplyText !== undefined ? publicReplyText : null,
         typeof sendDmOnComment === 'boolean' ? sendDmOnComment : null,
         privateReplyText !== undefined ? privateReplyText : null,
+        typeof reactOnCommentEnabled === 'boolean' ? reactOnCommentEnabled : null,
+        reactionTypeParam,
       ]
     );
 

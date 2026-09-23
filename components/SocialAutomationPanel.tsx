@@ -16,6 +16,11 @@ import {
   COMMENT_PUBLIC_REPLY_PRESETS,
   COMMENT_DM_AFTER_PRESETS
 } from '../constants/commentReplyPresets';
+import {
+  DEFAULT_COMMENT_REACTION,
+  parseCommentReactionOptionId,
+  type CommentReactionOptionId
+} from '../constants/commentReactions';
 
 type Platform = 'facebook' | 'instagram';
 
@@ -31,13 +36,23 @@ const emptyPostSettings = {
   commentReplyEnabled: false,
   publicReplyText: '',
   sendDmOnComment: false,
-  privateReplyText: ''
+  privateReplyText: '',
+  reactOnCommentEnabled: false,
+  commentReactionType: DEFAULT_COMMENT_REACTION as CommentReactionOptionId
 };
 
 const postLabel = (p: any) => {
   const caption = String(p?.caption || '').trim();
   if (caption) return caption;
   return p?.external_post_id ? `منشور ${p.external_post_id}` : 'منشور بدون نص';
+};
+
+const postAutomationStatus = (p: any) => {
+  const parts = [
+    p?.comment_reply_enabled ? 'رد' : null,
+    p?.react_on_comment_enabled ? 'تفاعل' : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(' + ') : 'غير مفعّل';
 };
 
 const PostThumbnail: React.FC<{ url?: string | null; size?: 'sm' | 'md' }> = ({
@@ -128,7 +143,9 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
               commentReplyEnabled: !!selected.comment_reply_enabled,
               publicReplyText: selected.public_reply_text || '',
               sendDmOnComment: !!selected.send_dm_on_comment,
-              privateReplyText: selected.private_reply_text || ''
+              privateReplyText: selected.private_reply_text || '',
+              reactOnCommentEnabled: !!selected.react_on_comment_enabled,
+              commentReactionType: parseCommentReactionOptionId(selected.comment_reaction_type)
             });
           }
         }
@@ -250,7 +267,9 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
       commentReplyEnabled: !!p.comment_reply_enabled,
       publicReplyText: p.public_reply_text || '',
       sendDmOnComment: !!p.send_dm_on_comment,
-      privateReplyText: p.private_reply_text || ''
+      privateReplyText: p.private_reply_text || '',
+      reactOnCommentEnabled: !!p.react_on_comment_enabled,
+      commentReactionType: parseCommentReactionOptionId(p.comment_reaction_type)
     });
     resetRuleForm();
     loadRulesForPost(p.id);
@@ -286,7 +305,9 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
         commentReplyEnabled: postSettings.commentReplyEnabled,
         publicReplyText: postSettings.publicReplyText,
         sendDmOnComment: postSettings.sendDmOnComment,
-        privateReplyText: postSettings.privateReplyText
+        privateReplyText: postSettings.privateReplyText,
+        reactOnCommentEnabled: postSettings.reactOnCommentEnabled,
+        commentReactionType: DEFAULT_COMMENT_REACTION
       });
       await apiService.linkSocialPostProduct(selectedPostId, linkProductId || null);
       notify('تم حفظ إعدادات المنشور', 'success');
@@ -462,12 +483,13 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
                       <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                         <span
                           className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                            selectedPost.comment_reply_enabled
+                            selectedPost.comment_reply_enabled ||
+                            selectedPost.react_on_comment_enabled
                               ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
                               : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
                           }`}
                         >
-                          {selectedPost.comment_reply_enabled ? 'مفعّل للرد' : 'غير مفعّل'}
+                          {postAutomationStatus(selectedPost)}
                         </span>
                         {selectedPost.linked_product_name && (
                           <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
@@ -568,7 +590,7 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
                                   {postLabel(p)}
                                 </p>
                                 <p className="text-[10px] text-gray-400 mt-1">
-                                  {p.comment_reply_enabled ? 'مفعّل للرد' : 'غير مفعّل'}
+                                  {postAutomationStatus(p)}
                                   {p.linked_product_name ? ` · ${p.linked_product_name}` : ''}
                                 </p>
                               </div>
@@ -622,7 +644,7 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
                         {p.caption || p.external_post_id}
                       </p>
                       <p className="text-[10px] text-gray-400 mt-0.5">
-                        {p.comment_reply_enabled ? 'مفعّل للرد' : 'غير مفعّل'}
+                        {postAutomationStatus(p)}
                         {p.linked_product_name ? ` · ${p.linked_product_name}` : ''}
                       </p>
                     </div>
@@ -655,6 +677,37 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
                     className="w-4 h-4"
                   />
                 </label>
+
+                {platform === 'facebook' ? (
+                  <div className="space-y-2 p-3 border border-gray-100 dark:border-gray-700 rounded-xl">
+                    <label className="flex items-center justify-between gap-3">
+                      <div>
+                        <span className="text-sm font-bold text-gray-800 dark:text-gray-200 block">
+                          لايك على التعليق
+                        </span>
+                        <span className="text-[10px] text-gray-400">
+                          الصفحة تعمل إعجاب (👍) على التعليق تلقائياً — الأنواع الأخرى غير مدعومة من فيسبوك عبر API
+                        </span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={postSettings.reactOnCommentEnabled}
+                        onChange={(e) =>
+                          setPostSettings((s) => ({
+                            ...s,
+                            reactOnCommentEnabled: e.target.checked,
+                            commentReactionType: DEFAULT_COMMENT_REACTION
+                          }))
+                        }
+                        className="w-4 h-4 flex-shrink-0"
+                      />
+                    </label>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-gray-400 px-1">
+                    تفاعل الصفحة مع التعليقات متاح حالياً على فيسبوك فقط.
+                  </p>
+                )}
 
                 <div>
                   <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
