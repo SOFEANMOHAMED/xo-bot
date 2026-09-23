@@ -2,11 +2,11 @@
 
 Supersedes `docs/BASELINE_v1_INVALID.md` (contaminated harness scoring).
 
-- **date (UTC):** 2026-09-23T08:09:18.783Z
-- **commit:** `1598c727f3880f641077d7c3c0c2c0a05192b075`
+- **date (UTC):** 2026-09-23T08:58:41.224Z
+- **commit:** `f487f275d48dcae32d66300b67191961f8d67c31`
 - **runs per scenario:** 3
 - **overall:** 133/133 (100.0%)
-- **LLM budget:** calls=201 promptTok=458032 completionTok=34142 estUsd≈0.08919
+- **LLM budget:** calls=201 promptTok=459279 completionTok=34117 estUsd≈0.089362
 
 ## Per scenario
 
@@ -45,8 +45,8 @@ Supersedes `docs/BASELINE_v1_INVALID.md` (contaminated harness scoring).
 | --- | ---: | ---: | ---: |
 | greeting | 24 | 24 | 100.0% |
 | browse | 33 | 33 | 100.0% |
-| price | 22 | 22 | 100.0% |
-| order | 131 | 131 | 100.0% |
+| price | 25 | 25 | 100.0% |
+| order | 128 | 128 | 100.0% |
 | color | 17 | 17 | 100.0% |
 | other | 8 | 8 | 100.0% |
 | confirm | 8 | 8 | 100.0% |
@@ -65,7 +65,7 @@ Supersedes `docs/BASELINE_v1_INVALID.md` (contaminated harness scoring).
 
 ## Failures by root cause
 
-- **keyword_classifier:** 31
+- **keyword_classifier:** 30
 - **state_focus_drift:** 0
 - **llm_fact_violation:** 0
 - **template_override:** 0
