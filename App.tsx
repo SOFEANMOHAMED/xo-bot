@@ -33,6 +33,7 @@ import AboutPage from './components/AboutPage';
 import WhatsAppBotPage from './components/WhatsAppBotPage';
 import AgencyPartnerPage from './components/AgencyPartnerPage';
 import AgencyRegisterPage from './components/AgencyRegisterPage';
+import TrackedLinkRedirect from './components/TrackedLinkRedirect';
 import NotFoundPage from './components/NotFoundPage';
 import SeoHead from './components/SeoHead';
 
@@ -441,6 +442,7 @@ const App: React.FC = () => {
         <Route path={PATHS.ABOUT} element={<AboutRoute />} />
         <Route path={PATHS.WHATSAPP_BOT} element={<WhatsAppBotRoute />} />
         <Route path={PATHS.BECOME_AGENCY} element={<BecomeAgencyRoute />} />
+        <Route path={`${PATHS.GO}/:code`} element={<TrackedLinkRedirect />} />
         <Route path="/:slug" element={<PublicPageRoute />} />
         <Route path="*" element={<NotFoundRoute />} />
       </Routes>

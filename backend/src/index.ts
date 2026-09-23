@@ -30,6 +30,7 @@ import analyticsRoutes from './routes/analytics.routes.js';
 import whatsappRoutes from './routes/whatsapp.routes.js';
 import pagesRoutes from './routes/pages.routes.js';
 import supportRoutes from './routes/support.routes.js';
+import acquisitionRoutes from './routes/acquisition.routes.js';
 import { autoReenableBot } from './controllers/conversation.controller.js';
 import pool from './database/connection.js';
 import { createRequire } from 'module';
@@ -297,6 +298,7 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/pages', pagesRoutes);
 app.use('/api/support', supportRoutes);
+app.use('/api/acquisition', acquisitionRoutes);
 app.use('/webhooks', webhookRoutes);
 
 // Serve uploaded files (product images for channels). Sensitive dirs stay private.
