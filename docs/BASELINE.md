@@ -2,11 +2,11 @@
 
 Supersedes `docs/BASELINE_v1_INVALID.md` (contaminated harness scoring).
 
-- **date (UTC):** 2026-09-22T13:05:25.752Z
-- **commit:** `669022b9dd926f2bef105c913a41eeff09198ce3`
+- **date (UTC):** 2026-09-23T07:45:40.367Z
+- **commit:** `34715014726173fda7fed600d0ce93dbfa0ec7db`
 - **runs per scenario:** 3
-- **overall:** 130/130 (100.0%)
-- **LLM budget:** calls=200 promptTok=456176 completionTok=33874 estUsd≈0.088751
+- **overall:** 133/133 (100.0%)
+- **LLM budget:** calls=201 promptTok=458092 completionTok=34469 estUsd≈0.089395
 
 ## Per scenario
 
@@ -37,6 +37,7 @@ Supersedes `docs/BASELINE_v1_INVALID.md` (contaminated harness scoring).
 | X_browse_all_phrasing | 8 | 8 | 100.0% | browse-all حابب اعرف المنتجات |
 | X_invented_counts | 8 | 8 | 100.0% | ساعتين — كمية |
 | X_false_black_apology | 3 | 3 | 100.0% | لا اعتذار زائف عن الأسود |
+| X_i4_soft_affirm_catalog | 3 | 3 | 100.0% | I4: طيب في تلفزيونات لا يؤكد طلب قميص بانتظار التأكيد |
 
 ## Per turn type
 
@@ -50,21 +51,21 @@ Supersedes `docs/BASELINE_v1_INVALID.md` (contaminated harness scoring).
 | other | 8 | 8 | 100.0% |
 | confirm | 8 | 8 | 100.0% |
 | cancel | 6 | 6 | 100.0% |
-| qa | 23 | 23 | 100.0% |
+| qa | 26 | 26 | 100.0% |
 
 ## Per invariant
 
 | Invariant | Pass | Total | Rate |
 | --- | ---: | ---: | ---: |
-| I1 | 272 | 272 | 100.0% |
-| I2 | 272 | 272 | 100.0% |
-| I3 | 272 | 272 | 100.0% |
-| I4 | 272 | 272 | 100.0% |
-| I5 | 272 | 272 | 100.0% |
+| I1 | 275 | 275 | 100.0% |
+| I2 | 275 | 275 | 100.0% |
+| I3 | 275 | 275 | 100.0% |
+| I4 | 275 | 275 | 100.0% |
+| I5 | 275 | 275 | 100.0% |
 
 ## Failures by root cause
 
-- **keyword_classifier:** 26
+- **keyword_classifier:** 31
 - **state_focus_drift:** 0
 - **llm_fact_violation:** 0
 - **template_override:** 0

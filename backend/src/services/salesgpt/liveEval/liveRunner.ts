@@ -125,6 +125,41 @@ function emptyState(seedFocus?: string | null): ConversationState {
   };
 }
 
+function awaitingCheckoutState(
+  seed: NonNullable<LiveScenario['seedAwaitingCheckout']>
+): ConversationState {
+  return {
+    message_count: 8,
+    salesgpt_stage_id: '8',
+    awaiting_order_confirmation: true,
+    last_recommended_products: [seed.productId],
+    extracted_entities: {
+      product_id: seed.productId,
+      product_query: seed.productName,
+      quantity: 1,
+      color: seed.color,
+      name: seed.name,
+      phone: seed.phone,
+      address: seed.address,
+    },
+    cart: {
+      items: [
+        {
+          productId: seed.productId,
+          productName: seed.productName,
+          quantity: 1,
+          unitPrice: seed.unitPrice,
+          currency: seed.currency,
+          color: seed.color,
+          addedAt: new Date().toISOString(),
+        },
+      ],
+      status: 'building',
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
+
 function classifyTurnType(turn: LiveTurnScript, userText: string): TurnType {
   if (turn.explicitConfirm) return 'confirm';
   if (turn.explicitRemoveOrCancel) return 'cancel';
@@ -202,8 +237,23 @@ export async function runScenarioOnce(input: {
   paraphraseIndex: number;
 }): Promise<LiveScenarioRunResult> {
   const catalog = resolveScenarioCatalog(input.scenario);
-  let state = emptyState(input.scenario.seedFocusProductId || null);
-  const recent: Message[] = [];
+  const seedAwait = input.scenario.seedAwaitingCheckout;
+  let state = seedAwait
+    ? awaitingCheckoutState(seedAwait)
+    : emptyState(input.scenario.seedFocusProductId || null);
+  const recent: Message[] = seedAwait
+    ? [
+        {
+          role: 'assistant',
+          content:
+            `تمام يا ${seedAwait.name}! طلبك جاهز للتأكيد:\n` +
+            `• ${seedAwait.productName}${seedAwait.color ? ` — ${seedAwait.color}` : ''} — ${seedAwait.unitPrice} ${seedAwait.currency}\n` +
+            `• الهاتف: ${seedAwait.phone}\n` +
+            `• العنوان: ${seedAwait.address}\n\n` +
+            `اكتب «نعم» أو «أكد» لتثبيت الطلب الآن.`,
+        },
+      ]
+    : [];
   const turns: LiveTurnRecord[] = [];
   let aborted = false;
   let abortReason: string | null = null;
@@ -254,7 +304,13 @@ export async function runScenarioOnce(input: {
       nextAction: result.next_action || '',
       intent: result.intent,
     });
-    const orderCreated = Boolean(result.updatedState.last_order);
+    // WHY: processWithSalesGPT does not set last_order — channels persist via ORDER_DATA.
+    // Treat confirm_order / ORDER_DATA / order-placed claims as "order created" for I4.
+    const orderCreated =
+      Boolean(result.updatedState.last_order) ||
+      result.next_action === 'confirm_order' ||
+      /\[ORDER_DATA\]/i.test(result.replyText) ||
+      /تم\s*(استلام|تأكيد)\s*طلبك|رقم\s*الطلب|#ORD-/i.test(result.replyText);
     const pendingQuestion = result.updatedState.pending_bot_question || null;
 
     const invariantFailures = checkInvariants({

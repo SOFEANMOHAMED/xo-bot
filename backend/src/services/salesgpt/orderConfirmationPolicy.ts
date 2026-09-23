@@ -68,8 +68,35 @@ const PRODUCT_INFO_REQUEST_PATTERNS: RegExp[] = [
   /(اعطيني|عطيني|بدي|أريد|ابي|عاوز)\s*(معلومات|تفاصيل|وصف)/i,
   /more\s+(info|information|details|about)/i,
   /tell\s+me\s+more|what\s+(is|are)\s+(it|this|the\s+product)|how\s+does\s+it\s+work/i,
-  /ingredients?|specifications?|description|benefits?/i
+  /ingredients?|specifications?|description|benefits?/i,
+  // Catalog availability («طيب في تلفزيونات»، «عندكم ساعات؟») — NOT order confirmation.
+  /(^|\s)(في|فيه|عندكم|عندكن|عندك|متوفر|يتوفر)\s+\S+/i,
+  /\b(do you (have|sell)|any .+ (available|in stock)|got any)\b/i,
 ];
+
+/**
+ * Soft discourse markers that ALSO open unrelated sentences («طيب في تلفزيونات»).
+ * Only count as affirmation when the entire message is that marker (optional punct).
+ * WHY: production I4 — awaiting + «طيب …» matched AFFIRM token «طيب» and confirmed.
+ */
+const SOFT_AFFIRM_STANDALONE_RAW = [
+  'طيب',
+  'تمام',
+  'ماشي',
+  'موافق',
+  'ممتاز',
+  'صح',
+  'صحيح',
+  'اوكي',
+  'اوكيه',
+  'ok',
+  'okay',
+  'sure',
+  'right',
+  'correct',
+  'agree',
+  'agreed',
+] as const;
 
 const ACTIVE_PRODUCT_DESCRIPTION_MAX_CHARS = 3000;
 
@@ -97,6 +124,20 @@ function containsAnyToken(text: string, tokens: string[]): boolean {
   );
 }
 
+/** Soft affirmations only when the message is JUST that word (optional punctuation). */
+function isStandaloneSoftAffirm(messageText: string): boolean {
+  const normalized = normalizeArabic(messageText);
+  if (!normalized) return false;
+  return SOFT_AFFIRM_STANDALONE_RAW.some((t) => normalizeArabic(t) === normalized);
+}
+
+/** Hard affirm tokens (نعم / yes / أكيد) — may appear with confirm verbs. */
+function containsHardAffirmToken(messageText: string): boolean {
+  const soft = new Set(SOFT_AFFIRM_STANDALONE_RAW.map((t) => normalizeArabic(t)));
+  const hard = AFFIRM_ORDER_TOKENS.filter((t) => !soft.has(normalizeArabic(t)));
+  return containsAnyToken(messageText, hard);
+}
+
 /** True when the customer is requesting product details / explanation. */
 export function isProductInfoRequest(messageText: string): boolean {
   if (!messageText?.trim()) return false;
@@ -113,26 +154,6 @@ export function isProductInfoRequest(messageText: string): boolean {
   return asksQuestion && aboutProduct && !orderVerb;
 }
 
-/**
- * Strip HTML / excess whitespace so long merchant descriptions are safe in prompts.
- */
-export function sanitizeProductDescriptionForPrompt(
-  raw: string,
-  maxChars: number = ACTIVE_PRODUCT_DESCRIPTION_MAX_CHARS
-): string {
-  const cleaned = String(raw || '')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (cleaned.length <= maxChars) return cleaned;
-  return `${cleaned.slice(0, maxChars).trim()}…`;
-}
-
 /** Permissive yes / confirm detection ("اي اكد", "نعم", "ok", …). Bare «لا» is never affirmation. */
 export function customerAffirmsOrder(messageText: string): boolean {
   if (!messageText) return false;
@@ -140,7 +161,10 @@ export function customerAffirmsOrder(messageText: string): boolean {
   if (isProductInfoRequest(messageText)) return false;
   const normalized = normalizeArabic(messageText);
   if (/^(لا|لأ|no|nope|not)$/i.test(normalized)) return false;
-  if (containsAnyToken(messageText, AFFIRM_ORDER_TOKENS)) return true;
+  // Soft discourse («طيب»، «تمام») alone may affirm; with more words they do NOT
+  // (I4: «طيب في تلفزيونات» while awaiting confirmation).
+  if (isStandaloneSoftAffirm(messageText)) return true;
+  if (containsHardAffirmToken(messageText)) return true;
   return CONFIRM_VERB_PATTERNS.some((p) => p.test(messageText));
 }
 
@@ -170,6 +194,27 @@ export function customerCancelsOrder(messageText: string): boolean {
   if (CANCEL_ORDER_PATTERNS.some((p) => p.test(messageText))) return true;
   return containsAnyToken(messageText, CANCEL_ORDER_TOKENS);
 }
+
+/**
+ * Strip HTML / excess whitespace so long merchant descriptions are safe in prompts.
+ */
+export function sanitizeProductDescriptionForPrompt(
+  raw: string,
+  maxChars: number = ACTIVE_PRODUCT_DESCRIPTION_MAX_CHARS
+): string {
+  const cleaned = String(raw || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (cleaned.length <= maxChars) return cleaned;
+  return `${cleaned.slice(0, maxChars).trim()}…`;
+}
+
 export function botReplyAnnouncesConfirmation(text: string): boolean {
   if (!text) return false;
   const normalized = normalizeArabic(text);
@@ -326,6 +371,22 @@ export function isPrematureCheckoutCopy(text: string): boolean {
   }
   if (/\bnull\b/i.test(text)) return true;
   return /جاهز\s*(ة)?\s*(للتاكيد|للتأكيد)|طلبك جاهز|ready to confirm/i.test(text);
+}
+
+/**
+ * Remove false "order placed / ORD-…" claims from free LLM text.
+ * WHY: model sometimes answers a catalog ask AND announces confirmation in one reply (I4).
+ */
+export function stripFalseOrderPlacedClaims(text: string): string {
+  if (!text?.trim()) return text;
+  let out = text
+    .replace(
+      /[^.!?\n]*?(?:تم\s*(?:استلام|تأكيد)\s*طلبك|طلبك\s*بنجاح|رقم\s*الطلب\s*:?\s*#?\s*ORD-[A-Z0-9-]+|order\s+(?:has\s+been\s+)?(?:confirmed|placed|received)|order\s*#?\s*ORD-[A-Z0-9-]+)[^.!?\n]*[.!?]?\s*/gi,
+      ''
+    )
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return out;
 }
 
 const MISSING_FIELD_LABELS_AR: Record<string, string> = {
@@ -553,9 +614,16 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
       aiNextAction === 'send_image' || aiNextAction === 'end_conversation'
         ? aiNextAction
         : 'present_product';
+    let safeText = stripFalseOrderPlacedClaims(responseText);
+    if (!safeText.trim() || botReplyAnnouncesConfirmation(safeText)) {
+      safeText =
+        language === 'arabic'
+          ? 'تمام، هاد سؤال عن المنتج. طلبك لسا بانتظار تأكيدك — اكتب «نعم» أو «أكد» لما تجهز.'
+          : 'Sure — that is a product question. Your order is still awaiting confirmation — reply "yes" or "confirm" when ready.';
+    }
     return {
       nextAction: safeAction,
-      responseText,
+      responseText: safeText,
       awaitingConfirmation: wasAwaitingConfirmation && effectivelyComplete,
       reason: 'product_info_request_blocks_checkout'
     };

@@ -2,7 +2,7 @@
  * Live measurement scenarios — BRAIN_FIX_PLAN §6 (20) + hotfix/extras.
  */
 import type { Product } from '../../../core/types.js';
-import { REAL_TEST_CATALOG, REAL_TEST_MOBILE, REAL_TEST_WATCH } from '../realTestCatalog.js';
+import { REAL_TEST_CATALOG, REAL_TEST_MOBILE, REAL_TEST_SHIRT, REAL_TEST_WATCH } from '../realTestCatalog.js';
 import { LIVE_TEN_PRODUCT_CATALOG } from './liveCatalog.js';
 import type { DecisionClass } from './liveClassify.js';
 
@@ -29,6 +29,20 @@ export type LiveScenario = {
   catalog: 'real3' | 'ten';
   /** Seed focus before turn 0 (optional). */
   seedFocusProductId?: string;
+  /**
+   * Seed a checkout-ready awaiting state (I4 hotfix).
+   * When set, turn 0 runs against this cart+identity instead of emptyState.
+   */
+  seedAwaitingCheckout?: {
+    productId: string;
+    productName: string;
+    unitPrice: number;
+    currency: string;
+    color?: string;
+    name: string;
+    phone: string;
+    address: string;
+  };
   turns: LiveTurnScript[];
   /** Key turns eligible for paraphrase expansion. */
   keyParaphraseTurns?: number[];
@@ -308,6 +322,28 @@ export const EXTRA_SCENARIOS: readonly LiveScenario[] = Object.freeze([
     turns: [
       { text: 'شو تفاصيل الساعة', expectClass: 'qa' },
       { text: 'أنت قلت في أسود', expectClass: 'qa' },
+    ],
+  },
+  {
+    id: 'X_i4_soft_affirm_catalog',
+    title: 'I4: طيب في تلفزيونات لا يؤكد طلب قميص بانتظار التأكيد',
+    catalog: 'real3',
+    seedAwaitingCheckout: {
+      productId: REAL_TEST_SHIRT.id,
+      productName: REAL_TEST_SHIRT.name,
+      unitPrice: REAL_TEST_SHIRT.price,
+      currency: REAL_TEST_SHIRT.currency || 'USD',
+      name: 'سفيان محمد',
+      phone: '09552222',
+      address: 'الحسينية دمشق',
+    },
+    turns: [
+      {
+        text: 'طيب في تلفزيونات',
+        expectClass: 'qa',
+        // Must NOT be treated as explicit confirm — I4 hard-fail if confirm_order fires.
+        explicitConfirm: false,
+      },
     ],
   },
 ]);

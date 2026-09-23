@@ -46,6 +46,7 @@
     "test-collect-info-order": "NODE_ENV=test tsx --import ./src/database/testPreflight.ts --import ./src/services/salesgpt/test_pipeline_hooks.ts src/services/salesgpt/test_collect_info_order.ts",
     "test-browse-not-collect": "NODE_ENV=test tsx --import ./src/database/testPreflight.ts --import ./src/services/salesgpt/test_pipeline_hooks.ts src/services/salesgpt/test_browse_not_collect.ts",
     "test-p0-color-focus": "NODE_ENV=test tsx --import ./src/database/testPreflight.ts --import ./src/services/salesgpt/test_pipeline_hooks.ts src/services/salesgpt/test_p0_color_focus.ts",
+    "test-i4-soft-affirm-catalog": "NODE_ENV=test tsx --import ./src/database/testPreflight.ts --import ./src/services/salesgpt/test_pipeline_hooks.ts src/services/salesgpt/test_i4_soft_affirm_catalog.ts",
     "test-commerce-engine": "NODE_ENV=test tsx --import ./src/database/testPreflight.ts src/services/salesgpt/test_commerce_engine.ts",
     "test-pending-bot-question": "NODE_ENV=test tsx --import ./src/database/testPreflight.ts --import ./src/services/salesgpt/test_pipeline_hooks.ts src/services/salesgpt/test_pending_bot_question.ts",
     "test-connection-guard": "NODE_ENV=test tsx src/database/test_connection_guard.ts",

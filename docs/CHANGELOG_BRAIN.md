@@ -4,6 +4,19 @@
 
 ---
 
+## 2026-09-23 — HOTFIX I4 / «طيب في تلفزيونات» لا يؤكّد الطلب — فرع `main`
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** إنتاج ORD-8009 بلا تأكيد صريح. الجذر: `customerAffirmsOrder` كان يطابق كلمة «طيب» داخل «طيب في تلفزيونات» عبر `containsAnyToken` + `AFFIRM_ORDER_TOKENS` بينما `awaiting_order_confirmation`، فيمرّ `resolveOrderNextAction` → `confirm_order` (`allowedToFinalize`). `isProductInfoRequest` لم يكن يلتقط سؤال توفر الكتالوج («في … / عندكم …»). الإصلاح: soft-affirm standalone فقط؛ أنماط توفر كتالوج؛ `stripFalseOrderPlacedClaims` عند product_info؛ توسيع كشف I4 في liveRunner (confirm_order / ORDER_DATA / ادّعاء رقم طلب — لأن `processWithSalesGPT` لا يضبط `last_order`).
+- **قميص / لون:** `REAL_TEST_SHIRT.colors=[]` → `isDraftLineComplete`/`isCheckoutReady` لا يطلبان لوناً؛ التأكيد كان مشروعاً من ناحية الحقول. لا باگ readiness هنا — الباگ كان المطابقة الناعمة.
+- **لماذا فاتت بوابة 130/130:** التسلسل غير موجود في السيناريوهات؛ وI4 كان يعتمد على `last_order` فقط.
+- **الملفات:** `orderConfirmationPolicy.ts` · `test_i4_soft_affirm_catalog.ts` · `liveScenarios.ts` (`X_i4_soft_affirm_catalog`) · `liveRunner.ts` · `package.json` · هذا السجل · `BASELINE*`.
+- **اختبارات:** `npm run test-i4-soft-affirm-catalog` PASS (ضمن test-all تلقائياً)؛ `LIVE_LLM=1 npm run test-live -- --gate` ×3 → **133/133** كل مرة؛ `X_i4_soft_affirm_catalog` 3/3.
+- **أثر السلوك:** سؤال توفر منتج أثناء انتظار التأكيد لا ينشئ طلباً ولا يدّعي تأكيداً؛ «طيب» وحدها ما زالت تأكيداً.
+- **حدود معروفة:** لا نشر/pm2 في هذا الـ hotfix.
+
+---
+
 ## 2026-09-22 15:55 UTC — DEPLOY prep / إصلاح typecheck قبل النشر — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
