@@ -26,6 +26,61 @@ function hasIdentityValue(value: unknown): boolean {
   return true;
 }
 
+/** Digit run long enough to be a phone (not a short qty / house number alone). */
+const PHONE_TOKEN_RE = /\+?\d[\d\s-]{5,}\d/;
+
+function isPhoneOnlyMessage(msg: string): boolean {
+  return /^\+?\d[\d\s-]{6,}$/.test(msg.trim());
+}
+
+/**
+ * Split a multi-field identity blob into name / phone / address.
+ * WHY: customers often paste «اسم رقم عنوان» in one reply while the bot asked
+ * for a single field; dumping the whole string into that slot re-asks nothing
+ * useful and loses the other fields (PHASE 2H).
+ * Structural only (phone = digit run) — no new keyword lists.
+ */
+export function parseIdentityFieldsFromMessage(messageText: string): IdentitySnapshot {
+  const msg = (messageText || '').trim();
+  if (!msg) return {};
+
+  if (isPhoneOnlyMessage(msg)) {
+    return { phone: msg.replace(/\s+/g, ' ').trim() };
+  }
+
+  const phoneMatch = msg.match(PHONE_TOKEN_RE);
+  if (!phoneMatch || phoneMatch.index === undefined) {
+    // No phone token — caller binds the whole string to the asked slot.
+    return {};
+  }
+
+  const phone = phoneMatch[0].replace(/\s+/g, ' ').trim();
+  const before = msg.slice(0, phoneMatch.index).trim();
+  const after = msg.slice(phoneMatch.index + phoneMatch[0].length).trim();
+
+  const out: IdentitySnapshot = { phone };
+  if (before) out.name = before;
+  if (after) out.address = after;
+  return out;
+}
+
+function mergeIdentitySnapshot(
+  base: IdentitySnapshot,
+  patch: IdentitySnapshot
+): IdentitySnapshot {
+  const next: IdentitySnapshot = { ...base };
+  if (hasIdentityValue(patch.name) && !hasIdentityValue(next.name)) {
+    next.name = patch.name;
+  }
+  if (hasIdentityValue(patch.phone) && !hasIdentityValue(next.phone)) {
+    next.phone = patch.phone;
+  }
+  if (hasIdentityValue(patch.address) && !hasIdentityValue(next.address)) {
+    next.address = patch.address;
+  }
+  return next;
+}
+
 /** First missing identity field in fixed order, or null when all present. */
 export function firstMissingIdentityField(
   info: IdentitySnapshot | null | undefined
@@ -104,9 +159,23 @@ export function ingestIdentityAnswerFromBotAsk(input: {
   const msg = (input.userMessage || '').trim();
   if (!msg) return { ...input.collected };
 
-  const next: IdentitySnapshot = { ...input.collected };
+  let next: IdentitySnapshot = { ...input.collected };
   const bot = input.lastBotReply || '';
   const missing = firstMissingIdentityField(next);
+
+  // Prefer structural multi-field parse whenever a phone token is present —
+  // even if the bot asked for only one field.
+  const parsed = parseIdentityFieldsFromMessage(msg);
+  const hasMulti =
+    (hasIdentityValue(parsed.phone) &&
+      (hasIdentityValue(parsed.name) || hasIdentityValue(parsed.address))) ||
+    (hasIdentityValue(parsed.name) && hasIdentityValue(parsed.address));
+
+  if (hasMulti || (hasIdentityValue(parsed.phone) && !isPhoneOnlyMessage(msg))) {
+    next = mergeIdentitySnapshot(next, parsed);
+    // If parse found phone+address but no name, do not stuff the blob into name.
+    return next;
+  }
 
   const askedName =
     /شو اسمك الكامل|what is your full name|اسمك الكامل/i.test(bot) &&
@@ -118,20 +187,30 @@ export function ingestIdentityAnswerFromBotAsk(input: {
     /شو عنوان التوصيل|what is the delivery address|عنوان التوصيل|عنوانك/i.test(bot) &&
     !hasIdentityValue(next.address);
 
-  if (askedAddress) next.address = msg;
-  else if (askedPhone) next.phone = msg;
-  else if (askedName) next.name = msg;
-  else if (
+  if (askedAddress) {
+    // Never treat a phone-number reply as an address (S10: «09552222» after name).
+    if (!isPhoneOnlyMessage(msg)) next.address = msg;
+    else if (!hasIdentityValue(next.phone)) next.phone = msg;
+  } else if (askedPhone) {
+    if (hasIdentityValue(parsed.phone)) next.phone = parsed.phone;
+    else next.phone = msg;
+  } else if (askedName) {
+    // Single-field name answer (no phone token in message).
+    next.name = msg;
+  } else if (
     missing === 'address' &&
     msg.length >= 4 &&
-    // Never treat a phone-number reply as an address (S10: «09552222» after name).
-    !/^\+?\d[\d\s-]{6,}$/.test(msg) &&
+    !isPhoneOnlyMessage(msg) &&
     !/هاتف|phone/i.test(bot) &&
     !/^(نعم|لا|أيوه|ايوه|أكد|اكد|ok|yes|no)$/i.test(msg)
   ) {
     // Last identity slot — only when the bot is not asking for phone.
     next.address = msg;
+  } else if (missing === 'phone' && isPhoneOnlyMessage(msg)) {
+    next.phone = msg;
   }
+  // WHY no bare `missing === 'name'` fill: browse phrases («بدي الحذاء»، «في موبايلات»)
+  // must not become the customer name unless the bot actually asked for the name.
 
   return next;
 }
