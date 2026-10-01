@@ -1,6 +1,6 @@
 /**
  * Super-admin APIs for official XO Bot page comment automation
- * (per-post replies + keyword rules — platform-scoped).
+ * (per-post replies + keyword rules — platform-scoped Facebook + Instagram).
  */
 
 import { Response, NextFunction } from 'express';
@@ -10,7 +10,8 @@ import pool from '../database/connection.js';
 import {
   ensurePlatformCommentTables,
   listOfficialPageSocialPosts,
-  syncOfficialFacebookPagePosts,
+  syncOfficialPagePosts as syncOfficialSocialPosts,
+  type OfficialSocialPlatform,
 } from '../services/platformSocialPosts.js';
 import { getLinkedPlatformFacebookPage } from '../services/platformFacebookPage.js';
 
@@ -30,26 +31,31 @@ function parseKeywords(raw: unknown): string[] {
     .filter(Boolean);
 }
 
+function parsePlatform(raw: unknown): OfficialSocialPlatform | undefined {
+  if (raw === 'facebook' || raw === 'instagram') return raw;
+  return undefined;
+}
+
 export const syncOfficialPagePosts = async (
-  _req: AuthRequest,
+  req: AuthRequest,
   res: Response,
   next: NextFunction
 ) => {
   try {
     await ensurePlatformCommentTables();
-    const result = await syncOfficialFacebookPagePosts();
+    const platform = parsePlatform(req.body?.platform);
+    const results = await syncOfficialSocialPosts(platform);
     res.json({
       success: true,
       data: {
         message: 'تمت مزامنة منشورات صفحة XO Bot',
-        results: [
-          {
-            synced: result.synced,
-            platform: 'facebook',
-            accountRef: result.pageId,
-            pageName: result.pageName,
-          },
-        ],
+        results: results.map((r) => ({
+          synced: r.synced,
+          platform: r.platform,
+          accountRef: r.accountRef,
+          pageName: r.pageName,
+          igUsername: r.igUsername ?? null,
+        })),
       },
     });
   } catch (e) {
@@ -66,7 +72,9 @@ export const getOfficialPagePosts = async (
     await ensurePlatformCommentTables();
     const limit = req.query.limit ? Number(req.query.limit) : 50;
     const offset = req.query.offset ? Number(req.query.offset) : 0;
-    const posts = await listOfficialPageSocialPosts({ limit, offset });
+    const platform = parsePlatform(req.query.platform) || 'facebook';
+    const posts = await listOfficialPageSocialPosts({ platform, limit, offset });
+    res.setHeader('Cache-Control', 'no-store');
     res.json({ success: true, data: { posts } });
   } catch (e) {
     next(e);
@@ -87,6 +95,7 @@ export const updateOfficialPagePostCommentSettings = async (
       publicReplyText,
       sendDmOnComment,
       privateReplyText,
+      reactOnCommentEnabled,
     } = req.body || {};
 
     if (!socialPostId) throw createError('socialPostId مطلوب', 400);
@@ -97,10 +106,16 @@ export const updateOfficialPagePostCommentSettings = async (
          public_reply_text = COALESCE($4, public_reply_text),
          send_dm_on_comment = COALESCE($5, send_dm_on_comment),
          private_reply_text = COALESCE($6, private_reply_text),
+         react_on_comment_enabled = COALESCE($7, react_on_comment_enabled),
+         comment_reaction_type = CASE
+           WHEN $7::boolean IS TRUE THEN 'LIKE'
+           ELSE comment_reaction_type
+         END,
          updated_at = NOW()
        WHERE id = $1 AND page_id = $2
-       RETURNING id, external_post_id, comment_reply_enabled, public_reply_text,
-                 send_dm_on_comment, private_reply_text`,
+       RETURNING id, external_post_id, platform, comment_reply_enabled, public_reply_text,
+                 send_dm_on_comment, private_reply_text,
+                 react_on_comment_enabled, comment_reaction_type`,
       [
         socialPostId,
         page.page_id,
@@ -108,6 +123,7 @@ export const updateOfficialPagePostCommentSettings = async (
         publicReplyText !== undefined ? publicReplyText : null,
         typeof sendDmOnComment === 'boolean' ? sendDmOnComment : null,
         privateReplyText !== undefined ? privateReplyText : null,
+        typeof reactOnCommentEnabled === 'boolean' ? reactOnCommentEnabled : null,
       ]
     );
 
@@ -130,8 +146,13 @@ export const listOfficialPageKeywordRules = async (
     await ensurePlatformCommentTables();
     const page = await requireLinkedPage();
     const socialPostId = req.query.socialPostId as string | undefined;
+    const platform = parsePlatform(req.query.platform);
     const params: unknown[] = [page.page_id];
     let sql = `SELECT * FROM platform_keyword_rules WHERE page_id = $1 AND scope = 'post'`;
+    if (platform) {
+      params.push(platform);
+      sql += ` AND platform = $${params.length}`;
+    }
     if (socialPostId) {
       params.push(socialPostId);
       sql += ` AND social_post_id = $${params.length}`;
@@ -159,24 +180,32 @@ export const createOfficialPageKeywordRule = async (
     if (!b.socialPostId) throw createError('اختر منشوراً لإضافة قاعدة', 400);
 
     const owned = await pool.query(
-      `SELECT id, external_post_id FROM platform_social_posts
+      `SELECT id, external_post_id, platform, account_ref FROM platform_social_posts
        WHERE id = $1 AND page_id = $2`,
       [b.socialPostId, page.page_id]
     );
     if (owned.rows.length === 0) throw createError('المنشور غير موجود', 404);
+
+    const post = owned.rows[0] as {
+      id: string;
+      external_post_id: string;
+      platform: OfficialSocialPlatform;
+      account_ref: string;
+    };
 
     const result = await pool.query(
       `INSERT INTO platform_keyword_rules (
          page_id, platform, account_ref, scope, social_post_id, external_post_id,
          keywords, match_type, priority, public_reply_enabled, public_reply_text,
          private_reply_enabled, private_reply_text, is_active
-       ) VALUES ($1,'facebook',$2,'post',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       ) VALUES ($1,$2,$3,'post',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        RETURNING *`,
       [
         page.page_id,
-        page.page_id,
-        owned.rows[0].id,
-        owned.rows[0].external_post_id,
+        post.platform,
+        post.account_ref,
+        post.id,
+        post.external_post_id,
         keywords,
         b.matchType || 'contains',
         Number.isFinite(Number(b.priority)) ? Number(b.priority) : 100,

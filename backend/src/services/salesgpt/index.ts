@@ -12,25 +12,10 @@ import {
     type CatalogAwareness
 } from './agent.js';
 import {
-    searchProducts,
-    getTopProducts,
-    getProductById,
-    getProductsOverview,
-    getCatalogMeta
-} from '../../catalog/product-search.js';
-import { resolveProductImageForBot } from '../../catalog/resolve-product-image.js';
-import { formatColorOptionsForDisplay } from '../../catalog/color-options.js';
-import {
     isColorInProductCatalog,
-    resolveOrderColor,
     buildUnavailableColorMessage,
     buildAskColorMessage,
-    type ResolveOrderColorResult
 } from './orderColorPolicy.js';
-import {
-    sanitizeCaptionWhenImageSent,
-    stripFalseImageDeliveryClaims
-} from '../../response/image-caption.js';
 import type {
     Message,
     ConversationState,
@@ -39,9 +24,6 @@ import type {
     MerchantConfig,
     Intent,
     Stage,
-    NextAction,
-    CtaType,
-    RecommendationStrategy
 } from '../../core/types.js';
 import { logger } from '../../utils/logger.js';
 import {
@@ -54,22 +36,36 @@ import {
     buildAwaitConfirmationMessage,
     isProductInfoRequest,
     sanitizeCollectedText,
+    resolveConfirmFinalize,
     AWAIT_CONFIRMATION_ACTION,
     CONFIRM_ORDER_ACTION,
     shouldAppendOrderData
 } from './orderConfirmationPolicy.js';
-import { extractProductKeywords, hasSpecificProductSearchIntent } from './productKeywords.js';
 import {
     violatesNoMatchGrounding,
     buildNoMatchFallbackMessage,
-    isGenuineCatalogNoMatch,
     validateCatalogReplyGrounding,
+    sanitizeUngroundedColorClaims,
 } from './catalogGrounding.js';
-import { isExplicitPhotoRequest } from './turnIntent.js';
+import { detectsWantsAlternativesIntent } from './customerRequest.js';
+import { resolvePhotoDecision } from './turnIntent.js';
+import {
+    isExplicitProductInterestAsk,
+    recordExplicitProductInterest,
+} from '../abandonedCheckout/productInterestAsk.js';
+import { logReplyOwnership } from './replyOwnership.js';
+import {
+    buildCartEmptiedMessage,
+    buildLineNotFoundMessage,
+    buildLineRemovedMessage,
+    buildPendingSelectMessage,
+} from './replyPolicy.js';
 import {
     applySalesGPTStage,
+    conversationStageForDb,
     FRESH_CONVERSATION_STAGE_ID,
 } from './conversationStateSync.js';
+import { matchFaqForTurn } from './faqMatcher.js';
 import {
     ADD_TO_CART_ACTION,
     buildAddedToCartMessage,
@@ -91,25 +87,20 @@ import {
     lockDraftIntoCart,
     messageSignalsBothProducts,
     normalizeCart,
-    removeCartLineById,
     replaceCartItems,
     shouldSyncMultiProductCart,
     updateCartLineById,
 } from './conversationCart.js';
-import { resolveQuantityFromMessage } from './arabicQuantityWords.js';
-import { classifyInterimCancelIntent } from './interimCancelMatchers.js';
-import { matchCartLinesForRemoval } from './cartLineRemoval.js';
+import { resolveQuantity } from './arabicQuantityWords.js';
+import {
+  classifyInterimCancelIntent,
+  isInterimPartialRemoveVerb,
+} from './interimCancelMatchers.js';
+import { matchCartLinesForProductNegation } from './cartLineRemoval.js';
 import {
     applyPendingToState,
     bindPendingBotQuestion,
     clearPendingBotQuestion,
-    detectPendingBotQuestion,
-    isExplicitPhotoRefusal,
-    lastAssistantContent,
-    readPendingFromState,
-    resolveIncomingPendingBotQuestion,
-    resolveIncomingPendingProductId,
-    resolvePendingVariantAnswer,
 } from './pendingBotQuestion.js';
 import {
     buildAskWhichLineMessage,
@@ -121,20 +112,42 @@ import {
     buildGroundedCatalogFallback,
     buildOutOfStockMessage,
     isSellableProduct,
-    resolveFocus,
 } from './resolveFocus.js';
-import { mayReplaceWithOrderTemplate } from './deterministicReplyGate.js';
+import {
+    axisById,
+    buildAskVariantMessage,
+    missingAxes,
+    setLineVariant,
+} from './variantEngine/index.js';
+import {
+    buildInterpreterCandidates,
+    groundInterpreterReply,
+    effectiveNextActionFromTurnFacts,
+    runInterpreterTurn,
+    type InterpreterActionType,
+    type InterpreterApplyResult,
+} from './interpreter/index.js';
+import {
+    applyImageDecision,
+    finalizeOutboundReply,
+    gateConfirmWhenColorInvalid,
+    resolveBareSizeFromMessage,
+    resolveProductOrderColor,
+    resolveTurnFocus,
+    scrubInvalidProductColorState,
+    variantSelectionForProduct,
+} from './pipelineSteps/index.js';
 
 // Re-export confirmation helpers so channel controllers keep a stable import path
 export {
     customerAffirmsOrder,
     customerDeclinesMoreItems,
     customerCancelsOrder,
-    isAffirmativeReply,
     botReplyAsksForConfirmation,
     botReplyAsksToAddMore,
     isProductInfoRequest,
     shouldAppendOrderData,
+    resolveConfirmFinalize,
     AWAIT_CONFIRMATION_ACTION,
     CONFIRM_ORDER_ACTION
 } from './orderConfirmationPolicy.js';
@@ -157,14 +170,6 @@ export interface SalesGPTPipelineResult {
     entities: Record<string, any>;
     missingFields: string[];
     products: Product[];
-    plan: {
-        nextAction: NextAction;
-        oneQuestion: string;
-        ctaType: CtaType;
-        recommendationStrategy: RecommendationStrategy;
-        shouldOfferDiscount: boolean;
-        handoffReason: string;
-    };
     updatedState: ConversationState;
     aiCallsCount: number;
     language: Language;
@@ -172,6 +177,16 @@ export interface SalesGPTPipelineResult {
 }
 
 // ==================== LANGUAGE DETECTION ====================
+
+function ownReply(
+    phase: Parameters<typeof logReplyOwnership>[0]['phase'],
+    reason: string,
+    nextAction: string | undefined,
+    replyText: string
+): string {
+    logReplyOwnership({ phase, reason, nextAction, replyText });
+    return replyText;
+}
 
 const detectLanguage = (text: string): Language => {
     const arabicChars = (text.match(/[\u0600-\u06FF]/g) || []).length;
@@ -214,134 +229,10 @@ export function checkOrderCompleteness(
     return isCheckoutReady(state, product);
 }
 
-// ==================== IMAGE URL CONVERSION ====================
-
-function convertImageUrlForBot(imageUrl: string | null, productId: string): string {
-    if (!imageUrl || imageUrl === 'N/A') return '';
-    const baseUrl = process.env.BACKEND_URL || process.env.BASE_URL || 'https://xo-bot.com';
-    let cacheBuster = '';
-    if (imageUrl && imageUrl.includes('product-image-')) {
-        const match = imageUrl.match(/product-image-(\d+)-/);
-        if (match && match[1]) cacheBuster = `?v=${match[1]}`;
-    }
-    return `${baseUrl}/api/products/${productId}/image${cacheBuster}`;
-}
-
-async function buildColorAwareImageTag(
-    merchantId: string,
-    product: Product,
-    requestedColor: string | null | undefined,
-    messageText: string
-): Promise<string> {
-    const resolved = await resolveProductImageForBot({
-        merchantId,
-        product,
-        requestedColor,
-        messageText
-    });
-    if (resolved.botImageUrl) return resolved.botImageUrl;
-    return convertImageUrlForBot(product.imageUrl || null, product.id);
-}
+// Image URL + color/size helpers live in ./pipelineSteps/
 
 // Re-export for callers that imported from salesgpt
 export { sanitizeCaptionWhenImageSent } from '../../response/image-caption.js';
-
-function collectUserMessageTexts(recentMessages: Message[], currentMessage: string): string[] {
-    const history = recentMessages
-        .filter((m) => m.role === 'user')
-        .map((m) => m.content || '');
-    return [...history, currentMessage];
-}
-
-/**
- * Strict catalog-bound color for the active product.
- * User history wins over AI / stale state (prevents hallucinated overwrite on confirm).
- */
-function resolveProductOrderColor(params: {
-    product: Product | undefined;
-    messageText: string;
-    recentMessages: Message[];
-    conversationState: ConversationState;
-    aiColor?: string | null;
-    language: Language;
-    replyText: string;
-}): {
-    color: string | null;
-    replyText: string;
-    policy: ResolveOrderColorResult | null;
-} {
-    const catalogColors = params.product?.colors;
-    // Colorless SKUs never inherit a draft/AI color from another product.
-    if (!catalogColors?.length) {
-        return { color: null, replyText: params.replyText, policy: null };
-    }
-
-    const userMessages = collectUserMessageTexts(params.recentMessages, params.messageText);
-    const policy = resolveOrderColor({
-        catalogColors,
-        currentMessage: params.messageText,
-        userMessages,
-        storedColor: params.conversationState.extracted_entities?.color,
-        aiColor: params.aiColor ?? null
-    });
-
-    let replyText = params.replyText;
-
-    if (policy.needsClarification && policy.ambiguous.length > 1) {
-        const options = formatColorOptionsForDisplay(
-            policy.ambiguous,
-            params.language === 'english' ? 'english' : 'arabic'
-        );
-        replyText = params.language === 'arabic'
-            ? `تقصد أي خيار لون؟ 🎨\n${options}`
-            : `Which color option did you mean? 🎨\n${options}`;
-        return { color: null, replyText, policy };
-    }
-
-    if (!policy.color && policy.rejectedAiColor) {
-        replyText = buildUnavailableColorMessage(
-            params.language === 'english' ? 'english' : 'arabic',
-            catalogColors,
-            policy.rejectedAiColor
-        );
-        return { color: null, replyText, policy };
-    }
-
-    return { color: policy.color, replyText, policy };
-}
-
-/** Block order finalization when the product requires a catalog color that is missing/invalid. */
-function gateConfirmWhenColorInvalid(params: {
-    nextAction: string;
-    product: Product | undefined;
-    resolvedColor: string | null;
-    language: Language;
-    replyText: string;
-    rejectedColor?: string | null;
-}): { nextAction: string; replyText: string; awaitingConfirmation: boolean } {
-    const catalogColors = params.product?.colors;
-    const needsColor = Array.isArray(catalogColors) && catalogColors.length > 0;
-    const colorOk = !needsColor || isColorInProductCatalog(params.resolvedColor, catalogColors);
-
-    if (params.nextAction !== CONFIRM_ORDER_ACTION || colorOk) {
-        return {
-            nextAction: params.nextAction,
-            replyText: params.replyText,
-            awaitingConfirmation: params.nextAction === AWAIT_CONFIRMATION_ACTION
-        };
-    }
-
-    const lang = params.language === 'english' ? 'english' : 'arabic';
-    const replyText = params.resolvedColor
-        ? buildUnavailableColorMessage(lang, catalogColors!, params.resolvedColor)
-        : buildAskColorMessage(lang, catalogColors!);
-
-    return {
-        nextAction: AWAIT_CONFIRMATION_ACTION,
-        replyText,
-        awaitingConfirmation: true
-    };
-}
 
 // ==================== MAIN SALESGPT PIPELINE ====================
 
@@ -372,151 +263,354 @@ export const processWithSalesGPT = async (
     });
 
     // ==================== STEP 1: Product focus (resolveFocus) ====================
-    let products: Product[] = [];
-    let activeProductId: string | null = null;
-    /** True when a real catalog hit came from the current message / pending / last bot / cart. */
-    let searchMatchedQuery = false;
-
-    const catalogForMention = await getTopProducts(merchantId, 40);
-    const mentionedInMessage = findProductsMentionedInText(messageText, catalogForMention);
-    const hadSpecificSearchIntent = hasSpecificProductSearchIntent({
+    const focus = await resolveTurnFocus({
+        merchantId,
         messageText,
-        mentionedInMessageCount: mentionedInMessage.length,
-        productQuery: conversationState.extracted_entities?.product_query,
+        recentMessages,
+        conversationState,
     });
+    let products = focus.products;
+    let activeProductId = focus.activeProductId;
+    const focusSource = focus.focusSource;
+    const catalogForMention = focus.catalogForMention;
+    const namedInMessage = focus.namedInMessage;
+    const mentionedInMessage = focus.mentionedInMessage;
+    const asksForPhoto = focus.asksForPhoto;
+    const pendingKindEarly = focus.pendingKindEarly;
+    const pendingProductIdEarly = focus.pendingProductIdEarly;
+    const catalogAwareness = focus.catalogAwareness;
+    const noMatchForSpecificQuery = focus.noMatchForSpecificQuery;
+    const catalogOverview = catalogAwareness.overview;
 
-    // Keyword search only expands "named in message" candidates — never overrides resolveFocus order.
-    let namedInMessage = mentionedInMessage;
-    if (namedInMessage.length === 0 && hadSpecificSearchIntent) {
-        const smartKeywords = extractProductKeywords(messageText);
-        const meaningfulKeywords = smartKeywords.filter((k) => k.length >= 3);
-        const sortedKeywords = [...meaningfulKeywords].sort((a, b) => b.length - a.length);
-        for (const keyword of sortedKeywords) {
-            const searchResults = await searchProducts(
-                merchantId,
-                keyword,
-                { inStockOnly: false },
-                5
-            );
-            if (searchResults.length > 0) {
-                namedInMessage = searchResults;
-                console.log('✅ SalesGPT: Found products from keywords:', {
-                    keyword,
-                    count: searchResults.length,
-                    topProduct: searchResults[0]?.name,
-                });
-                break;
+    const interpreterSkip = new Set<InterpreterActionType>();
+    let interpreterApplied: InterpreterApplyResult | null = null;
+    const cartItemsBeforeInterpreter = getCartItems(conversationState).map(ensureLineId);
+    {
+        const built = await buildInterpreterCandidates({
+            merchantId,
+            message: messageText,
+            recentMessages,
+            conversationState,
+            catalog: catalogForMention,
+            focusProductId: activeProductId,
+            mentioned: namedInMessage,
+            pendingKind: pendingKindEarly,
+            pendingProductId: pendingProductIdEarly,
+        });
+        const turn = await runInterpreterTurn({
+            input: built.input,
+            state: conversationState,
+            productsById: built.productsById,
+            storeCurrency: merchantConfig.storeCurrency || merchantConfig.currency,
+        });
+        interpreterApplied = turn.applied;
+        for (const type of turn.skippedOldTypes) interpreterSkip.add(type);
+        if (turn.applied) {
+            conversationState = turn.applied.state;
+
+            // Focus priority:
+            //   1) product named in this customer message
+            //   2) post-linked / seed (already in resolveTurnFocus)
+            //   3) interpreter explicit set_focus / add_product / ask_product_info+productId
+            // Never let a stale inherited interpreter focusProductId yank focus
+            // away from a product the customer just named.
+            const messageProduct = namedInMessage[0] || null;
+            const interpreterWantsFocus =
+                !!turn.applied.focusProductId &&
+                !noMatchForSpecificQuery &&
+                turn.applied.focusExplicitlyChanged;
+
+            if (messageProduct) {
+                products = [messageProduct];
+                activeProductId = messageProduct.id;
+                catalogAwareness.activeProductId = messageProduct.id;
+                conversationState = {
+                    ...conversationState,
+                    extracted_entities: {
+                        ...(conversationState.extracted_entities || {}),
+                        product_id: messageProduct.id,
+                        product_query: messageProduct.name,
+                    },
+                };
+                if (
+                    interpreterWantsFocus &&
+                    turn.applied.focusProductId !== messageProduct.id
+                ) {
+                    logger.info('SalesGPT: message product beats interpreter focus', {
+                        merchantId,
+                        messageProductId: messageProduct.id,
+                        interpreterFocusId: turn.applied.focusProductId,
+                        focusSource,
+                    });
+                }
+            } else if (interpreterWantsFocus && turn.applied.focusProductId) {
+                const focusedProduct = built.productsById.get(turn.applied.focusProductId);
+                if (focusedProduct) {
+                    products = [focusedProduct];
+                    activeProductId = focusedProduct.id;
+                    catalogAwareness.activeProductId = focusedProduct.id;
+                }
             }
         }
     }
 
-    // Photo with no product name → recent user mention counts as named-in-message.
-    const asksForPhoto = isExplicitPhotoRequest(messageText);
-    if (asksForPhoto && namedInMessage.length === 0) {
-        for (let i = recentMessages.length - 1; i >= 0 && i >= recentMessages.length - 8; i--) {
-            const msg = recentMessages[i];
-            if (msg.role !== 'user') continue;
-            const fromHistory = findProductsMentionedInText(msg.content || '', catalogForMention);
-            if (fromHistory.length > 0) {
-                namedInMessage = fromHistory;
-                console.log('📸 SalesGPT: Photo focus from recent user mention:', fromHistory[0].name);
-                break;
+    // Interpreter-owned cancel — short-circuit (old interim cancelled rail skipped).
+    if (interpreterApplied?.applied.includes('cancel_order')) {
+        const reply = ownReply(
+            'early_rail',
+            'interpreter_cancel',
+            'end_conversation',
+            buildOrderCancelledMessage(language)
+        );
+        const updatedCancel: ConversationState = {
+            ...conversationState,
+            last_intent: 'other',
+            language,
+            awaiting_order_confirmation: false,
+            last_interaction: new Date().toISOString(),
+            message_count: (conversationState.message_count || 0) + 1,
+        };
+        applySalesGPTStage(updatedCancel, '9');
+        return {
+            replyText: reply,
+            intent: 'other' as Intent,
+            stage: 'close' as Stage,
+            entities: updatedCancel.extracted_entities || {},
+            missingFields: [],
+            products: [],
+            updatedState: updatedCancel,
+            aiCallsCount: 0,
+            language,
+            next_action: 'end_conversation',
+        };
+    }
+
+    // Interpreter-owned remove_line — templates that used to live in the INTERIM rail.
+    // Product negation («مو الساعة» / «ما بدي الساعة») while also requesting another
+    // product must update the cart and continue — not short-circuit the turn.
+    if (interpreterApplied?.applied.includes('remove_line')) {
+        const negatedBefore = matchCartLinesForProductNegation(
+            messageText,
+            cartItemsBeforeInterpreter
+        );
+        const wasProductNegation =
+            negatedBefore.length > 0 && !isInterimPartialRemoveVerb(messageText);
+        const wantedOtherProduct = [...namedInMessage, ...mentionedInMessage].some(
+            (p) => !negatedBefore.some((n) => n.productId === p.id)
+        );
+        if (wasProductNegation && wantedOtherProduct) {
+            const wanted =
+                namedInMessage.find(
+                    (p) => !negatedBefore.some((n) => n.productId === p.id)
+                ) ||
+                mentionedInMessage.find(
+                    (p) => !negatedBefore.some((n) => n.productId === p.id)
+                );
+            if (wanted) {
+                products = [wanted];
+                activeProductId = wanted.id;
+                catalogAwareness.activeProductId = wanted.id;
+                conversationState = {
+                    ...conversationState,
+                    extracted_entities: {
+                        ...(conversationState.extracted_entities || {}),
+                        product_id: wanted.id,
+                        product_query: wanted.name,
+                    },
+                    last_recommended_products: [
+                        wanted.id,
+                        ...(conversationState.last_recommended_products || []).filter(
+                            (id) => id !== wanted.id
+                        ),
+                    ],
+                };
             }
-        }
-    }
-
-    const lastBotText = lastAssistantContent(recentMessages);
-    const lastBotProducts = findProductsMentionedInText(lastBotText, catalogForMention);
-    const storedPendingEarly = readPendingFromState(conversationState);
-    const pendingKindEarly = resolveIncomingPendingBotQuestion({
-        stored: storedPendingEarly.pending_bot_question,
-        lastBotReply: lastBotText,
-    });
-    const pendingProductIdEarly = resolveIncomingPendingProductId({
-        pending: pendingKindEarly,
-        mentionedProductId: namedInMessage[0]?.id ?? null,
-        lastBotProductId: lastBotProducts[0]?.id ?? null,
-        storedProductId: storedPendingEarly.pending_bot_question_product_id,
-    });
-
-    async function productById(id: string | null | undefined): Promise<Product | null> {
-        if (!id) return null;
-        const fromCatalog = catalogForMention.find((p) => p.id === id);
-        if (fromCatalog) return fromCatalog;
-        return getProductById(merchantId, id);
-    }
-
-    const pendingProduct = await productById(pendingProductIdEarly);
-    const cartLinesEarly = getCartItems(conversationState);
-    const cartFocusId =
-        conversationState.last_recommended_products?.[0] ||
-        cartLinesEarly[0]?.productId ||
-        null;
-    const cartFocusProduct = await productById(cartFocusId);
-    // Ad-seed is the draft product_id — resolveFocus uses it only as last resort.
-    const seededProduct = await productById(
-        conversationState.extracted_entities?.product_id || null
-    );
-
-    const focused = resolveFocus({
-        namedInMessage,
-        pendingProduct,
-        lastBotProduct: lastBotProducts[0] || null,
-        cartFocusProduct,
-        seededProduct,
-    });
-
-    if (focused.product) {
-        products = [focused.product];
-        activeProductId = focused.product.id;
-        // Seed alone is context, not proof the current message matched catalog.
-        if (focused.source !== 'seed' || namedInMessage.length > 0) {
-            searchMatchedQuery = true;
-        }
-        if (focused.source === 'message') {
-            console.log('🎯 SalesGPT: Products mentioned in message:', {
-                names: namedInMessage.map((p) => p.name),
-            });
-        } else if (focused.source === 'seed') {
-            console.log('🎯 SalesGPT: Using acquisition-seeded product:', focused.product.name);
+            // Fall through — cart already updated by interpreter apply.
         } else {
-            console.log('📦 SalesGPT: Focus from', focused.source, focused.product.name);
+        const afterIds = new Set(
+            getCartItems(conversationState).map((row) => ensureLineId(row).lineId)
+        );
+        const removed = cartItemsBeforeInterpreter.filter(
+            (row) => row.lineId && !afterIds.has(row.lineId)
+        );
+        const remaining = getCartItems(conversationState).map(ensureLineId);
+        if (remaining.length === 0) {
+            const reply = ownReply(
+                'early_rail',
+                'interpreter_cart_empty',
+                'present_product',
+                buildCartEmptiedMessage(language)
+            );
+            const emptied = clearCart(conversationState);
+            const updatedEmpty: ConversationState = {
+                ...emptied,
+                language,
+                awaiting_order_confirmation: false,
+                last_interaction: new Date().toISOString(),
+                message_count: (conversationState.message_count || 0) + 1,
+            };
+            applySalesGPTStage(updatedEmpty, '4');
+            return {
+                replyText: reply,
+                intent: 'browse' as Intent,
+                stage: 'offer' as Stage,
+                entities: updatedEmpty.extracted_entities || {},
+                missingFields: [],
+                products: [],
+                updatedState: updatedEmpty,
+                aiCallsCount: 0,
+                language,
+                next_action: 'present_product',
+            };
+        }
+        const cart = normalizeCart(
+            { items: remaining, status: 'building' },
+            { storeCurrency: merchantConfig.storeCurrency || merchantConfig.currency }
+        );
+        const summary = formatCartSummary(cart.items, language, {
+            shippingPolicy: merchantConfig.shippingPolicy,
+        });
+        const removedNames = removed.map((m) => m.productName).join('، ') || (
+            language === 'arabic' ? 'المنتج' : 'the item'
+        );
+        const reply = ownReply(
+            'early_rail',
+            'interpreter_cart_remove',
+            ADD_TO_CART_ACTION,
+            buildLineRemovedMessage({
+                language,
+                removedNames,
+                cartSummary: summary,
+            })
+        );
+        const updatedPartial: ConversationState = {
+            ...conversationState,
+            cart,
+            last_recommended_products: cart.items.map((i) => i.productId),
+            language,
+            awaiting_order_confirmation: false,
+            last_interaction: new Date().toISOString(),
+            message_count: (conversationState.message_count || 0) + 1,
+        };
+        applySalesGPTStage(updatedPartial, '4');
+        return {
+            replyText: reply,
+            intent: 'order' as Intent,
+            stage: 'offer' as Stage,
+            entities: updatedPartial.extracted_entities || {},
+            missingFields: [],
+            products: [],
+            updatedState: updatedPartial,
+            aiCallsCount: 0,
+            language,
+            next_action: ADD_TO_CART_ACTION,
+        };
         }
     }
 
-    const noMatchForSpecificQuery = isGenuineCatalogNoMatch(
-        hadSpecificSearchIntent,
-        searchMatchedQuery
-    );
-
-    if (noMatchForSpecificQuery) {
-        products = [];
-        activeProductId = null;
-    } else if (products.length === 0) {
-        // Cold-start browse only — never a sticky seed substitute.
-        products =
-            catalogForMention.length > 0
-                ? catalogForMention.slice(0, 5)
-                : await getTopProducts(merchantId, 5);
-        if (products[0]) activeProductId = products[0].id;
+    // Partial-remove with no matching cart line (whitelist ask_clarification sentinel).
+    if (
+        interpreterApplied?.applied.includes('ask_clarification') &&
+        interpreterApplied.clarification &&
+        classifyInterimCancelIntent(messageText) === 'partial_remove'
+    ) {
+        const reply = ownReply(
+            'early_rail',
+            'interpreter_line_not_found',
+            'present_product',
+            buildLineNotFoundMessage(language)
+        );
+        const updatedMiss: ConversationState = {
+            ...conversationState,
+            language,
+            last_interaction: new Date().toISOString(),
+            message_count: (conversationState.message_count || 0) + 1,
+        };
+        return {
+            replyText: reply,
+            intent: 'order' as Intent,
+            stage: 'close' as Stage,
+            entities: updatedMiss.extracted_entities || {},
+            missingFields: [],
+            products: [],
+            updatedState: updatedMiss,
+            aiCallsCount: 0,
+            language,
+            next_action: 'present_product',
+        };
     }
 
-    // Always attach compact catalog awareness for SaaS stores.
-    const [catalogOverview, catalogMeta] = await Promise.all([
-        getProductsOverview(merchantId, 30),
-        getCatalogMeta(merchantId)
-    ]);
-    const catalogAwareness: CatalogAwareness = {
-        overview: catalogOverview,
-        meta: catalogMeta,
-        activeProductId,
-        isExploring: true,
-        hadSpecificSearchIntent,
-        searchMatchedQuery,
-        noMatchForSpecificQuery,
-    };
+    // Interpreter-owned pending color/size select — priced summary (old pending rail).
+    if (
+        interpreterApplied?.applied.includes('select_color') ||
+        interpreterApplied?.applied.includes('select_size')
+    ) {
+        const focusId =
+            interpreterApplied.focusProductId ||
+            conversationState.extracted_entities?.product_id ||
+            products[0]?.id ||
+            null;
+        const pendingProduct =
+            (focusId
+                ? catalogForMention.find((p) => p.id === focusId) ||
+                  products.find((p) => p.id === focusId)
+                : null) || null;
+        if (pendingProduct && isSellableProduct(pendingProduct)) {
+            const cart = normalizeCart(conversationState.cart, {
+                storeCurrency: merchantConfig.storeCurrency || merchantConfig.currency,
+            });
+            const summary = formatCartSummary(cart.items, language, {
+                shippingPolicy: merchantConfig.shippingPolicy,
+            });
+            const e = conversationState.extracted_entities || {};
+            const reply = ownReply(
+                'early_rail',
+                'interpreter_pending_select',
+                'present_product',
+                buildPendingSelectMessage({
+                    language,
+                    productName: pendingProduct.name,
+                    color: e.color,
+                    size: e.size,
+                    cartSummary: summary,
+                })
+            );
+            const updatedSelect: ConversationState = applyPendingToState(
+                {
+                    ...conversationState,
+                    cart,
+                    language,
+                    last_recommended_products: [
+                        pendingProduct.id,
+                        ...cart.items
+                            .map((i) => i.productId)
+                            .filter((id) => id !== pendingProduct.id),
+                    ],
+                    awaiting_order_confirmation: false,
+                    last_interaction: new Date().toISOString(),
+                    message_count: (conversationState.message_count || 0) + 1,
+                },
+                clearPendingBotQuestion()
+            );
+            applySalesGPTStage(updatedSelect, '7');
+            return {
+                replyText: reply,
+                intent: 'order' as Intent,
+                stage: 'close' as Stage,
+                entities: updatedSelect.extracted_entities || {},
+                missingFields: [],
+                products: [pendingProduct],
+                updatedState: updatedSelect,
+                aiCallsCount: 0,
+                language,
+                next_action: 'present_product',
+            };
+        }
+    }
 
     // ==================== STEP 2: Create & Run SalesGPT Agent ====================
+    // Drop stale colors from prior experiments that are not on this product's catalog.
+    conversationState = scrubInvalidProductColorState(conversationState, products[0]);
 
     const agentConfig: SalesGPTConfig = {
         merchantId,
@@ -552,9 +646,9 @@ export const processWithSalesGPT = async (
         agent.restoreState([], { ...conversationState, extracted_entities: {} });
         agent.injectContextNote(orderContext);
 
-        console.log('🔄 SalesGPT: Returning customer after confirmed order', {
+        logger.info('SalesGPT: Returning customer after confirmed order', {
             orderId: lastOrder.orderId,
-            productName: lastOrder.productName
+            productName: lastOrder.productName,
         });
     } else {
         agent.restoreState(recentMessages, conversationState);
@@ -562,7 +656,23 @@ export const processWithSalesGPT = async (
 
     agent.humanStep(messageText);
 
-    let salesResult: SalesGPTResult;
+    let salesResult: SalesGPTResult | undefined;
+    const skipAgent = Boolean(interpreterApplied?.handoffHuman);
+    if (skipAgent) {
+        salesResult = {
+            responseText:
+                language === 'arabic'
+                    ? 'حاضر، رح أحولك لموظف.\n<ESCALATE>'
+                    : 'Sure — I will connect you with a teammate.\n<ESCALATE>',
+            stageId: '9',
+            stageName: 'Close',
+            intent: 'complaint',
+            stage: 'handoff',
+            collectedInfo: {},
+            nextAction: 'end_conversation',
+            aiCallsCount: 0,
+        };
+    }
 
     // ==================== DETERMINISTIC CONFIRMATION FAST-PATH ====================
     // Completeness is read from state *before* this turn — providing the last field
@@ -574,13 +684,18 @@ export const processWithSalesGPT = async (
         lastBotMessageAsksForConfirmation(recentMessages);
     const botAskedConfirm = lastBotMessageAsksForConfirmation(recentMessages);
     const botAskedAddMore = lastBotMessageAsksToAddMore(recentMessages);
-    const userAffirms = customerAffirmsOrder(messageText);
-    const userDeclinesMore = customerDeclinesMoreItems(messageText);
+    const userAffirms = Boolean(interpreterApplied?.affirmsOrder)
+        ? true
+        : customerAffirmsOrder(messageText);
+    const userDeclinesMore = Boolean(interpreterApplied?.deniesOrder)
+        ? true
+        : customerDeclinesMoreItems(messageText);
     const completeness = checkOrderCompleteness(conversationState, products[0]);
 
     // Affirmative confirm OR decline of upsell/"anything else?" while order is complete → finalize.
     // Never finalize when the customer is asking for product details (e.g. "تمام، معلومات أكثر؟").
-    const askingProductInfo = isProductInfoRequest(messageText);
+    const askingProductInfo =
+        interpreterSkip.has('ask_product_info') || isProductInfoRequest(messageText);
     const addAnotherIntent = detectsAddAnotherIntent(messageText) && !askingProductInfo;
 
     const catalogColorsForConfirm = products[0]?.colors;
@@ -600,8 +715,15 @@ export const processWithSalesGPT = async (
         !catalogColorsForConfirm?.length ||
         isColorInProductCatalog(colorForFastPath, catalogColorsForConfirm);
 
-    // ——— Variant correction BEFORE pending (positive color wins over negation) ———
-    {
+    // ——— Variant correction BEFORE pending (any axis via variantEngine) ———
+    // Skip when interpreter already applied select_color / select_size.
+    // correct_variant alone does not skip: if the LLM only filled color on a
+    // size correction, the engine can still write size onto the cart line.
+    if (
+        !interpreterSkip.has('ask_product_info') &&
+        !interpreterSkip.has('select_color') &&
+        !interpreterSkip.has('select_size')
+    ) {
         const liveItems = getCartItems(conversationState).map(ensureLineId);
         const focusId =
             conversationState.extracted_entities?.product_id ||
@@ -630,64 +752,103 @@ export const processWithSalesGPT = async (
         });
 
         if (variant.kind === 'apply') {
-            const nextItems = updateCartLineById(liveItems, variant.lineId, {
-                color: variant.color,
-            }).map(ensureLineId);
+            let nextItems = liveItems.map((row) =>
+                row.lineId === variant.lineId
+                    ? setLineVariant(row, variant.axisId, variant.value)
+                    : row
+            );
+            if (variant.axisId === 'color') {
+                nextItems = updateCartLineById(nextItems, variant.lineId, {
+                    color: variant.value,
+                }).map(ensureLineId);
+            } else if (variant.axisId === 'size') {
+                nextItems = updateCartLineById(nextItems, variant.lineId, {
+                    size: variant.value,
+                }).map(ensureLineId);
+            } else {
+                nextItems = nextItems.map(ensureLineId);
+            }
             const cart = normalizeCart(
                 { items: nextItems, status: 'building' },
                 { storeCurrency: merchantConfig.storeCurrency || merchantConfig.currency }
             );
             const reply = buildVariantUpdatedMessage(
                 language === 'english' ? 'english' : 'arabic',
-                variant.color,
+                variant.value,
                 variant.productName,
                 cart.items,
-                { shippingPolicy: merchantConfig.shippingPolicy }
+                {
+                    shippingPolicy: merchantConfig.shippingPolicy,
+                    axisId: variant.axisId,
+                }
             );
+            const entityPatch: Record<string, string> = {
+                product_id: variant.productId,
+            };
+            if (variant.axisId === 'color') entityPatch.color = variant.value;
+            if (variant.axisId === 'size') entityPatch.size = variant.value;
+            const wasAwaiting = Boolean(conversationState.awaiting_order_confirmation);
             const updatedVariant: ConversationState = applyPendingToState(
                 {
                     ...conversationState,
                     cart,
                     extracted_entities: {
                         ...(conversationState.extracted_entities || {}),
-                        product_id: variant.productId,
-                        color: variant.color,
+                        ...entityPatch,
                     },
                     language,
-                    awaiting_order_confirmation: false,
+                    awaiting_order_confirmation: wasAwaiting,
                     last_interaction: new Date().toISOString(),
                     message_count: (conversationState.message_count || 0) + 1,
                 },
                 clearPendingBotQuestion()
             );
-            applySalesGPTStage(updatedVariant, '7');
+            // If checkout was ready, keep confirmation flow with refreshed summary.
+            const stillReady = checkOrderCompleteness(
+                updatedVariant,
+                productPool.find((p) => p.id === variant.productId) || products[0]
+            ).complete;
+            let finalReply = reply;
+            let nextActionOut: string = 'collect_info';
+            if (wasAwaiting && stillReady) {
+                const e = updatedVariant.extracted_entities || {};
+                finalReply = buildAwaitConfirmationMessage(language, {
+                    name: e.name,
+                    phone: e.phone,
+                    address: e.address,
+                    product_name: variant.productName || e.product_query,
+                    color: cart.items[0]?.color || e.color,
+                    size: cart.items[0]?.size || e.size,
+                    quantity: cart.items[0]?.quantity || e.quantity,
+                }, formatCartSummary(cart.items, language, {
+                    shippingPolicy: merchantConfig.shippingPolicy,
+                }));
+                updatedVariant.awaiting_order_confirmation = true;
+                nextActionOut = AWAIT_CONFIRMATION_ACTION;
+                applySalesGPTStage(updatedVariant, '8');
+            } else {
+                applySalesGPTStage(updatedVariant, '7');
+            }
             return {
-                replyText: reply,
+                replyText: finalReply,
                 intent: 'order' as Intent,
                 stage: 'close' as Stage,
                 entities: updatedVariant.extracted_entities || {},
                 missingFields: [],
                 products: productPool.filter((p) => p.id === variant.productId),
-                plan: {
-                    nextAction: 'recommend_products' as NextAction,
-                    oneQuestion: reply,
-                    ctaType: 'choose' as CtaType,
-                    recommendationStrategy: null as RecommendationStrategy,
-                    shouldOfferDiscount: false,
-                    handoffReason: '',
-                },
                 updatedState: updatedVariant,
                 aiCallsCount: 0,
                 language,
-                next_action: 'collect_info',
+                next_action: nextActionOut,
             };
         }
 
         if (variant.kind === 'unchanged') {
             const reply = buildVariantUnchangedMessage(
                 language === 'english' ? 'english' : 'arabic',
-                variant.color,
-                variant.productName
+                variant.value,
+                variant.productName,
+                variant.axisId
             );
             const updatedSame: ConversationState = applyPendingToState(
                 {
@@ -705,14 +866,6 @@ export const processWithSalesGPT = async (
                 entities: updatedSame.extracted_entities || {},
                 missingFields: [],
                 products: productPool.filter((p) => p.id === variant.productId),
-                plan: {
-                    nextAction: 'recommend_products' as NextAction,
-                    oneQuestion: reply,
-                    ctaType: 'choose' as CtaType,
-                    recommendationStrategy: null as RecommendationStrategy,
-                    shouldOfferDiscount: false,
-                    handoffReason: '',
-                },
                 updatedState: updatedSame,
                 aiCallsCount: 0,
                 language,
@@ -742,14 +895,6 @@ export const processWithSalesGPT = async (
                 entities: updatedBad.extracted_entities || {},
                 missingFields: [],
                 products: productPool.filter((p) => p.id === variant.productId),
-                plan: {
-                    nextAction: 'recommend_products' as NextAction,
-                    oneQuestion: reply,
-                    ctaType: 'choose' as CtaType,
-                    recommendationStrategy: null as RecommendationStrategy,
-                    shouldOfferDiscount: false,
-                    handoffReason: '',
-                },
                 updatedState: updatedBad,
                 aiCallsCount: 0,
                 language,
@@ -760,7 +905,8 @@ export const processWithSalesGPT = async (
         if (variant.kind === 'ask_which') {
             const reply = buildAskWhichLineMessage(
                 language === 'english' ? 'english' : 'arabic',
-                variant.productName
+                variant.productName,
+                variant.axisId
             );
             const updatedAsk: ConversationState = {
                 ...conversationState,
@@ -775,346 +921,10 @@ export const processWithSalesGPT = async (
                 entities: updatedAsk.extracted_entities || {},
                 missingFields: [],
                 products: productPool.filter((p) => p.id === variant.productId),
-                plan: {
-                    nextAction: 'recommend_products' as NextAction,
-                    oneQuestion: reply,
-                    ctaType: 'choose' as CtaType,
-                    recommendationStrategy: null as RecommendationStrategy,
-                    shouldOfferDiscount: false,
-                    handoffReason: '',
-                },
                 updatedState: updatedAsk,
                 aiCallsCount: 0,
                 language,
                 next_action: 'collect_info',
-            };
-        }
-    }
-
-    // ——— Pending color/size answer (before cancel / agent / image) ———
-    {
-        const storedPending = readPendingFromState(conversationState);
-        const lastBot = lastAssistantContent(recentMessages);
-        const pendingKind = resolveIncomingPendingBotQuestion({
-            stored: storedPending.pending_bot_question,
-            lastBotReply: lastBot,
-        });
-        const pendingProductId = resolveIncomingPendingProductId({
-            pending: pendingKind,
-            mentionedProductId: mentionedInMessage[0]?.id ?? null,
-            lastBotProductId: products[0]?.id ?? null,
-            storedProductId: storedPending.pending_bot_question_product_id,
-        });
-        const pendingProduct =
-            (pendingProductId
-                ? catalogForMention.find((p) => p.id === pendingProductId) ||
-                  products.find((p) => p.id === pendingProductId)
-                : null) || null;
-
-        if (pendingKind && pendingProduct && isSellableProduct(pendingProduct)) {
-            const resolved = resolvePendingVariantAnswer({
-                pending: pendingKind,
-                userMessage: messageText,
-                product: pendingProduct,
-            });
-
-            if (resolved.kind === 'select') {
-                let stateForSelect: ConversationState = {
-                    ...conversationState,
-                    extracted_entities: {
-                        ...(conversationState.extracted_entities || {}),
-                        product_id: pendingProduct.id,
-                        product_query: pendingProduct.name,
-                        color: resolved.color || conversationState.extracted_entities?.color,
-                        size: resolved.size || conversationState.extracted_entities?.size,
-                    },
-                };
-                // Ensure a cart line exists, then write the chosen variant onto THAT product only.
-                stateForSelect = fillCartVariantsFromDraft(stateForSelect, pendingProduct);
-                if (getCartItems(stateForSelect).length === 0) {
-                    const locked = lockDraftIntoCart(
-                        {
-                            ...stateForSelect,
-                            extracted_entities: {
-                                ...(stateForSelect.extracted_entities || {}),
-                                product_id: pendingProduct.id,
-                                product_query: pendingProduct.name,
-                                color: resolved.color,
-                                size: resolved.size,
-                            },
-                        },
-                        pendingProduct,
-                        merchantConfig.storeCurrency || merchantConfig.currency
-                    );
-                    if (locked.locked) stateForSelect = locked.state;
-                }
-                let items = getCartItems(stateForSelect).map(ensureLineId);
-                const targetIdx = items.findIndex((row) => row.productId === pendingProduct.id);
-                if (targetIdx >= 0) {
-                    const lineId = items[targetIdx].lineId!;
-                    items = updateCartLineById(items, lineId, {
-                        color: resolved.color ?? items[targetIdx].color,
-                        size: resolved.size ?? items[targetIdx].size,
-                    }).map(ensureLineId);
-                }
-                const cart = normalizeCart(
-                    { items, status: 'building' },
-                    { storeCurrency: merchantConfig.storeCurrency || merchantConfig.currency }
-                );
-                const summary = formatCartSummary(cart.items, language, {
-                    shippingPolicy: merchantConfig.shippingPolicy,
-                });
-                const lead =
-                    language === 'arabic'
-                        ? `تمام، ثبتّ${resolved.color ? ` اللون ${resolved.color}` : ''}${resolved.size ? ` المقاس ${resolved.size}` : ''} لـ ${pendingProduct.name}.`
-                        : `Got it — recorded${resolved.color ? ` ${resolved.color}` : ''}${resolved.size ? ` size ${resolved.size}` : ''} for ${pendingProduct.name}.`;
-                const cta =
-                    language === 'arabic'
-                        ? 'نقدر نضيف منتج ثاني، أو نكمّل الطلب؟'
-                        : 'We can add another product, or finish the order.';
-                const reply = `${lead}\n${summary}\n\n${cta}`;
-                const updatedSelect: ConversationState = applyPendingToState(
-                    {
-                        ...stateForSelect,
-                        cart,
-                        language,
-                        last_recommended_products: [
-                            pendingProduct.id,
-                            ...cart.items
-                                .map((i) => i.productId)
-                                .filter((id) => id !== pendingProduct.id),
-                        ],
-                        awaiting_order_confirmation: false,
-                        last_interaction: new Date().toISOString(),
-                        message_count: (conversationState.message_count || 0) + 1,
-                    },
-                    clearPendingBotQuestion()
-                );
-                applySalesGPTStage(updatedSelect, '7');
-                return {
-                    replyText: reply,
-                    intent: 'order' as Intent,
-                    stage: 'close' as Stage,
-                    entities: updatedSelect.extracted_entities || {},
-                    missingFields: [],
-                    products: [pendingProduct],
-                    plan: {
-                        nextAction: 'recommend_products' as NextAction,
-                        oneQuestion: reply,
-                        ctaType: 'choose' as CtaType,
-                        recommendationStrategy: null as RecommendationStrategy,
-                        shouldOfferDiscount: false,
-                        handoffReason: '',
-                    },
-                    updatedState: updatedSelect,
-                    aiCallsCount: 0,
-                    language,
-                    next_action: 'present_product',
-                };
-            }
-
-            if (resolved.kind === 'unavailable') {
-                const reply = buildUnavailableColorMessage(
-                    language === 'english' ? 'english' : 'arabic',
-                    pendingProduct.colors || [],
-                    resolved.rejected
-                );
-                const updatedUnavail: ConversationState = applyPendingToState(
-                    {
-                        ...conversationState,
-                        language,
-                        last_interaction: new Date().toISOString(),
-                        message_count: (conversationState.message_count || 0) + 1,
-                    },
-                    clearPendingBotQuestion()
-                );
-                return {
-                    replyText: reply,
-                    intent: 'product_query' as Intent,
-                    stage: 'offer' as Stage,
-                    entities: updatedUnavail.extracted_entities || {},
-                    missingFields: [],
-                    products: [pendingProduct],
-                    plan: {
-                        nextAction: 'recommend_products' as NextAction,
-                        oneQuestion: reply,
-                        ctaType: 'choose' as CtaType,
-                        recommendationStrategy: null as RecommendationStrategy,
-                        shouldOfferDiscount: false,
-                        handoffReason: '',
-                    },
-                    updatedState: updatedUnavail,
-                    aiCallsCount: 0,
-                    language,
-                    next_action: 'collect_info',
-                };
-            }
-
-            // Fall through: clear stale pending so later rails see a clean slate.
-            conversationState = applyPendingToState(
-                conversationState,
-                clearPendingBotQuestion()
-            );
-        }
-    }
-
-    // ——— INTERIM cancel / remove-line rails (cartLineOps) ———
-    {
-        const cancelKind = classifyInterimCancelIntent(messageText);
-        const liveItems = getCartItems(conversationState).map(ensureLineId);
-
-        if (cancelKind === 'whole_cancel') {
-            const cleared = clearCart(conversationState);
-            const reply = buildOrderCancelledMessage(language);
-            const updatedCancel: ConversationState = {
-                ...cleared,
-                last_intent: 'other',
-                language,
-                awaiting_order_confirmation: false,
-                last_interaction: new Date().toISOString(),
-                message_count: (conversationState.message_count || 0) + 1,
-            };
-            applySalesGPTStage(updatedCancel, '9');
-            return {
-                replyText: reply,
-                intent: 'other' as Intent,
-                stage: 'close' as Stage,
-                entities: updatedCancel.extracted_entities || {},
-                missingFields: [],
-                products: [],
-                plan: {
-                    nextAction: 'handoff' as NextAction,
-                    oneQuestion: reply,
-                    ctaType: 'support' as CtaType,
-                    recommendationStrategy: null as RecommendationStrategy,
-                    shouldOfferDiscount: false,
-                    handoffReason: '',
-                },
-                updatedState: updatedCancel,
-                aiCallsCount: 0,
-                language,
-                next_action: 'end_conversation',
-            };
-        }
-
-        if (cancelKind === 'partial_remove') {
-            const matches = matchCartLinesForRemoval(messageText, liveItems);
-            if (matches.length === 0) {
-                const reply =
-                    language === 'arabic'
-                        ? 'هذا المنتج مو موجود بطلبك الحالي.'
-                        : 'That item is not in your current order.';
-                const updatedMiss: ConversationState = {
-                    ...conversationState,
-                    language,
-                    last_interaction: new Date().toISOString(),
-                    message_count: (conversationState.message_count || 0) + 1,
-                };
-                return {
-                    replyText: reply,
-                    intent: 'order' as Intent,
-                    stage: 'close' as Stage,
-                    entities: updatedMiss.extracted_entities || {},
-                    missingFields: [],
-                    products: [],
-                    plan: {
-                        nextAction: 'recommend_products' as NextAction,
-                        oneQuestion: reply,
-                        ctaType: 'choose' as CtaType,
-                        recommendationStrategy: null as RecommendationStrategy,
-                        shouldOfferDiscount: false,
-                        handoffReason: '',
-                    },
-                    updatedState: updatedMiss,
-                    aiCallsCount: 0,
-                    language,
-                    next_action: 'present_product',
-                };
-            }
-
-            let nextItems = liveItems;
-            for (const line of matches) {
-                const id = ensureLineId(line).lineId;
-                nextItems = removeCartLineById(nextItems, id).map(ensureLineId);
-            }
-
-            if (nextItems.length === 0) {
-                const reply =
-                    language === 'arabic'
-                        ? 'تمام، شلت آخر منتج من طلبك. الطلب فاضي هلق — خبرني إذا بدك تختار شي تاني.'
-                        : 'Okay, I removed the last item. Your order is empty now — tell me if you want to pick something else.';
-                const emptied = clearCart(conversationState);
-                const updatedEmpty: ConversationState = {
-                    ...emptied,
-                    language,
-                    awaiting_order_confirmation: false,
-                    last_interaction: new Date().toISOString(),
-                    message_count: (conversationState.message_count || 0) + 1,
-                };
-                applySalesGPTStage(updatedEmpty, '4');
-                return {
-                    replyText: reply,
-                    intent: 'browse' as Intent,
-                    stage: 'offer' as Stage,
-                    entities: updatedEmpty.extracted_entities || {},
-                    missingFields: [],
-                    products: [],
-                    plan: {
-                        nextAction: 'recommend_products' as NextAction,
-                        oneQuestion: reply,
-                        ctaType: 'choose' as CtaType,
-                        recommendationStrategy: null as RecommendationStrategy,
-                        shouldOfferDiscount: false,
-                        handoffReason: '',
-                    },
-                    updatedState: updatedEmpty,
-                    aiCallsCount: 0,
-                    language,
-                    next_action: 'present_product',
-                };
-            }
-
-            const cart = normalizeCart(
-                { items: nextItems, status: 'building' },
-                { storeCurrency: merchantConfig.storeCurrency || merchantConfig.currency }
-            );
-            const summary = formatCartSummary(cart.items, language, {
-                shippingPolicy: merchantConfig.shippingPolicy,
-            });
-            const removedNames = matches.map((m) => m.productName).join('، ');
-            const reply =
-                language === 'arabic'
-                    ? `تمام، شلت ${removedNames} من طلبك.\n${summary}\n\nنقدر نضيف منتج ثاني، أو نكمّل الطلب؟`
-                    : `Okay, I removed ${removedNames} from your order.\n${summary}\n\nWe can add another product, or finish the order.`;
-            const updatedPartial: ConversationState = {
-                ...conversationState,
-                cart,
-                last_recommended_products: cart.items.map((i) => i.productId),
-                language,
-                awaiting_order_confirmation: false,
-                last_interaction: new Date().toISOString(),
-                message_count: (conversationState.message_count || 0) + 1,
-            };
-            applySalesGPTStage(updatedPartial, '4');
-            return {
-                replyText: reply,
-                intent: 'order' as Intent,
-                stage: 'offer' as Stage,
-                entities: updatedPartial.extracted_entities || {},
-                missingFields: [],
-                products: [],
-                plan: {
-                    nextAction: 'recommend_products' as NextAction,
-                    oneQuestion: reply,
-                    ctaType: 'choose' as CtaType,
-                    recommendationStrategy: null as RecommendationStrategy,
-                    shouldOfferDiscount: false,
-                    handoffReason: '',
-                },
-                updatedState: updatedPartial,
-                aiCallsCount: 0,
-                language,
-                next_action: ADD_TO_CART_ACTION,
             };
         }
     }
@@ -1180,14 +990,6 @@ export const processWithSalesGPT = async (
                 entities: updatedMulti.extracted_entities || {},
                 missingFields: [],
                 products: productsForCart,
-                plan: {
-                    nextAction: 'recommend_products' as NextAction,
-                    oneQuestion: reply,
-                    ctaType: 'choose' as CtaType,
-                    recommendationStrategy: 'match_query' as RecommendationStrategy,
-                    shouldOfferDiscount: false,
-                    handoffReason: '',
-                },
                 updatedState: updatedMulti,
                 aiCallsCount: 0,
                 language,
@@ -1241,12 +1043,59 @@ export const processWithSalesGPT = async (
             }
         }
 
-        if (lockedItem || cartHasItems(stateForAdd)) {
+        // Named product needs a variant — ask via existing ask_variant templates.
+        // Never echo a stale cart line as a fake "added" confirmation.
+        if (!lockedItem && products[0] && !draftReady) {
+            const draftMissing = isDraftLineComplete(draftEntities, products[0]).missing;
+            const lang = language === 'english' ? 'english' : 'arabic';
+            let askText = '';
+            if (draftMissing.includes('color') && products[0].colors?.length) {
+                askText = buildAskColorMessage(lang, products[0].colors);
+            } else if (draftMissing.includes('size')) {
+                const sizeAxis = axisById(products[0], 'size');
+                if (sizeAxis) askText = buildAskVariantMessage(lang, sizeAxis);
+            }
+            if (askText) {
+                let updatedAsk: ConversationState = {
+                    ...stateForAdd,
+                    last_intent: 'browse',
+                    language,
+                    awaiting_order_confirmation: false,
+                    last_order: isReturningAfterOrder
+                        ? undefined
+                        : conversationState.last_order,
+                    last_interaction: new Date().toISOString(),
+                    message_count: (conversationState.message_count || 0) + 1,
+                    last_recommended_products: [products[0].id],
+                };
+                applySalesGPTStage(updatedAsk, '4');
+                updatedAsk = applyPendingToState(
+                    updatedAsk,
+                    bindPendingBotQuestion(askText, updatedAsk, products[0])
+                );
+                logger.info('🛒 SalesGPT: add-another needs variant', {
+                    merchantId,
+                    product: products[0].name,
+                    missing: draftMissing,
+                });
+                return {
+                    replyText: askText,
+                    intent: 'browse' as Intent,
+                    stage: 'offer' as Stage,
+                    entities: updatedAsk.extracted_entities || {},
+                    missingFields: draftMissing,
+                    products: [products[0]],
+                    updatedState: updatedAsk,
+                    aiCallsCount: 0,
+                    language,
+                    next_action: 'collect_info',
+                };
+            }
+        }
+
+        if (lockedItem) {
             const cart = normalizeCart(stateForAdd.cart, { storeCurrency });
-            const displayItem =
-                lockedItem ||
-                cart.items[cart.items.length - 1]!;
-            const thankAdd = buildAddedToCartMessage(language, displayItem, cart);
+            const thankAdd = buildAddedToCartMessage(language, lockedItem, cart);
             const updatedStateAdd: ConversationState = {
                 ...stateForAdd,
                 cart,
@@ -1261,7 +1110,7 @@ export const processWithSalesGPT = async (
 
             logger.info('🛒 SalesGPT: add_to_cart fast-path', {
                 merchantId,
-                product: displayItem.productName,
+                product: lockedItem.productName,
                 cartSize: getCartItems(updatedStateAdd).length,
             });
 
@@ -1272,30 +1121,77 @@ export const processWithSalesGPT = async (
                 entities: updatedStateAdd.extracted_entities || {},
                 missingFields: [],
                 products: [],
-                plan: {
-                    nextAction: 'recommend_products' as NextAction,
-                    oneQuestion: thankAdd,
-                    ctaType: 'choose' as CtaType,
-                    recommendationStrategy: 'match_query' as RecommendationStrategy,
-                    shouldOfferDiscount: false,
-                    handoffReason: '',
-                },
                 updatedState: updatedStateAdd,
                 aiCallsCount: 0,
                 language,
                 next_action: ADD_TO_CART_ACTION,
             };
         }
+
+        // Bare "add another" with no new SKU locked — confirm current cart only when
+        // the focused product is already the last cart line (or no new focus).
+        if (cartHasItems(stateForAdd)) {
+            const cart = normalizeCart(stateForAdd.cart, { storeCurrency });
+            const displayItem = cart.items[cart.items.length - 1]!;
+            const focusIsNewSku =
+                !!products[0] && products[0].id !== displayItem.productId;
+            if (!focusIsNewSku) {
+                const thankAdd = buildAddedToCartMessage(language, displayItem, cart);
+                const updatedStateAdd: ConversationState = {
+                    ...stateForAdd,
+                    cart,
+                    last_intent: 'browse',
+                    language,
+                    awaiting_order_confirmation: false,
+                    last_order: isReturningAfterOrder
+                        ? undefined
+                        : conversationState.last_order,
+                    last_interaction: new Date().toISOString(),
+                    message_count: (conversationState.message_count || 0) + 1,
+                };
+                applySalesGPTStage(updatedStateAdd, '4');
+
+                logger.info('🛒 SalesGPT: add_to_cart fast-path', {
+                    merchantId,
+                    product: displayItem.productName,
+                    cartSize: getCartItems(updatedStateAdd).length,
+                });
+
+                return {
+                    replyText: thankAdd,
+                    intent: 'browse' as Intent,
+                    stage: 'offer' as Stage,
+                    entities: updatedStateAdd.extracted_entities || {},
+                    missingFields: [],
+                    products: [],
+                    updatedState: updatedStateAdd,
+                    aiCallsCount: 0,
+                    language,
+                    next_action: ADD_TO_CART_ACTION,
+                };
+            }
+        }
     }
 
-    if (
-        wasInClosingFlow &&
-        completeness.complete &&
-        fastPathColorReady &&
-        !askingProductInfo &&
-        !addAnotherIntent &&
-        (userAffirms || (userDeclinesMore && botAskedAddMore && !botAskedConfirm))
-    ) {
+    const confirmFinalize = resolveConfirmFinalize({
+        effectivelyComplete: completeness.complete,
+        fieldsWereCompleteBeforeTurn: completeness.complete,
+        botAskedConfirm: wasInClosingFlow || botAskedConfirm,
+        botAskedAddMore,
+        userAffirms,
+        userDeclinesMore,
+        askingProductInfo,
+        addAnotherIntent,
+        colorReady: fastPathColorReady,
+        variantsReady: products[0]
+            ? missingAxes(
+                  products[0],
+                  variantSelectionForProduct(conversationState, products[0])
+              ).length === 0
+            : true,
+    });
+
+    if (confirmFinalize.finalize) {
         const e = conversationState.extracted_entities || {};
         const productName = products[0]?.name || e.product_query || '';
         const confirmedColor = colorForFastPath ?? e.color;
@@ -1328,21 +1224,17 @@ export const processWithSalesGPT = async (
             quantity: e.quantity
         });
 
-        logger.info('⚡ SalesGPT: deterministic confirm_order fast-path', {
+        logger.info('SalesGPT: deterministic confirm_order fast-path', {
             merchantId,
             product: productName,
             cartItems: cartItems.length,
             missing: completeness.missing,
-            trigger: userAffirms ? 'affirmative' : 'negative_no_more_additions',
-            stageId: stageId || null
-        });
-        console.log('⚡ SalesGPT: confirm_order fast-path engaged', {
+            trigger: confirmFinalize.reason,
+            stageId: stageId || null,
             messageLength: messageText.length,
-            trigger: userAffirms ? 'yes' : 'no_decline_more',
             hasName: Boolean(e.name),
             hasPhone: Boolean(e.phone),
             hasAddress: Boolean(e.address),
-            cartItems: cartItems.length,
             cartSummaryLength: cartSummary.length,
         });
 
@@ -1406,14 +1298,6 @@ export const processWithSalesGPT = async (
             },
             missingFields: [],
             products,
-            plan: {
-                nextAction: 'confirm_order' as NextAction,
-                oneQuestion: thankMsg,
-                ctaType: 'confirm' as CtaType,
-                recommendationStrategy: 'match_query' as RecommendationStrategy,
-                shouldOfferDiscount: false,
-                handoffReason: ''
-            },
             updatedState: updatedStateFast,
             aiCallsCount: 0,
             language,
@@ -1430,7 +1314,53 @@ export const processWithSalesGPT = async (
     // Negative + incomplete while in closing flow → fall through to agent.step() to collect fields.
 
     try {
+        if (!skipAgent) {
+        const faqMatch = await matchFaqForTurn({ merchantId, messageText, recentMessages });
+        if (faqMatch) {
+            const reply = ownReply('early_rail', 'faq_match', undefined, faqMatch.answer);
+            const updatedFaqState: ConversationState = {
+                ...conversationState,
+                language,
+                last_interaction: new Date().toISOString(),
+                message_count: (conversationState.message_count || 0) + 1,
+            };
+            logger.info('SalesGPT: FAQ match fast-path', {
+                merchantId,
+                faqId: faqMatch.id,
+            });
+            return {
+                replyText: reply,
+                intent: 'other' as Intent,
+                stage: conversationStageForDb(updatedFaqState),
+                entities: updatedFaqState.extracted_entities || {},
+                missingFields: [],
+                products,
+                updatedState: updatedFaqState,
+                aiCallsCount: 0,
+                language,
+            };
+        }
         salesResult = await agent.step(messageText, products, catalogAwareness);
+        ownReply(
+            'agent_draft',
+            'agent_step',
+            salesResult.nextAction,
+            salesResult.responseText
+        );
+        // Model may re-emit a stale color from history; drop it when not on catalog.
+        if (
+            salesResult.collectedInfo?.color &&
+            products[0] &&
+            !(
+                products[0].colors?.length &&
+                isColorInProductCatalog(salesResult.collectedInfo.color, products[0].colors)
+            )
+        ) {
+            salesResult.collectedInfo = {
+                ...salesResult.collectedInfo,
+                color: undefined,
+            };
+        }
         if (
             catalogAwareness.noMatchForSpecificQuery &&
             violatesNoMatchGrounding(salesResult.responseText, catalogOverview, language)
@@ -1461,26 +1391,72 @@ export const processWithSalesGPT = async (
                 size: undefined,
             };
         } else {
-            const grounding = validateCatalogReplyGrounding({
+            const conversationColors = [
+                conversationState.extracted_entities?.color,
+                ...getCartItems(conversationState).map((item) => item.color),
+                salesResult.collectedInfo?.color,
+            ].filter((color): color is string => Boolean(color && String(color).trim()));
+
+            const groundingInput = {
                 responseText: salesResult.responseText,
                 products,
                 customerMessage: messageText,
+                conversationColors,
                 catalogOverview,
-            });
+            };
+            const grounding = validateCatalogReplyGrounding(groundingInput);
             if (!grounding.valid) {
-                logger.warn('SalesGPT: replaced reply with ungrounded catalog claims', {
-                    merchantId,
-                    reasons: grounding.reasons,
-                });
-                salesResult.responseText = buildGroundedCatalogFallback(
-                    products,
-                    language === 'english' ? 'english' : 'arabic'
-                );
+                const storeCurrency =
+                    merchantConfig.storeCurrency || merchantConfig.currency || null;
+                // Prefer surgical color strip so price/currency/tone survive.
+                if (grounding.reasons.includes('ungrounded_color')) {
+                    const repaired = sanitizeUngroundedColorClaims(
+                        salesResult.responseText,
+                        {
+                            products,
+                            customerMessage: messageText,
+                            conversationColors,
+                            catalogOverview,
+                        }
+                    );
+                    const recheck = validateCatalogReplyGrounding({
+                        ...groundingInput,
+                        responseText: repaired.text,
+                    });
+                    if (recheck.valid && repaired.text.trim().length > 0) {
+                        logger.warn('SalesGPT: stripped ungrounded color claims from reply', {
+                            merchantId,
+                            stripped: repaired.stripped,
+                            reasons: grounding.reasons,
+                        });
+                        salesResult.responseText = repaired.text;
+                    } else {
+                        logger.warn('SalesGPT: replaced reply with ungrounded catalog claims', {
+                            merchantId,
+                            reasons: grounding.reasons,
+                        });
+                        salesResult.responseText = buildGroundedCatalogFallback(
+                            products,
+                            language === 'english' ? 'english' : 'arabic',
+                            storeCurrency
+                        );
+                    }
+                } else {
+                    logger.warn('SalesGPT: replaced reply with ungrounded catalog claims', {
+                        merchantId,
+                        reasons: grounding.reasons,
+                    });
+                    salesResult.responseText = buildGroundedCatalogFallback(
+                        products,
+                        language === 'english' ? 'english' : 'arabic',
+                        storeCurrency
+                    );
+                }
             }
+        }
         }
     } catch (error) {
         logger.error('SalesGPT agent failed', error as Error, { merchantId });
-        console.error('❌ SalesGPT error:', error);
 
         salesResult = {
             responseText: language === 'arabic'
@@ -1497,99 +1473,116 @@ export const processWithSalesGPT = async (
     }
 
     // ==================== STEP 3: Handle Image Requests ====================
+    if (!salesResult) {
+        throw new Error('SalesGPT: salesResult missing after agent turn');
+    }
+    if (interpreterApplied) {
+        const focusForFacts = products[0];
+        const selectionForFacts = focusForFacts
+            ? variantSelectionForProduct(conversationState, focusForFacts)
+            : {};
+        const missingVariantAxes = focusForFacts
+            ? missingAxes(focusForFacts, selectionForFacts).length > 0
+            : false;
+        salesResult.nextAction = effectiveNextActionFromTurnFacts(
+            {
+                applied: interpreterApplied.applied,
+                handoffHuman: interpreterApplied.handoffHuman,
+                wantsPhoto: interpreterApplied.wantsPhoto,
+                refusesPhoto: interpreterApplied.refusesPhoto,
+                affirmsOrder: interpreterApplied.affirmsOrder,
+                deniesOrder: interpreterApplied.deniesOrder,
+                browseCatalog: interpreterApplied.browseCatalog,
+                infoKind: interpreterApplied.infoKind,
+                clarification: interpreterApplied.clarification,
+                checkoutReady: checkOrderCompleteness(conversationState, products[0]).complete,
+                missingVariantAxes,
+                cartEmpty: getCartItems(conversationState).length === 0,
+                finalizedOrder: salesResult.nextAction === CONFIRM_ORDER_ACTION,
+            },
+            salesResult.nextAction
+        );
+    }
     let finalReplyText = salesResult.responseText;
 
-    // Attach images ONLY when the CURRENT message explicitly asks to see a photo.
-    // Never as a side-effect of color selection or a previous bot offer.
-    const shouldAttachImage =
-        isExplicitPhotoRequest(messageText) &&
-        !isExplicitPhotoRefusal(messageText);
-
-    if (shouldAttachImage && catalogAwareness.noMatchForSpecificQuery) {
-        // Do not attach a random catalog photo after a genuine catalog miss.
-        finalReplyText = stripFalseImageDeliveryClaims(finalReplyText);
-    } else if (shouldAttachImage) {
-        // Resolve the product the customer asked to see — never blindly use a stale products[0].
-        const imageProduct =
-            mentionedInMessage[0] ||
-            (salesResult.collectedInfo.product_name
-                ? findProductsMentionedInText(
-                      String(salesResult.collectedInfo.product_name),
-                      catalogForMention
-                  )[0]
-                : undefined) ||
-            (activeProductId
-                ? products.find((p) => p.id === activeProductId) ||
-                  catalogForMention.find((p) => p.id === activeProductId)
-                : undefined) ||
-            products[0];
-
-        if (imageProduct?.imageUrl) {
-            const requestedColor =
-                salesResult.collectedInfo.color ||
-                conversationState.extracted_entities?.color ||
-                null;
-            const imageUrlForBot = await buildColorAwareImageTag(
-                merchantId,
-                imageProduct,
-                requestedColor,
-                messageText
-            );
-            const caption = sanitizeCaptionWhenImageSent(
-                salesResult.responseText,
-                language,
-                imageProduct.name
-            );
-            finalReplyText = `${caption}\n\n[IMAGE: ${imageUrlForBot}]`;
-            // Keep focus on the product whose image we sent
-            products = [imageProduct, ...products.filter((p) => p.id !== imageProduct.id)];
-            activeProductId = imageProduct.id;
-            console.log('📸 SalesGPT color-aware image:', {
-                product: imageProduct.name,
-                productId: imageProduct.id,
-                requestedColor,
-                imageUrlForBot,
-                captionLength: caption.length,
-            });
-        } else if (products.length > 1 && !imageProduct) {
-            const productList = products.slice(0, 3).map(p => p.name).join('، ');
-            finalReplyText = language === 'arabic'
-                ? `في أكثر من منتج: ${productList}. شو المنتج اللي بدك صورته؟`
-                : `Multiple products found: ${productList}. Which one do you want to see?`;
-        } else if (!imageProduct) {
-            finalReplyText = language === 'arabic'
-                ? `عذراً، ما عندي المنتج المطلوب 😔 جرّب اسم تاني أو اسأل "شو عندك؟"`
-                : `Sorry, product not found 😔 Try another name or ask "what do you have?"`;
-        } else {
-            // Product found but no image URL — strip false "here's the photo" claims
-            finalReplyText = stripFalseImageDeliveryClaims(finalReplyText);
-        }
-    } else {
-        // Price/specs/etc. — never leave hallucinated image-delivery phrases in the reply
-        finalReplyText = stripFalseImageDeliveryClaims(finalReplyText);
+    // Attach images ONLY when resolvePhotoDecision says so (interpreter owns when flipped).
+    const photoDecision = resolvePhotoDecision({
+        messageText,
+        interpreterOwnsRefuse: interpreterSkip.has('refuse_photo'),
+        interpreterOwnsRequest: interpreterSkip.has('request_photo'),
+        interpreterRefusesPhoto: Boolean(interpreterApplied?.refusesPhoto),
+        interpreterWantsPhoto: interpreterApplied?.wantsPhoto,
+    });
+    const shouldAttachImage = photoDecision.attachImage;
+    {
+        const imaged = await applyImageDecision({
+            merchantId,
+            messageText,
+            language,
+            shouldAttachImage,
+            noMatchForSpecificQuery: Boolean(catalogAwareness.noMatchForSpecificQuery),
+            responseText: salesResult.responseText,
+            collectedProductName: salesResult.collectedInfo.product_name,
+            collectedColor: salesResult.collectedInfo.color,
+            storedColor: conversationState.extracted_entities?.color,
+            collectedSize: salesResult.collectedInfo.size,
+            storedSize: conversationState.extracted_entities?.size,
+            activeProductId,
+            products,
+            mentionedInMessage,
+            catalogForMention,
+        });
+        finalReplyText = imaged.replyText;
+        products = imaged.products;
+        activeProductId = imaged.activeProductId;
     }
+
+    const storeNameForGround = merchantConfig.storeName || merchantConfig.store_name || '';
+    finalReplyText = groundInterpreterReply({
+        replyText: finalReplyText,
+        language,
+        imageAttached: /\[IMAGE:/i.test(finalReplyText),
+        noMatchForSpecificQuery: Boolean(catalogAwareness.noMatchForSpecificQuery),
+        catalogOverview,
+        salespersonName: storeNameForGround ? `مساعد ${storeNameForGround}` : 'مساعد المتجر',
+        storeName: storeNameForGround,
+        allowAlternatives: detectsWantsAlternativesIntent(messageText),
+        activeProductNames: products.map((p) => p.name).filter(Boolean),
+    });
 
     // ==================== STEP 4: Build Updated Conversation State ====================
     // Strict catalog-bound color — never on OOS products; user history beats AI.
     const focusProduct = products[0] && isSellableProduct(products[0]) ? products[0] : null;
-    const colorResolution = resolveProductOrderColor({
-        product: focusProduct || undefined,
-        messageText,
-        recentMessages,
-        conversationState,
-        aiColor: focusProduct ? salesResult.collectedInfo.color : null,
-        language,
-        replyText: finalReplyText
-    });
+    const skipVariantExtract = interpreterSkip.has('ask_product_info');
+    const colorResolution = skipVariantExtract
+        ? {
+            color: conversationState.extracted_entities?.color ?? null,
+            replyText: finalReplyText,
+            policy: null,
+        }
+        : resolveProductOrderColor({
+            product: focusProduct || undefined,
+            messageText,
+            recentMessages,
+            conversationState,
+            aiColor: focusProduct ? salesResult.collectedInfo.color : null,
+            language,
+            replyText: finalReplyText
+        });
     let resolvedColor = focusProduct ? colorResolution.color : null;
     finalReplyText = colorResolution.replyText;
     if (resolvedColor) {
         salesResult.collectedInfo.color = resolvedColor;
-    } else if (focusProduct?.colors?.length) {
-        salesResult.collectedInfo.color = undefined;
     } else {
+        // Colorless SKU: drop inherited/AI color only. Never clear size here
+        // (shirt/perfume size lives on a product with no colors).
         salesResult.collectedInfo.color = undefined;
-        salesResult.collectedInfo.size = undefined;
+    }
+    const resolvedSizeFromMessage = skipVariantExtract
+        ? null
+        : resolveBareSizeFromMessage(focusProduct, messageText);
+    if (resolvedSizeFromMessage) {
+        salesResult.collectedInfo.size = resolvedSizeFromMessage;
     }
 
     const storeCurrency = merchantConfig.storeCurrency || merchantConfig.currency;
@@ -1599,7 +1592,7 @@ export const processWithSalesGPT = async (
         products[0]
     );
 
-    const updatedState: ConversationState = {
+    let updatedState: ConversationState = {
         ...conversationState,
         last_intent: salesResult.intent,
         salesgpt_stage_id: salesResult.stageId,
@@ -1624,18 +1617,17 @@ export const processWithSalesGPT = async (
                   sanitizeCollectedText(focusedEntities.size)
                 : undefined,
             quantity: (() => {
-                const fromAi = coerceSafeQuantity(
-                    messageText,
-                    salesResult.collectedInfo.quantity
-                );
-                if (fromAi !== undefined) return fromAi;
+                // Model never writes quantity — interpreter set_quantity or resolveQuantity only.
+                if (interpreterSkip.has('set_quantity')) {
+                    return focusedEntities.quantity;
+                }
                 if (messageSignalsBothProducts(messageText)) return undefined;
                 const focusName =
                     focusProduct?.name ||
                     sanitizeCollectedText(salesResult.collectedInfo.product_name) ||
                     sanitizeCollectedText(focusedEntities.product_query);
                 if (focusName) {
-                    const fromWords = resolveQuantityFromMessage(messageText, focusName);
+                    const fromWords = resolveQuantity(messageText, focusName);
                     if (fromWords != null && fromWords > 0) {
                         return coerceSafeQuantity(messageText, fromWords) ?? fromWords;
                     }
@@ -1657,6 +1649,22 @@ export const processWithSalesGPT = async (
     };
     applySalesGPTStage(updatedState, salesResult.stageId);
 
+    // Arm per-product interest reminder only on explicit product Q&A (not ad-seed greetings).
+    {
+        const interestProduct =
+            namedInMessage[0] ||
+            mentionedInMessage[0] ||
+            (products[0] && isSellableProduct(products[0]) ? products[0] : null);
+        const explicitAsk =
+            Boolean(interestProduct?.id) &&
+            !noMatchForSpecificQuery &&
+            (interpreterSkip.has('ask_product_info') ||
+                isExplicitProductInterestAsk(messageText));
+        if (explicitAsk && interestProduct?.id) {
+            updatedState = recordExplicitProductInterest(updatedState, interestProduct.id);
+        }
+    }
+
     // Write resolved color/size onto the matching cart line immediately (not only at confirm).
     // Never create or mutate lines for out-of-stock products.
     if (focusProduct) {
@@ -1675,6 +1683,7 @@ export const processWithSalesGPT = async (
     const confirmGate = gateConfirmWhenColorInvalid({
         nextAction: salesResult.nextAction,
         product: focusProduct || undefined,
+        state: updatedState,
         resolvedColor,
         language,
         replyText: finalReplyText,
@@ -1728,6 +1737,28 @@ export const processWithSalesGPT = async (
             updatedState.awaiting_order_confirmation = false;
             updatedState.last_intent = 'browse';
             applySalesGPTStage(updatedState, '4');
+        } else if (
+            !isDraftLineComplete(updatedState.extracted_entities, focusProduct).complete
+        ) {
+            const draftMissing = isDraftLineComplete(
+                updatedState.extracted_entities,
+                focusProduct
+            ).missing;
+            const lang = language === 'english' ? 'english' : 'arabic';
+            let askText = '';
+            if (draftMissing.includes('color') && focusProduct.colors?.length) {
+                askText = buildAskColorMessage(lang, focusProduct.colors);
+            } else if (draftMissing.includes('size')) {
+                const sizeAxis = axisById(focusProduct, 'size');
+                if (sizeAxis) askText = buildAskVariantMessage(lang, sizeAxis);
+            }
+            if (askText) {
+                finalReplyText = askText;
+                effectiveNextAction = 'collect_info';
+                updatedState.awaiting_order_confirmation = false;
+                updatedState.last_intent = 'browse';
+                applySalesGPTStage(updatedState, '4');
+            }
         }
     }
 
@@ -1766,25 +1797,7 @@ export const processWithSalesGPT = async (
                 size: primary.size,
                 quantity: primary.quantity,
             };
-            // Pre-confirmation copy must show priced per-currency lines from the cart.
-            if (effectiveNextAction === AWAIT_CONFIRMATION_ACTION) {
-                const e = updatedState.extracted_entities || {};
-                finalReplyText = buildAwaitConfirmationMessage(
-                    language,
-                    {
-                        name: e.name,
-                        phone: e.phone,
-                        address: e.address,
-                        product_name: primary.productName,
-                        color: primary.color,
-                        size: primary.size,
-                        quantity: primary.quantity,
-                    },
-                    formatCartSummary(items, language, {
-                        shippingPolicy: merchantConfig.shippingPolicy,
-                    })
-                );
-            }
+            // Await / variant / identity templates compose once below.
         }
     }
 
@@ -1796,47 +1809,20 @@ export const processWithSalesGPT = async (
         updatedState.awaiting_order_confirmation = false;
     }
 
-    // Color ask template ONLY on order-ish turns — never greeting/price/browse.
-    // (HOTFIX 2E: unconditional force rewrote «كم سعر ساعة؟» / «السلام عليكم».)
-    const focusForPending = focusProduct;
-    const mayForceColorAsk = mayReplaceWithOrderTemplate({
-        nextAction: effectiveNextAction,
+    const finalized = finalizeOutboundReply({
+        language,
+        messageText,
+        effectiveNextAction,
+        replyText: finalReplyText,
+        updatedState,
+        focusProduct,
+        turnIntent: salesResult.turnIntent,
+        shippingPolicy: merchantConfig.shippingPolicy,
     });
-    if (
-        mayForceColorAsk &&
-        focusForPending &&
-        focusForPending.colors?.length &&
-        isDraftLineComplete(updatedState.extracted_entities, focusForPending).missing.includes(
-            'color'
-        )
-    ) {
-        if (!detectPendingBotQuestion(finalReplyText)) {
-            finalReplyText = buildAskColorMessage(
-                language === 'english' ? 'english' : 'arabic',
-                focusForPending.colors
-            );
-            effectiveNextAction = 'collect_info';
-        }
-    } else if (
-        focusForPending &&
-        !(focusForPending.colors && focusForPending.colors.length > 0) &&
-        /أي لون|الألوان المتاحة|which color|available colors/i.test(finalReplyText)
-    ) {
-        // Shirt etc. — strip invented color questions from the model.
-        finalReplyText = finalReplyText
-            .replace(/[^.!\n]*?(?:أي لون|الألوان المتاحة|which color|available colors)[^.!\n]*[.!]?\s*/gi, '')
-            .trim() || finalReplyText;
-    }
-
-    // Bind or clear pending_bot_question from the outbound template (never free LLM inference alone).
-    {
-        const pendingBind = bindPendingBotQuestion(
-            finalReplyText,
-            updatedState,
-            focusForPending
-        );
-        Object.assign(updatedState, pendingBind);
-    }
+    finalReplyText = finalized.replyText;
+    effectiveNextAction = finalized.nextAction;
+    updatedState = finalized.updatedState;
+    const composed = finalized.composed;
 
     const processingTime = Date.now() - startTime;
 
@@ -1851,17 +1837,19 @@ export const processWithSalesGPT = async (
         processingTimeMs: processingTime
     });
 
-    console.log('✅ SalesGPT decision:', {
+    logger.debug('SalesGPT decision', {
         intent: salesResult.intent,
         stage: salesResult.stage,
         stageId: updatedState.salesgpt_stage_id || salesResult.stageId,
         nextAction: effectiveNextAction,
-        collectedInfo: salesResult.collectedInfo,
+        hasProductName: Boolean(salesResult.collectedInfo.product_name),
+        hasColor: Boolean(salesResult.collectedInfo.color),
+        hasSize: Boolean(salesResult.collectedInfo.size),
         cartItems: getCartItems(updatedState).length,
-        aiCalls: salesResult.aiCallsCount
+        aiCalls: salesResult.aiCallsCount,
     });
 
-    const isFinalConfirm = effectiveNextAction === CONFIRM_ORDER_ACTION;
+    ownReply('final', composed.replySource, effectiveNextAction, finalReplyText);
 
     return {
         replyText: finalReplyText,
@@ -1877,14 +1865,6 @@ export const processWithSalesGPT = async (
         },
         missingFields: [],
         products,
-        plan: {
-            nextAction: (isFinalConfirm ? 'confirm_order' : 'recommend_products') as NextAction,
-            oneQuestion: salesResult.responseText,
-            ctaType: (isFinalConfirm ? 'confirm' : 'choose') as CtaType,
-            recommendationStrategy: 'match_query' as RecommendationStrategy,
-            shouldOfferDiscount: false,
-            handoffReason: ''
-        },
         updatedState,
         aiCallsCount: salesResult.aiCallsCount,
         language,
@@ -1918,6 +1898,8 @@ export {
 } from './conversationCart.js';
 export {
   isExplicitPhotoRequest,
+  resolvePhotoDecision,
   resolveTurnIntent,
+  type PhotoDecision,
   type TurnIntent,
 } from './turnIntent.js';

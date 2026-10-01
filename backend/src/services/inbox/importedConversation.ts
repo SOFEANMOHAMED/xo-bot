@@ -5,6 +5,7 @@
 
 import pool from '../../database/connection.js';
 import { buildImportedHistoryMetadata } from './historyImportFlags.js';
+import { isPlaceholderCustomerName } from '../socialProfile.js';
 
 export type InboxImportPlatform =
   | 'facebook_messenger'
@@ -28,10 +29,25 @@ export async function getOrCreateImportedConversation(params: {
   );
 
   if (existing.rows[0]) {
-    return {
-      id: existing.rows[0].id as string,
-      userName: (existing.rows[0].user_name as string | null) || null,
-    };
+    const id = existing.rows[0].id as string;
+    const currentName = (existing.rows[0].user_name as string | null) || null;
+    const incoming = (params.userName || '').trim();
+
+    if (
+      incoming &&
+      !isPlaceholderCustomerName(incoming) &&
+      isPlaceholderCustomerName(currentName)
+    ) {
+      await pool.query(
+        `UPDATE conversations
+         SET user_name = $1, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2 AND merchant_id = $3`,
+        [incoming, id, params.merchantId]
+      );
+      return { id, userName: incoming };
+    }
+
+    return { id, userName: currentName };
   }
 
   try {

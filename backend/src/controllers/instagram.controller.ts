@@ -18,6 +18,7 @@ import {
   deliverHumanLikeReply,
   startTypingKeepalive
 } from '../services/channels/replyDelivery.js';
+import { prepareMetaOutboundImageUrl } from '../services/channels/prepareMetaOutboundImage.js';
 import {
   conversationIngressQueue,
   mergeMessengerStylePayloads
@@ -34,6 +35,7 @@ import {
 } from '../services/voiceTranscription.js';
 import { getCurrencyDisplayName } from '../utils/currencyDisplayName.js';
 import { withOAuthCodeDedup } from '../utils/oauthCodeDedup.js';
+import { signOAuthState, verifyOAuthState } from '../utils/oauthState.js';
 import {
   resolveManagedFacebookPages,
   fetchGrantedFacebookPermissions,
@@ -47,7 +49,18 @@ import {
 } from '../services/socialCommentReplies.js';
 import { normalizePageFeedCommentValue, isPageFeedCommentEvent } from '../services/pageFeedCommentPayload.js';
 import { runCommentAutomation } from '../services/socialCommentAutomation.js';
-import { sendInstagramCommentReply } from '../services/instagramCommentGraph.js';
+import {
+  sendInstagramCommentReply,
+  sendInstagramPrivateReplyAfterComment,
+} from '../services/instagramCommentGraph.js';
+import {
+  getPlatformFacebookPageByIgUserId,
+  getPlatformFacebookPageByPageId,
+} from '../services/platformFacebookPage.js';
+import {
+  processOfficialInstagramCommentFromPageFeed,
+  processOfficialInstagramCommentWebhook,
+} from '../services/platformCommentAutomation.js';
 import {
   applyMessagingAcquisition,
   isStoryReplyMessagingEvent,
@@ -176,45 +189,6 @@ const resolveLinkedInstagramBusinessAccount = async (
   return null;
 };
 
-/**
- * أول رسالة خاصة بعد تعليق — يجب استخدام comment_id على مسار الصفحة (Private Replies).
- * لا يعمل استبدالها بـ recipient.id لأن المستخدم لم يبدأ محادثة بعد.
- * @see https://developers.facebook.com/docs/messenger-platform/instagram/features/private-replies/
- */
-const sendInstagramPrivateReplyAfterComment = async (
-  pageId: string,
-  commentId: string,
-  message: string,
-  accessToken: string
-): Promise<boolean> => {
-  try {
-    const url =
-      `https://graph.facebook.com/${INSTAGRAM_GRAPH_VERSION}/${encodeURIComponent(pageId)}/messages` +
-      `?access_token=${encodeURIComponent(accessToken)}`;
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        recipient: { comment_id: commentId },
-        message: { text: message }
-      })
-    });
-    const data = await resp.json() as any;
-    if (!resp.ok) {
-      logger.error(
-        'Instagram private reply after comment failed',
-        new Error(JSON.stringify(data)),
-        { pageId, commentId }
-      );
-      return false;
-    }
-    return true;
-  } catch (error) {
-    logger.error('Error sending Instagram private reply', error as Error, { pageId, commentId });
-    return false;
-  }
-};
-
 const sendInstagramDM = async (
   igScopedUserId: string,
   message: string,
@@ -281,6 +255,7 @@ const sendInstagramImage = async (
   accessToken: string
 ): Promise<boolean> => {
   try {
+    const metaImageUrl = await prepareMetaOutboundImageUrl(imageUrl);
     const url =
       `https://graph.facebook.com/v21.0/me/messages` +
       `?access_token=${encodeURIComponent(accessToken)}`;
@@ -292,14 +267,18 @@ const sendInstagramImage = async (
         message: {
           attachment: {
             type: 'image',
-            payload: { url: imageUrl, is_reusable: false }
+            payload: { url: metaImageUrl, is_reusable: false }
           }
         }
       })
     });
-    const data = await resp.json() as any;
+    const data = await resp.json() as { error?: { message?: string } };
     if (!resp.ok) {
-      logger.error('Instagram API error sending image', new Error(JSON.stringify(data)), { igScopedUserId });
+      logger.error('Instagram API error sending image', new Error(JSON.stringify(data)), {
+        igScopedUserId,
+        imageUrl: metaImageUrl,
+        originalImageUrl: imageUrl,
+      });
       return false;
     }
     if (caption && caption.trim()) {
@@ -393,7 +372,7 @@ export const connectInstagram = async (
       });
     }
 
-    const state = Buffer.from(JSON.stringify({ merchantId: req.merchantId })).toString('base64');
+    const state = signOAuthState({ merchantId: req.merchantId });
 
     const authUrl =
       `https://www.facebook.com/${INSTAGRAM_GRAPH_VERSION}/dialog/oauth` +
@@ -446,13 +425,11 @@ export const instagramCallback = async (
         `${process.env.CORS_ORIGIN || 'https://xo-bot.com'}/api/integrations/instagram/callback`;
 
       let merchantId: string;
-      try {
-        const decoded = JSON.parse(Buffer.from(state as string, 'base64').toString());
-        merchantId = decoded.merchantId;
-        if (!isValidUUID(merchantId)) throw new Error('bad uuid');
-      } catch {
+      const decoded = verifyOAuthState<{ merchantId?: string }>(state);
+      if (!decoded?.merchantId || !isValidUUID(decoded.merchantId)) {
         return buildInstagramIntegrationRedirect({ instagram: 'error', reason: 'invalid_state' });
       }
+      merchantId = decoded.merchantId;
 
       const tokenResp = await fetch(
         `https://graph.facebook.com/v21.0/oauth/access_token` +
@@ -761,6 +738,13 @@ export const processInstagramCommentFromPageFeed = async (pageId: string, value:
 
   if (!commentId) return;
 
+  // Official XO Bot page: isolated platform path (never merchant tables)
+  const platformPage = await getPlatformFacebookPageByPageId(String(pageId));
+  if (platformPage?.ig_user_id) {
+    await processOfficialInstagramCommentFromPageFeed(platformPage, value);
+    return;
+  }
+
   const igResult = await pool.query(
     `SELECT ia.*, ms.store_name, ms.store_currency, ms.system_prompt, ms.bot_persona,
             ms.shipping_policy, ms.delivery_time, ms.payment_methods, ms.return_policy,
@@ -898,6 +882,23 @@ const processInstagramCommentWebhook = async (value: any, entryInstagramAccountI
   }
   const bodyText = text != null ? String(text) : '';
   const externalPostId = media?.id != null ? String(media.id) : null;
+
+  // Official XO Bot IG account: resolve via entry.id / media.owner before merchant lookup
+  const hintedOwner = (() => {
+    const o = media?.owner_id ?? value?.owner_id;
+    if (o != null && String(o).trim() !== '') return String(o);
+    if (entryInstagramAccountId != null && String(entryInstagramAccountId).trim() !== '') {
+      return String(entryInstagramAccountId);
+    }
+    return null;
+  })();
+  if (hintedOwner) {
+    const platformPage = await getPlatformFacebookPageByIgUserId(hintedOwner);
+    if (platformPage?.ig_user_id) {
+      await processOfficialInstagramCommentWebhook(platformPage, value);
+      return;
+    }
+  }
 
   const ig = await loadInstagramAccountRowForCommentWebhook(
     String(commentId),

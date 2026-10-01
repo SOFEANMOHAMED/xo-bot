@@ -22,6 +22,11 @@ import { setAuthCookie } from '../utils/authCookies.js';
 import {
   ensureSubscriptionEndsAtColumn,
   enforceMerchantSubscriptionExpiry,
+  expireDueSubscriptions,
+  defaultTrialEndsAt,
+  parseOptionalDate,
+  assertSubscriptionPeriodValid,
+  resolveStatusAfterDateEdit,
 } from '../services/subscriptionExpiry/index.js';
 import { logger } from '../utils/logger.js';
 import {
@@ -31,6 +36,70 @@ import {
 // Legacy prompt helpers removed; orchestrator is the single source of truth.
 const PRODUCT_BOT_SYSTEM_PROMPT = 'You are a helpful product assistant.';
 const SERVICE_BOT_SYSTEM_PROMPT = 'You are a helpful service assistant.';
+
+function toIsoOrUndefined(value: Date | string | null | undefined): string | undefined {
+  if (value == null) return undefined;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return undefined;
+  return d.toISOString();
+}
+
+function mapPlanLabel(plan: string | null | undefined): string {
+  if (plan === 'trial') return 'Trial';
+  if (plan === 'comments') return 'التعليقات';
+  if (plan === 'single') return 'القناة الواحدة';
+  if (plan === 'social') return 'السوشيال';
+  if (plan === 'yearly') return 'السنوية';
+  if (plan === 'starter') return 'Starter';
+  if (plan === 'pro') return 'Pro';
+  if (plan === 'business') return 'Business';
+  return plan || 'Trial';
+}
+
+function mapStatusLabel(status: string | null | undefined): 'active' | 'suspended' | 'expired' {
+  if (status === 'active') return 'active';
+  if (status === 'suspended') return 'suspended';
+  return 'expired';
+}
+
+function mapAdminUserRow(row: {
+  id: string;
+  email: string;
+  name: string | null;
+  phone?: string | null;
+  subscription_plan: string | null;
+  subscription_status: string | null;
+  trial_ends_at: Date | string | null;
+  subscription_starts_at?: Date | string | null;
+  subscription_ends_at?: Date | string | null;
+  created_at: Date;
+}) {
+  const isTrialPlan = (row.subscription_plan || 'trial') === 'trial';
+  const trialEnded =
+    isTrialPlan &&
+    row.trial_ends_at != null &&
+    !Number.isNaN(new Date(row.trial_ends_at).getTime()) &&
+    new Date(row.trial_ends_at).getTime() <= Date.now();
+
+  let status = mapStatusLabel(row.subscription_status);
+  if (trialEnded && status === 'active') {
+    status = 'expired';
+  }
+
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name || 'غير محدد',
+    phone: row.phone || null,
+    registrationDate: row.created_at.toISOString(),
+    plan: mapPlanLabel(row.subscription_plan),
+    status,
+    isTrial: isTrialPlan,
+    trialEndsAt: toIsoOrUndefined(row.trial_ends_at),
+    subscriptionStartsAt: toIsoOrUndefined(row.subscription_starts_at),
+    subscriptionEndsAt: toIsoOrUndefined(row.subscription_ends_at),
+  };
+}
 
 function serializeLlmUsage(totals: MerchantLlmUsageTotals) {
   return {
@@ -750,6 +819,13 @@ export const getAdminUsers = async (
   next: NextFunction
 ) => {
   try {
+    await ensureSubscriptionEndsAtColumn();
+    // Sync ended trials / paid periods so admin list shows accurate status
+    try {
+      await expireDueSubscriptions();
+    } catch (expireErr) {
+      console.warn('Could not sync expired subscriptions before listing users:', expireErr);
+    }
     const result = await pool.query(
       `SELECT 
         id,
@@ -759,6 +835,8 @@ export const getAdminUsers = async (
         subscription_plan,
         subscription_status,
         trial_ends_at,
+        subscription_starts_at,
+        subscription_ends_at,
         created_at,
         role
        FROM merchants
@@ -767,25 +845,7 @@ export const getAdminUsers = async (
     );
 
     const users = result.rows.map(row => ({
-      id: row.id,
-      email: row.email,
-      name: row.name || 'غير محدد',
-      phone: row.phone || null,
-      registrationDate: row.created_at.toISOString(),
-      plan: row.subscription_plan === 'trial' ? 'Trial' :
-            row.subscription_plan === 'comments' ? 'التعليقات' :
-            row.subscription_plan === 'single' ? 'القناة الواحدة' :
-            row.subscription_plan === 'social' ? 'السوشيال' :
-            row.subscription_plan === 'yearly' ? 'السنوية' :
-            row.subscription_plan === 'starter' ? 'Starter' :
-            row.subscription_plan === 'pro' ? 'Pro' :
-            row.subscription_plan === 'business' ? 'Business' :
-            (row.subscription_plan || 'Trial'),
-      status: row.subscription_status === 'active' ? 'active' :
-              row.subscription_status === 'suspended' ? 'suspended' :
-              'expired',
-      isTrial: row.subscription_plan === 'trial' || row.trial_ends_at !== null,
-      trialEndsAt: row.trial_ends_at ? row.trial_ends_at.toISOString() : undefined,
+      ...mapAdminUserRow(row),
       llmUsage: serializeLlmUsage(EMPTY_MERCHANT_LLM_USAGE),
     }));
 
@@ -815,6 +875,7 @@ export const getAdminUser = async (
 ) => {
   try {
     const { id } = req.params;
+    await ensureSubscriptionEndsAtColumn();
 
     const result = await pool.query(
       `SELECT 
@@ -825,6 +886,8 @@ export const getAdminUser = async (
         subscription_plan,
         subscription_status,
         trial_ends_at,
+        subscription_starts_at,
+        subscription_ends_at,
         created_at,
         role
        FROM merchants 
@@ -845,25 +908,7 @@ export const getAdminUser = async (
     }
 
     const user = {
-      id: row.id,
-      email: row.email,
-      name: row.name || 'غير محدد',
-      phone: row.phone || null,
-      registrationDate: row.created_at.toISOString(),
-      plan: row.subscription_plan === 'trial' ? 'Trial' :
-            row.subscription_plan === 'comments' ? 'التعليقات' :
-            row.subscription_plan === 'single' ? 'القناة الواحدة' :
-            row.subscription_plan === 'social' ? 'السوشيال' :
-            row.subscription_plan === 'yearly' ? 'السنوية' :
-            row.subscription_plan === 'starter' ? 'Starter' :
-            row.subscription_plan === 'pro' ? 'Pro' :
-            row.subscription_plan === 'business' ? 'Business' :
-            (row.subscription_plan || 'Trial'),
-      status: row.subscription_status === 'active' ? 'active' :
-              row.subscription_status === 'suspended' ? 'suspended' :
-              'expired',
-      isTrial: row.subscription_plan === 'trial' || row.trial_ends_at !== null,
-      trialEndsAt: row.trial_ends_at ? row.trial_ends_at.toISOString() : undefined,
+      ...mapAdminUserRow(row),
       llmUsage,
     };
 
@@ -883,17 +928,31 @@ export const updateAdminUser = async (
 ) => {
   try {
     const { id } = req.params;
-    const { name, email, subscription_plan, subscription_status, trial_ends_at } = req.body;
+    const {
+      name,
+      email,
+      subscription_plan,
+      subscription_status,
+      trial_ends_at,
+      subscription_starts_at,
+      subscription_ends_at,
+    } = req.body;
+
+    await ensureSubscriptionEndsAtColumn();
 
     // Check if user exists
     const checkResult = await pool.query(
-      'SELECT id FROM merchants WHERE id = $1',
+      `SELECT id, subscription_status, subscription_plan,
+              subscription_starts_at, subscription_ends_at, trial_ends_at
+       FROM merchants WHERE id = $1`,
       [id]
     );
 
     if (checkResult.rows.length === 0) {
       return next(createError('User not found', 404));
     }
+
+    const existing = checkResult.rows[0];
 
     // Check if email is already taken by another user
     if (email !== undefined) {
@@ -904,6 +963,43 @@ export const updateAdminUser = async (
       if (emailCheck.rows.length > 0) {
         return next(createError('Email already registered', 400));
       }
+    }
+
+    let parsedTrialEnds: Date | null | undefined;
+    let parsedStarts: Date | null | undefined;
+    let parsedEnds: Date | null | undefined;
+
+    try {
+      if (trial_ends_at !== undefined) {
+        parsedTrialEnds = parseOptionalDate(trial_ends_at, 'trial_ends_at');
+      }
+      if (subscription_starts_at !== undefined) {
+        parsedStarts = parseOptionalDate(subscription_starts_at, 'subscription_starts_at');
+      }
+      if (subscription_ends_at !== undefined) {
+        parsedEnds = parseOptionalDate(subscription_ends_at, 'subscription_ends_at');
+      }
+    } catch (dateErr: any) {
+      return next(createError(dateErr?.message || 'Invalid date', 400));
+    }
+
+    const effectiveStarts =
+      parsedStarts !== undefined
+        ? parsedStarts
+        : existing.subscription_starts_at
+          ? new Date(existing.subscription_starts_at)
+          : null;
+    const effectiveEnds =
+      parsedEnds !== undefined
+        ? parsedEnds
+        : existing.subscription_ends_at
+          ? new Date(existing.subscription_ends_at)
+          : null;
+
+    try {
+      assertSubscriptionPeriodValid(effectiveStarts, effectiveEnds);
+    } catch (rangeErr: any) {
+      return next(createError(rangeErr?.message || 'Invalid subscription period', 400));
     }
 
     // Update user
@@ -921,29 +1017,84 @@ export const updateAdminUser = async (
       values.push(email);
     }
 
-    // Get old plan before updating (if subscription_plan is being changed)
-    let oldPlan: string | null = null;
-    if (subscription_plan !== undefined) {
-      const oldPlanResult = await pool.query(
-        'SELECT subscription_plan FROM merchants WHERE id = $1',
-        [id]
-      );
-      oldPlan = oldPlanResult.rows[0]?.subscription_plan || null;
-    }
+    const oldPlan: string | null = existing.subscription_plan || null;
+    let nextStarts = effectiveStarts;
+    let nextEnds = effectiveEnds;
+    let nextTrial =
+      parsedTrialEnds !== undefined
+        ? parsedTrialEnds
+        : existing.trial_ends_at
+          ? new Date(existing.trial_ends_at)
+          : null;
+    let trialTouched = parsedTrialEnds !== undefined;
+    let startsTouched = parsedStarts !== undefined;
+    let endsTouched = parsedEnds !== undefined;
 
     if (subscription_plan !== undefined) {
       updateFields.push(`subscription_plan = $${paramCount++}`);
       values.push(subscription_plan);
+
+      if (subscription_plan === 'trial') {
+        if (!trialTouched) {
+          nextTrial = defaultTrialEndsAt();
+          trialTouched = true;
+        }
+        nextStarts = null;
+        nextEnds = null;
+        startsTouched = true;
+        endsTouched = true;
+      } else if (subscription_plan !== 'agency') {
+        if (!startsTouched && !existing.subscription_starts_at) {
+          nextStarts = new Date();
+          startsTouched = true;
+        }
+      }
     }
 
-    if (subscription_status !== undefined) {
+    let statusToWrite = subscription_status;
+    const effectivePlan =
+      subscription_plan !== undefined ? subscription_plan : oldPlan;
+
+    if (statusToWrite === undefined && endsTouched) {
+      statusToWrite = resolveStatusAfterDateEdit(
+        existing.subscription_status,
+        nextEnds,
+        true
+      );
+    }
+
+    // Trial end date edit: expire in place (stay on trial) or reactivate if extended
+    if (
+      statusToWrite === undefined &&
+      trialTouched &&
+      effectivePlan === 'trial' &&
+      existing.subscription_status !== 'suspended'
+    ) {
+      if (nextTrial && nextTrial.getTime() <= Date.now()) {
+        statusToWrite = 'expired';
+      } else if (nextTrial && nextTrial.getTime() > Date.now() && existing.subscription_status === 'expired') {
+        statusToWrite = 'active';
+      }
+    }
+
+    if (statusToWrite !== undefined) {
       updateFields.push(`subscription_status = $${paramCount++}`);
-      values.push(subscription_status);
+      values.push(statusToWrite);
     }
 
-    if (trial_ends_at !== undefined) {
+    if (trialTouched) {
       updateFields.push(`trial_ends_at = $${paramCount++}`);
-      values.push(trial_ends_at ? new Date(trial_ends_at) : null);
+      values.push(nextTrial);
+    }
+
+    if (startsTouched) {
+      updateFields.push(`subscription_starts_at = $${paramCount++}`);
+      values.push(nextStarts);
+    }
+
+    if (endsTouched) {
+      updateFields.push(`subscription_ends_at = $${paramCount++}`);
+      values.push(nextEnds);
     }
 
     if (updateFields.length === 0) {
@@ -957,7 +1108,8 @@ export const updateAdminUser = async (
       `UPDATE merchants 
        SET ${updateFields.join(', ')} 
        WHERE id = $${paramCount}
-       RETURNING id, email, name, subscription_plan, subscription_status, trial_ends_at, created_at`,
+       RETURNING id, email, name, subscription_plan, subscription_status,
+                 trial_ends_at, subscription_starts_at, subscription_ends_at, created_at`,
       values
     );
 
@@ -1006,7 +1158,17 @@ export const createAdminUser = async (
   next: NextFunction
 ) => {
   try {
-    const { name, email, password, subscription_plan, subscription_status, isTrial, trial_ends_at } = req.body;
+    const {
+      name,
+      email,
+      password,
+      subscription_plan,
+      subscription_status,
+      isTrial,
+      trial_ends_at,
+      subscription_starts_at,
+      subscription_ends_at,
+    } = req.body;
 
     if (!name || !email || !password) {
       return next(createError('Name, email, and password are required', 400));
@@ -1015,6 +1177,8 @@ export const createAdminUser = async (
     if (password.length < 6) {
       return next(createError('Password must be at least 6 characters', 400));
     }
+
+    await ensureSubscriptionEndsAtColumn();
 
     // Check if user exists
     const existingUser = await pool.query(
@@ -1032,16 +1196,43 @@ export const createAdminUser = async (
     const passwordHash = await bcrypt.default.hash(password, saltRounds);
 
     // Determine subscription plan
-    const plan = subscription_plan || 'starter';
+    const plan = subscription_plan || (isTrial ? 'trial' : 'starter');
     const status = subscription_status || 'active';
-    const trialEndsAt = isTrial && trial_ends_at ? new Date(trial_ends_at) : (isTrial ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : null);
+    const treatAsTrial = isTrial || plan === 'trial';
+
+    let trialEndsAt: Date | null = null;
+    let startsAt: Date | null = null;
+    let endsAt: Date | null = null;
+
+    try {
+      if (treatAsTrial) {
+        trialEndsAt = trial_ends_at
+          ? parseOptionalDate(trial_ends_at, 'trial_ends_at')
+          : defaultTrialEndsAt();
+      } else {
+        startsAt = subscription_starts_at !== undefined
+          ? parseOptionalDate(subscription_starts_at, 'subscription_starts_at')
+          : new Date();
+        endsAt = subscription_ends_at !== undefined
+          ? parseOptionalDate(subscription_ends_at, 'subscription_ends_at')
+          : null;
+        assertSubscriptionPeriodValid(startsAt, endsAt);
+      }
+    } catch (dateErr: any) {
+      return next(createError(dateErr?.message || 'Invalid date', 400));
+    }
 
     // Create user
     const result = await pool.query(
-      `INSERT INTO merchants (email, password_hash, name, role, subscription_plan, subscription_status, trial_ends_at)
-       VALUES ($1, $2, $3, 'user', $4, $5, $6)
-       RETURNING id, email, name, subscription_plan, subscription_status, trial_ends_at, created_at, role`,
-      [email, passwordHash, name, plan, status, trialEndsAt]
+      `INSERT INTO merchants (
+         email, password_hash, name, role,
+         subscription_plan, subscription_status,
+         trial_ends_at, subscription_starts_at, subscription_ends_at
+       )
+       VALUES ($1, $2, $3, 'user', $4, $5, $6, $7, $8)
+       RETURNING id, email, name, subscription_plan, subscription_status,
+                 trial_ends_at, subscription_starts_at, subscription_ends_at, created_at, role`,
+      [email, passwordHash, name, plan, status, trialEndsAt, startsAt, endsAt]
     );
 
     const merchant = result.rows[0];
@@ -1062,24 +1253,7 @@ export const createAdminUser = async (
       success: true,
       message: 'User created successfully',
       data: {
-        id: merchant.id,
-        email: merchant.email,
-        name: merchant.name,
-        plan: merchant.subscription_plan === 'trial' ? 'Trial' :
-              merchant.subscription_plan === 'comments' ? 'التعليقات' :
-              merchant.subscription_plan === 'single' ? 'القناة الواحدة' :
-              merchant.subscription_plan === 'social' ? 'السوشيال' :
-              merchant.subscription_plan === 'yearly' ? 'السنوية' :
-              merchant.subscription_plan === 'starter' ? 'Starter' :
-              merchant.subscription_plan === 'pro' ? 'Pro' :
-              merchant.subscription_plan === 'business' ? 'Business' :
-              (merchant.subscription_plan || 'Trial'),
-        status: merchant.subscription_status === 'active' ? 'active' :
-                merchant.subscription_status === 'suspended' ? 'suspended' :
-                'expired',
-        registrationDate: merchant.created_at.toISOString(),
-        isTrial: merchant.subscription_plan === 'trial' || merchant.trial_ends_at !== null,
-        trialEndsAt: merchant.trial_ends_at ? merchant.trial_ends_at.toISOString() : undefined
+        ...mapAdminUserRow(merchant),
       }
     });
   } catch (error: any) {
@@ -1138,6 +1312,7 @@ export const impersonateAdminUser = async (
       subscription_plan: target.subscription_plan ?? null,
       subscription_status: target.subscription_status ?? null,
       subscription_ends_at: target.subscription_ends_at ?? null,
+      trial_ends_at: target.trial_ends_at ?? null,
     });
 
     logger.info('Support impersonation started', {

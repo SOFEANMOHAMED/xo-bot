@@ -177,7 +177,7 @@ export const getMerchantProductKeywords = async (merchantId: string): Promise<st
     });
     
     // Remove duplicates and empty strings
-    const uniqueKeywords = [...new Set(keywords)].filter(k => k && k.length > 1);
+    const uniqueKeywords = [...new Set(keywords)].filter(k => k && k.length > 0);
     
     // Cache the result
     productKeywordsCache.set(merchantId, {

@@ -38,8 +38,8 @@ const FACEBOOK_OAUTH_ERROR_MESSAGES: Record<string, string> = {
   oauth_failed:
     'تعذّر إتمام تسجيل الدخول إلى فيسبوك. أعد المحاولة أو راجع إعدادات التطبيق في ميتا.',
   user_denied: 'تم إلغاء التفويض من فيسبوك. أعد المحاولة ووافق على الصلاحيات المطلوبة.',
-  invalid_state: 'انتهت صلاحية خطوة الربط. افتح «التكاملات» من لوحة التحكم وأعد ربط فيسبوك.',
-  missing_params: 'لم يكتمل تسجيل الدخول. أعد المحاولة من صفحة التكاملات.',
+  invalid_state: 'انتهت صلاحية خطوة الربط. افتح «ربط الصفحات» من لوحة التحكم وأعد ربط فيسبوك.',
+  missing_params: 'لم يكتمل تسجيل الدخول. أعد المحاولة من صفحة ربط الصفحات.',
   server_error: 'حدث خطأ غير متوقع أثناء ربط فيسبوك. حاول مرة أخرى لاحقاً.',
 };
 
@@ -53,8 +53,8 @@ const INSTAGRAM_OAUTH_ERROR_MESSAGES: Record<string, string> = {
   oauth_failed:
     'تعذّر إتمام تسجيل الدخول إلى إنستغرام. أعد المحاولة أو راجع إعدادات التطبيق في ميتا.',
   user_denied: 'تم إلغاء التفويض. أعد المحاولة ووافق على الصلاحيات المطلوبة.',
-  invalid_state: 'انتهت صلاحية خطوة الربط. افتح «التكاملات» من لوحة التحكم وأعد ربط إنستغرام.',
-  missing_params: 'لم يكتمل تسجيل الدخول. أعد المحاولة من صفحة التكاملات.',
+  invalid_state: 'انتهت صلاحية خطوة الربط. افتح «ربط الصفحات» من لوحة التحكم وأعد ربط إنستغرام.',
+  missing_params: 'لم يكتمل تسجيل الدخول. أعد المحاولة من صفحة ربط الصفحات.',
   server_error: 'حدث خطأ غير متوقع أثناء ربط إنستغرام. حاول مرة أخرى لاحقاً.',
 };
 
@@ -258,6 +258,22 @@ const MerchantApp: React.FC = () => {
     setIsDarkMode(!isDarkMode);
   };
 
+  const applyLocalSettings = useCallback((newSettings: MerchantSettings) => {
+    let previousCurrency = '';
+    setSettings((prev) => {
+      previousCurrency = prev.storeCurrency;
+      return newSettings;
+    });
+    const nextCurrency = newSettings.storeCurrency || previousCurrency;
+    if (nextCurrency && nextCurrency !== previousCurrency) {
+      setProducts((productsPrev) =>
+        productsPrev.map((p) =>
+          p.currency === nextCurrency ? p : { ...p, currency: nextCurrency }
+        )
+      );
+    }
+  }, []);
+
   // Load data functions
   const loadProducts = useCallback(async () => {
     try {
@@ -277,6 +293,7 @@ const MerchantApp: React.FC = () => {
         images: p.images || (p.imageUrl ? [p.imageUrl] : []),
         imageColors: p.imageColors || [],
         externalId: p.externalId || undefined,
+        updatedAt: p.updatedAt || undefined,
       }));
       setProducts(productsList);
     } catch (error: unknown) {
@@ -384,6 +401,10 @@ const MerchantApp: React.FC = () => {
         abandonedReminderEnabled: response.settings.abandonedReminderEnabled ?? true,
         abandonedReminderDelayMinutes: response.settings.abandonedReminderDelayMinutes ?? 45,
         abandonedReminderMessage: response.settings.abandonedReminderMessage || '',
+        productInterestReminderEnabled: response.settings.productInterestReminderEnabled ?? true,
+        productInterestReminderDelayMinutes:
+          response.settings.productInterestReminderDelayMinutes ?? 60,
+        productInterestReminderMessage: response.settings.productInterestReminderMessage || '',
         planCapabilities: response.planCapabilities ?? DEFAULT_PLAN_CAPABILITIES,
       };
       setSettings(settingsData);
@@ -542,6 +563,7 @@ const MerchantApp: React.FC = () => {
         images: response.product.images || (response.product.imageUrl ? [response.product.imageUrl] : []),
         imageColors: response.product.imageColors || [],
         externalId: response.product.externalId || undefined,
+        updatedAt: response.product.updatedAt || undefined,
       };
       
       setProducts([...products, product]);
@@ -587,6 +609,7 @@ const MerchantApp: React.FC = () => {
         images: response.product.images || (response.product.imageUrl ? [response.product.imageUrl] : []),
         imageColors: response.product.imageColors || [],
         externalId: response.product.externalId || undefined,
+        updatedAt: response.product.updatedAt || new Date().toISOString(),
       };
       
       setProducts(products.map(p => p.id === product.id ? product : p));
@@ -1001,6 +1024,7 @@ const MerchantApp: React.FC = () => {
             settings={settings}
             onNewQuery={handleNewQuery}
             onAddOrder={handleAddOrder}
+            onOrdersRefresh={loadOrders}
           />
           </ErrorBoundary>
         );
@@ -1029,7 +1053,7 @@ const MerchantApp: React.FC = () => {
                      ? newSettings.storePolicies.enableAIInjection 
                      : false,
                  });
-                 setSettings(newSettings);
+                 applyLocalSettings(newSettings);
                  showNotification('تم حفظ التعديلات بنجاح', 'success');
                } catch (error: unknown) {
                  showNotification(getErrorMessage(error) || 'فشل حفظ التعديلات', 'error');
@@ -1080,7 +1104,7 @@ const MerchantApp: React.FC = () => {
                       ? newSettings.storePolicies.enableAIInjection
                       : false
                 });
-                setSettings(newSettings);
+                applyLocalSettings(newSettings);
                 showNotification('تم حفظ التعديلات بنجاح', 'success');
               } catch (error: unknown) {
                 showNotification(getErrorMessage(error) || 'فشل حفظ التعديلات', 'error');
@@ -1159,8 +1183,13 @@ const MerchantApp: React.FC = () => {
                   abandonedReminderEnabled: newSettings.abandonedReminderEnabled ?? true,
                   abandonedReminderDelayMinutes: newSettings.abandonedReminderDelayMinutes ?? 45,
                   abandonedReminderMessage: newSettings.abandonedReminderMessage || '',
+                  productInterestReminderEnabled: newSettings.productInterestReminderEnabled ?? true,
+                  productInterestReminderDelayMinutes:
+                    newSettings.productInterestReminderDelayMinutes ?? 60,
+                  productInterestReminderMessage:
+                    newSettings.productInterestReminderMessage || '',
                 });
-                setSettings(newSettings);
+                applyLocalSettings(newSettings);
                 showNotification('تم حفظ التعديلات بنجاح', 'success');
               } catch (error: unknown) {
                 showNotification(getErrorMessage(error) || 'فشل حفظ التعديلات', 'error');

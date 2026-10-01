@@ -19,6 +19,11 @@ import apiService from '../services/api';
 import { logger } from '../utils/logger';
 import { useInboxRealtime, type InboxStreamEvent } from '../hooks/useInboxRealtime';
 import EmojiPicker from './EmojiPicker';
+import {
+  isWhatsAppPhoneLabel,
+  normalizeWhatsAppPhoneLabel,
+  phoneDisplayFromWhatsAppUserId,
+} from '../utils/whatsappDisplay';
 
 type ConversationSourcePost = {
   source: string;
@@ -147,13 +152,26 @@ function isPlaceholderInboxName(name: string): boolean {
   // Placeholders like «عميل فيسبوك» / «عميل إنستغرام» / «عميل غير معروف»
   if (n.startsWith('عميل')) return true;
   if (n === 'facebook user' || n === 'instagram user') return true;
+  // Meta PSID / IGSID mistaken as a name (not WhatsApp phones — handled in displayName)
   if (/^\d{8,}$/.test(n)) return true;
   return false;
 }
 
-function displayName(c: Pick<InboxConversation, 'userName' | 'userId'>): string {
+function displayName(c: Pick<InboxConversation, 'userName' | 'userId' | 'platform'>): string {
   const name = (c.userName || '').trim();
+  const isWhatsApp = (c.platform || '').toLowerCase() === 'whatsapp';
+
+  if (isWhatsApp && name && isWhatsAppPhoneLabel(name)) {
+    return normalizeWhatsAppPhoneLabel(name);
+  }
+
   if (name && !isPlaceholderInboxName(name)) return name;
+
+  if (isWhatsApp) {
+    const phone = phoneDisplayFromWhatsAppUserId(c.userId);
+    if (phone) return phone;
+  }
+
   if (c.userId) return `عميل · ${String(c.userId).slice(-6)}`;
   return 'عميل';
 }

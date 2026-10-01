@@ -4,6 +4,116 @@
 
 ---
 
+## 2026-09-24 — تصحيح مقاس السلة عبر correct_variant
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** `correct_variant` كان يطبّق اللون فقط (`if (!action.color) return`) فيطفئ مسار المحرك دون كتابة المقاس. أصبح يكتب `color` و/أو `size`؛ كلمة «عدل» دخلت إشارة التصحيح؛ مسار `resolveVariantChange` يبقى متاحاً بعد `correct_variant` لإصلاح مقاس ناقص.
+- **الملفات:** `interpreter/apply.ts` · `variantEngine/change.ts` · `interimCancelMatchers.ts` · `index.ts` · اختبارات variant/interpreter/interim · هذا السجل.
+- **اختبارات:** `test-variant-engine` · `test-interpreter-offline` · `test-interim-cancel-matchers`.
+- **أثر السلوك:** «عدل/غيّر المقاس لـ s» يحدّث سطر السلة؛ `correct_variant` بمقاس فقط لم يعد no-op.
+- **حدود معروفة:** إن المفسّر أخطأ ووضع قيمة المقاس في حقل اللون فقط، يعتمد الإصلاح على محرك المتغيرات لنفس الدور.
+
+---
+
+## 2026-09-24 — مركزية I4 / صورة / هوية
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** ازدواج تأكيد الطلب (fast-path مقابل resolveOrderNextAction) وصورة (index/agent/turnIntent) وهوية (regex مضمّن مقابل collectInfoOrder). أُضيف `resolveConfirmFinalize` كمالك I4؛ `resolvePhotoDecision` لمسار الإرفاق/send_image؛ `botAskedIdentityField` + whitelist `provide_identity_field` مقلوب؛ `effectiveNextActionFromTurnFacts` يحمي confirm_order من تخفيض الحقائق.
+- **الملفات:** `orderConfirmationPolicy.ts` · `turnIntent.ts` · `collectInfoOrder.ts` · `interpreter/flip.ts` · `whitelist.ts` · `turnFacts.ts` · `index.ts` · `agent.ts` · هذا السجل + BOT_BRAIN_MAP / INTERPRETER_CONTRACT.
+- **اختبارات:** typecheck · test-all · test-live --gate: I4/confirm/order = 100%؛ البوابة فشلت على turnType price (~79% مقابل 90%) لأسباب تصنيف/تركيز سابقة (S16/S17) لا مسار التأكيد.
+- **أثر السلوك:** مسار تأكيد واحد؛ إرفاق صورة من قرار واحد؛ إجابة قالب الهوية عبر المفسّر (أجوبة قصيرة/هاتف؛ blobs اسم+عنوان تبقى للوكيل).
+- **حدود معروفة:** affirm_order/deny_order لم يُقلبا كـ LLM types (whitelist يبقى). سكة interim cancel تبقى fallback عند عدم تطبيق المفسّر.
+
+---
+
+## 2026-09-24 — مركزية الصيانة: قلب select/cancel + مالك واحد
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** إكمال ما بعد Phase 4 الجزئي — قلب `select_color`/`select_size`/`correct_variant`/`add_product`/`remove_line`/`cancel_order`/`browse_catalog`؛ whitelist حتمي لـ pending اللون/المقاس والإلغاء؛ إطفاء المسارات القديمة لنفس الدور؛ `resolveVariantChange` يعتمد المحرك فقط؛ حذف `VARIANT_OPTION_PATTERN`؛ `nextActionFromInterpreterFacts` يملك `next_action` النهائي؛ كمية عبر `resolveQuantity` فقط (لا من النموذج)؛ صدق عبر `groundInterpreterReply` فقط.
+- **الملفات:** `interpreter/flip.ts` · `whitelist.ts` · `candidates.ts` · `nextAction.ts` · `index.ts` · `resolveVariantChange.ts` · `interimCancelMatchers.ts` · `arabicQuantityWords.ts` · `docs/BOT_BRAIN_MAP.md` · `docs/INTERPRETER_CONTRACT.md` · هذا السجل.
+- **اختبارات:** `test-interpreter-offline` · `test-interim-cancel-matchers` · `test-variant-engine` · typecheck / `test-all` حيث أمكن.
+- **أثر السلوك:** إجابة pending اللون عبر المفسّر؛ إلغاء الطلب يُطبَّق ويُرجع فوراً؛ تصحيح متغير بلا معجم ألوان ثابت؛ النموذج لا يثبّت الكمية.
+- **حدود معروفة:** `confirm_order` يبقى I4 فقط. `test-live --gate` لم يُشغَّل هنا.
+
+---
+
+## 2026-09-24 — Phase 4 D–F partial: أغلفة لون/مقاس + مخفّض + بوابة صدق
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** إكمال دفعات د–و الآمنة بعد قلب صفوف 1–4: `extractBareSizeAnswer` و`extractNumericColorChoice` أغلفة على المحرك؛ `extractColorFromUserText` يفضّل الاستخراج الصارم أولاً. مخفّض `nextActionFromInterpreterFacts` و`groundInterpreterReply` مربوطان في المسار الحي. `interimCancelMatchers` / أنواع select_color|size|cancel تبقى حتى قلب §6 صفوف 5–6.
+- **الملفات:** `pendingBotQuestion.ts` · `orderColorPolicy.ts` · `variantEngine/axes.ts` · `variantEngine/index.ts` · `docs/BRAIN_FIX_PLAN.md` · هذا السجل.
+- **اختبارات:** `test-interpreter-*` · `test-v4-size-pipeline` · `test-all` حيث أمكن.
+- **أثر السلوك:** لا تغيير مقصود على اختيار اللون/المقاس الناجح؛ المسارات القديمة لم تعد تكرّر منطق الاستخراج.
+- **حدود معروفة:** حذف `VARIANT_OPTION_PATTERN` مؤجّل لقلب cancel/variant. `test-live --gate` لم يُشغَّل هنا.
+
+---
+
+## 2026-09-24 — Phase 4 Interpreter: هيكل + whitelist + قلب أنواع 1–4
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** نية الدور كانت موزّعة على مصنّفات كلمات + أعلام النموذج + fast-path. وُضعت وحدة `interpreter/` حسب `INTERPRETER_CONTRACT`: whitelist حتمي (موظف / هل-بوت / نعم-لا عند التأكيد)، تحقق مغلق، تطبيق عبر السلة، استدعاء JSON منفصل. الأنواع 1–4 (§6) تُقلَب عند التطبيق وتُطفأ المصنّفات القديمة لنفس الدور. 5–7 تبقى ظلاً. مخفّض `next_action` وبوابة `groundInterpreterReply` مركزية.
+- **الملفات:** `interpreter/*` · `index.ts` · `test_interpreter_validate.ts` · `test_interpreter_offline.ts` · `package.json` · `docs/BRAIN_FIX_PLAN.md` · هذا السجل.
+- **اختبارات:** `npm run test-interpreter-validate` · `npm run test-interpreter-offline` · `test-all`.
+- **أثر السلوك:** طلب موظف يحوّل فوراً. نعم/لا العاريان أثناء انتظار التأكيد يملكهما الـ whitelist. نزاع لون (`ask_product_info`) لا يستخرج لوناً ولا يجمع اسماً. استدعاء LLM إضافي عندما لا يطابق الـ whitelist (فشل JSON → المسار القديم).
+- **حدود معروفة:** `INTERPRETER_MODE=shadow` يعطّل قلب LLM ويبقي الـ whitelist. أنواع select/cancel/browse لم تُقلب. `test-live --gate` لم يُشغَّل هنا.
+
+---
+
+## 2026-09-24 — VARIANT_ENGINE V5: نقل اللون فوق المحرك
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** اللون كان يستخرج بالبحث الجزئي في الجملة (`extractColorFromUserText` / P1-2). V5 يجعل `buildAskColorMessage` و`extractBareColorAnswer` وفرع الرسالة الحالية في `resolveOrderColor` و`gateConfirmWhenColorInvalid` و`resolveVariantChange` أغلفة على المحرك. «الأسود غالي؟» لم تعد اختيار لون؛ «أسود» / «الأسود» / «بدي الأسود» / «2» تبقى. تصحيح «غيّر للأحمر» يبقى على adapter اللون.
+- **الملفات:** `orderColorPolicy.ts` · `pendingBotQuestion.ts` · `resolveVariantChange.ts` · `index.ts` · `variantEngine/match.ts` · `variantEngine/extract.ts` · `variantEngine/axes.ts` · `test_variant_engine.ts` · `docs/VARIANT_ENGINE.md` · `docs/BRAIN_FIX_PLAN.md` · هذا السجل.
+- **اختبارات:** `npm run test-variant-engine` + الاختبارات المرتبطة باللون/المقاس + typecheck.
+- **أثر السلوك:** جملة طويلة فيها اسم لون (سعر/سؤال) لا تثبّت لوناً من الرسالة الحالية. قالب سؤال اللون بلا إيموجي (نفس «أي لون بتحب؟»).
+- **حدود معروفة:** `extractColorFromUserText` ما زال واسعاً لتاريخ الرسائل. `test-live --gate` لم يُشغَّل هنا.
+
+---
+
+## 2026-09-24 — مقاس: لا تمسح على منتج بلا لون + استخراج الرسالة الحالية
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** بعد سؤال النموذج «أي مقاس تفضله؟» كان `M` يُتجاهل ويُعاد قالب V4. سببان: (1) فرع المنتج بلا ألوان كان يصفّر `collectedInfo.size`؛ (2) `extractBareVariantAnswer` كان يعمل فقط عند pending=size (قالبنا «بتحب» لا «تفضله»).
+- **الملفات:** `index.ts` (`resolveBareSizeFromMessage` + إيقاف مسح المقاس مع اللون) · `test_v4_size_pipeline.ts` · هذا السجل.
+- **اختبارات:** `npm run test-v4-size-pipeline` + typecheck.
+- **أثر السلوك:** `M` على قميص بمقاسات `s,m,l` يُثبَّت `m` ولا يُعاد سؤال المقاس. جملة طويلة فيها قيمة مقاس ما زالت لا تُختار.
+- **حدود معروفة:** عرض قائمة المقاسات اللاتينية داخل عربي (اتجاه RTL) لم يُصلح.
+
+---
+
+## 2026-09-24 — VARIANT_ENGINE V4: ربط المقاس في processWithSalesGPT
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** المقاس كان نصف موصول (`extractBareSizeAnswer` + لا `buildAskSizeMessage`). V4 يفرض سؤال المقاس من القالب العام بعد اكتمال اللون (أو منتج بلا ألوان)، يمنع `confirm_order` إن المقاس ناقص، ويستهلك إجابة pending عبر `extractBareVariantAnswer` + `setLineVariant`. اللون لم يُنقل — يبقى `orderColorPolicy`.
+- **الملفات:** `index.ts` · `conversationCart.ts` (`normalizeCart` يحفظ `variants`) · `test_v4_size_pipeline.ts` · `test_variant_engine.ts` · `package.json` · `variantEngine/index.ts` · `variantEngine/types.ts` · `docs/VARIANT_ENGINE.md` · `docs/BRAIN_FIX_PLAN.md` · هذا السجل.
+- **اختبارات:** `npm run test-v4-size-pipeline` و `npm run test-variant-engine` و typecheck.
+- **أثر السلوك:** منتج بمقاسات (عطر/فستان/حذاء) يُسأل عن المقاس قبل التأكيد. كتالوج real3 (`sizes: []`) لا يتغيّر. «50ml غالي؟» أثناء سؤال مقاس ليست اختياراً.
+- **حدود معروفة:** V5 (نقل اللون) لم يُنفَّذ. `test-live --gate` على كتالوج `ten` قد يتغيّر — لم يُشغَّل هنا (تكلفة ~\$0.10).
+
+---
+
+## 2026-09-24 — VARIANT_ENGINE V1–V3: وحدة عامة بلا ربط pipeline
+
+- **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.
+- **ماذا تغيّر والسبب الجذري:** تنفيذ عقد `docs/VARIANT_ENGINE.md` للمراحل الآمنة: محاور ديناميكية من `colors`/`sizes`/`variant_axes`، قالب سؤال واحد، استخراج كتالوجي أضيق من P1-2، pending كـ `string`، حسم غموض (pending → حصري → توضيح). **لا استدعاء من `processWithSalesGPT`** — سكك اللون/المقاس القديمة كما هي.
+- **الملفات:** `variantEngine/*` · `test_variant_engine.ts` · `types.ts` (pending نص + `variant_axes` + `variants`) · `pendingBotQuestion.ts` (قراءة نصية) · `package.json` · `docs/VARIANT_ENGINE.md` · هذا السجل.
+- **اختبارات:** `npm run test-variant-engine` PASS؛ typecheck PASS؛ pending / p0-color-focus / conversation-cart PASS.
+- **أثر السلوك:** لا تغيير في مسار الإنتاج. «الأسود غالي؟» ما زالت تُختار لوناً على السكة القديمة حتى V5.
+- **حدود معروفة:** V4 (فرض سؤال مقاس) وV5 (نقل اللون) لم يُنفَّذا. عمود SQL `variant_axes` لم يُضف — الحقل اختياري على كائن المنتج في الذاكرة فقط.
+
+---
+
+## 2026-09-24 — V0 VARIANT_ENGINE: تصميم محرك متغيرات عام — توثيق فقط
+
+- **الهاش:** لا commit تنفيذ — تصميم.
+- **ماذا تغيّر والسبب الجذري:** عقل المتغيرات خانتان ثابتتان (`color`/`size`)؛ اللون موصول بالكامل والمقاس نصف موصول؛ `product_options` عامة وغير مستخدمة قرارياً. أي نوع ثالث كان سيعيد نفس السكك (ومنها اتساع P1-2). وُضع عقد محرك واحد: محور = id + labels + values؛ `colors`/`sizes` حالة خاصة؛ `variant_axes` JSONB للأنواع اللاحقة بلا هجرة لكل نوع.
+- **الملفات:** `docs/VARIANT_ENGINE.md` · `docs/BRAIN_FIX_PLAN.md` (مؤشر) · هذا السجل.
+- **اختبارات:** لا تشغيل — لا كود إنتاج.
+- **أثر السلوك:** لا تغيير. اللون الحالي يبقى حتى V5 في الخطة.
+- **حدود معروفة:** التنفيذ يبدأ بـ V1 (أغلفة `effectiveAxes` بلا ربط pipeline). أول كسر حيّ متوقع عند V4 (فرض سؤال مقاس على كتالوج `ten`). أول كسر لسلوك اللون عند V5 (استخراج أضيق من P1-2). لا قوائم كلمات نية.
+
+---
+
 ## 2026-09-23 — PHASE 2H / ITEM 2: ملخص سلة بعد تغيير اللون — فرع `main`
 
 - **الهاش:** يُطابق `git log -1 --format=%H` بعد هذا الـ commit.

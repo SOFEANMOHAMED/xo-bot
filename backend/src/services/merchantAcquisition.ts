@@ -117,6 +117,279 @@ function generateAcqCode(): string {
   return `${ACQ_CODE_PREFIX}${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
 }
 
+const ALLOWED_LINK_PATHS = new Set(['/signup', '/', '/login']);
+const RESERVED_LINK_CODES = new Set([
+  'GO',
+  'LOGIN',
+  'SIGNUP',
+  'APP',
+  'ADMIN',
+  'AGENCY',
+  'API',
+  'ABOUT',
+  'REF',
+  'WEBHOOKS',
+  'STORIFY',
+  'INTEGRATIONS',
+]);
+
+export type MarketingTrackingLink = {
+  id: string;
+  code: string;
+  name: string | null;
+  path: string;
+  source: string | null;
+  medium: string | null;
+  campaign: string | null;
+  content: string | null;
+  term: string | null;
+  clickCount: number;
+  signups: number;
+  paid: number;
+  isActive: boolean;
+  createdAt: string;
+  url: string;
+};
+
+let marketingLinksEnsured = false;
+
+export async function ensureMarketingTrackingLinksTable(): Promise<void> {
+  if (marketingLinksEnsured) return;
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS marketing_tracking_links (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      code VARCHAR(32) NOT NULL UNIQUE,
+      name VARCHAR(128),
+      path VARCHAR(64) NOT NULL DEFAULT '/signup',
+      utm_source VARCHAR(64),
+      utm_medium VARCHAR(64),
+      utm_campaign VARCHAR(128),
+      utm_content VARCHAR(128),
+      utm_term VARCHAR(128),
+      click_count INTEGER NOT NULL DEFAULT 0,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_marketing_tracking_links_active
+      ON marketing_tracking_links(is_active, created_at DESC)
+  `);
+  marketingLinksEnsured = true;
+}
+
+export function normalizeTrackingLinkCode(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const code = raw.trim().toUpperCase().replace(/[^A-Z0-9\-_]/g, '');
+  if (code.length < 3 || code.length > 32) return null;
+  if (RESERVED_LINK_CODES.has(code)) return null;
+  return code;
+}
+
+function normalizeLinkPath(raw: unknown): string {
+  const path = cleanStr(raw, 64) || '/signup';
+  return ALLOWED_LINK_PATHS.has(path) ? path : '/signup';
+}
+
+export function buildUniqueGoUrl(code: string, baseUrl?: string): string {
+  const base =
+    (baseUrl || process.env.CORS_ORIGIN || process.env.FRONTEND_URL || 'https://xo-bot.com').replace(
+      /\/+$/,
+      ''
+    );
+  return `${base}/go/${encodeURIComponent(code)}`;
+}
+
+function mapMarketingLinkRow(row: Record<string, unknown>): MarketingTrackingLink {
+  const code = String(row.code || '');
+  return {
+    id: String(row.id),
+    code,
+    name: (row.name as string) || null,
+    path: String(row.path || '/signup'),
+    source: (row.utm_source as string) || null,
+    medium: (row.utm_medium as string) || null,
+    campaign: (row.utm_campaign as string) || null,
+    content: (row.utm_content as string) || null,
+    term: (row.utm_term as string) || null,
+    clickCount: Number(row.click_count || 0),
+    signups: Number(row.signups || 0),
+    paid: Number(row.paid || 0),
+    isActive: Boolean(row.is_active),
+    createdAt: row.created_at ? new Date(String(row.created_at)).toISOString() : '',
+    url: buildUniqueGoUrl(code),
+  };
+}
+
+async function generateUniqueMarketingCode(): Promise<string> {
+  for (let i = 0; i < 8; i++) {
+    const code = `UL${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+    const existing = await pool.query(
+      `SELECT 1 FROM marketing_tracking_links WHERE code = $1 LIMIT 1`,
+      [code]
+    );
+    if (existing.rows.length === 0) return code;
+  }
+  throw new Error('Failed to allocate unique tracking code');
+}
+
+export async function createMarketingTrackingLink(input: {
+  name?: string | null;
+  code?: string | null;
+  path?: string | null;
+  source?: string | null;
+  medium?: string | null;
+  campaign?: string | null;
+  content?: string | null;
+  term?: string | null;
+}): Promise<MarketingTrackingLink> {
+  await ensureMarketingTrackingLinksTable();
+
+  const name = cleanStr(input.name, 128);
+  const source = cleanStr(input.source, 64);
+  const medium = cleanStr(input.medium, 64);
+  const campaign = cleanStr(input.campaign, 128);
+  const content = cleanStr(input.content, 128);
+  const term = cleanStr(input.term, 128);
+  const path = normalizeLinkPath(input.path);
+
+  if (!name && !source && !medium && !campaign && !content && !term) {
+    const err = new Error('أدخل اسماً أو حقول UTM للرابط الفريد') as Error & { statusCode?: number };
+    err.statusCode = 400;
+    throw err;
+  }
+
+  let code = input.code ? normalizeTrackingLinkCode(input.code) : null;
+  if (input.code && !code) {
+    const err = new Error('الكود المخصص غير صالح — استخدم 3–32 حرفاً (A-Z, 0-9, -, _)') as Error & {
+      statusCode?: number;
+    };
+    err.statusCode = 400;
+    throw err;
+  }
+  if (!code) code = await generateUniqueMarketingCode();
+
+  try {
+    const inserted = await pool.query(
+      `INSERT INTO marketing_tracking_links
+        (code, name, path, utm_source, utm_medium, utm_campaign, utm_content, utm_term)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING *`,
+      [code, name, path, source, medium, campaign, content, term]
+    );
+    return mapMarketingLinkRow({ ...inserted.rows[0], signups: 0, paid: 0 });
+  } catch (e: unknown) {
+    const pg = e as { code?: string };
+    if (pg.code === '23505') {
+      const err = new Error('هذا الكود مستخدم مسبقاً — اختر كوداً آخر') as Error & { statusCode?: number };
+      err.statusCode = 409;
+      throw err;
+    }
+    throw e;
+  }
+}
+
+export async function listMarketingTrackingLinks(): Promise<MarketingTrackingLink[]> {
+  await ensureMarketingTrackingLinksTable();
+  await ensureMerchantAcquisitionColumns();
+
+  const paidPredicate = `subscription_plan IS NOT NULL
+    AND subscription_plan NOT IN ('trial', 'expired', '')
+    AND COALESCE(subscription_status, 'active') IN ('active', 'past_due')`;
+
+  const result = await pool.query(
+    `SELECT l.*,
+            COUNT(m.id)::int AS signups,
+            COUNT(m.id) FILTER (WHERE ${paidPredicate})::int AS paid
+     FROM marketing_tracking_links l
+     LEFT JOIN merchants m
+       ON m.acquisition_acq_code = l.code
+      AND COALESCE(m.role, 'user') = 'user'
+     GROUP BY l.id
+     ORDER BY l.created_at DESC
+     LIMIT 200`
+  );
+  return result.rows.map((row) => mapMarketingLinkRow(row));
+}
+
+export async function setMarketingTrackingLinkActive(
+  id: string,
+  isActive: boolean
+): Promise<MarketingTrackingLink> {
+  await ensureMarketingTrackingLinksTable();
+  const updated = await pool.query(
+    `UPDATE marketing_tracking_links
+     SET is_active = $2, updated_at = CURRENT_TIMESTAMP
+     WHERE id = $1
+     RETURNING *`,
+    [id, isActive]
+  );
+  if (!updated.rows[0]) {
+    const err = new Error('الرابط غير موجود') as Error & { statusCode?: number };
+    err.statusCode = 404;
+    throw err;
+  }
+  return mapMarketingLinkRow({ ...updated.rows[0], signups: 0, paid: 0 });
+}
+
+export type ResolvedMarketingLink = {
+  code: string;
+  path: string;
+  source: string | null;
+  medium: string | null;
+  campaign: string | null;
+  content: string | null;
+  term: string | null;
+  destination: string;
+};
+
+export async function resolveMarketingTrackingLink(
+  rawCode: string,
+  opts?: { recordClick?: boolean }
+): Promise<ResolvedMarketingLink | null> {
+  await ensureMarketingTrackingLinksTable();
+  const code = normalizeTrackingLinkCode(rawCode);
+  if (!code) return null;
+
+  const result = opts?.recordClick
+    ? await pool.query(
+        `UPDATE marketing_tracking_links
+         SET click_count = click_count + 1, updated_at = CURRENT_TIMESTAMP
+         WHERE code = $1 AND is_active = TRUE
+         RETURNING *`,
+        [code]
+      )
+    : await pool.query(
+        `SELECT * FROM marketing_tracking_links WHERE code = $1 AND is_active = TRUE LIMIT 1`,
+        [code]
+      );
+
+  const row = result.rows[0];
+  if (!row) return null;
+
+  const path = normalizeLinkPath(row.path);
+  const q = new URLSearchParams();
+  if (row.utm_source) q.set('utm_source', String(row.utm_source));
+  if (row.utm_medium) q.set('utm_medium', String(row.utm_medium));
+  if (row.utm_campaign) q.set('utm_campaign', String(row.utm_campaign));
+  if (row.utm_content) q.set('utm_content', String(row.utm_content));
+  if (row.utm_term) q.set('utm_term', String(row.utm_term));
+  q.set('acq', String(row.code));
+  const qs = q.toString();
+
+  return {
+    code: String(row.code),
+    path,
+    source: row.utm_source || null,
+    medium: row.utm_medium || null,
+    campaign: row.utm_campaign || null,
+    content: row.utm_content || null,
+    term: row.utm_term || null,
+    destination: qs ? `${path}?${qs}` : path,
+  };
+}
+
 /**
  * Ensure a platform conversation has a stable short acq code for tracked signup links.
  */
@@ -254,19 +527,33 @@ export async function applyMerchantAcquisition(
 
   let merged: MerchantAcquisitionInput = { ...input };
   let platformConversationId: string | null = null;
+  let fromMarketingLink = false;
 
   if (merged.acqCode) {
-    const fromAcq = await resolveFromAcqCode(merged.acqCode);
-    if (fromAcq) {
-      platformConversationId = fromAcq.platformConversationId;
+    const fromLink = await resolveMarketingTrackingLink(merged.acqCode);
+    if (fromLink) {
+      fromMarketingLink = true;
       merged = {
         ...merged,
-        source: merged.source || fromAcq.source,
-        medium: merged.medium || fromAcq.medium,
-        campaign: merged.campaign || fromAcq.campaign || fromAcq.ref,
-        adId: merged.adId || fromAcq.adId,
-        ref: merged.ref || fromAcq.ref,
+        source: merged.source || fromLink.source,
+        medium: merged.medium || fromLink.medium,
+        campaign: merged.campaign || fromLink.campaign,
+        content: merged.content || fromLink.content,
+        term: merged.term || fromLink.term,
       };
+    } else {
+      const fromAcq = await resolveFromAcqCode(merged.acqCode);
+      if (fromAcq) {
+        platformConversationId = fromAcq.platformConversationId;
+        merged = {
+          ...merged,
+          source: merged.source || fromAcq.source,
+          medium: merged.medium || fromAcq.medium,
+          campaign: merged.campaign || fromAcq.campaign || fromAcq.ref,
+          adId: merged.adId || fromAcq.adId,
+          ref: merged.ref || fromAcq.ref,
+        };
+      }
     }
   }
 
@@ -274,7 +561,7 @@ export async function applyMerchantAcquisition(
   if (!merged.source) {
     if (merged.fbclid || merged.adId) merged.source = 'facebook_ad';
     else if (merged.gclid) merged.source = 'google_ad';
-    else if (merged.campaign || merged.medium) merged.source = 'campaign';
+    else if (merged.campaign || merged.medium || fromMarketingLink) merged.source = 'campaign';
     else if (merged.acqCode) merged.source = 'facebook_messenger';
   }
 

@@ -59,7 +59,6 @@ export const checkSubscriptionStatus = async (
     const accountType = merchant.account_type || 'merchant';
     const subscriptionPlan = merchant.subscription_plan || 'trial';
     let subscriptionStatus = merchant.subscription_status || 'active';
-    const trialEndsAt = merchant.trial_ends_at;
 
     // Agency accounts are management-only (no channels / ops APIs)
     if (accountType === 'agency' || subscriptionPlan === 'agency') {
@@ -73,11 +72,12 @@ export const checkSubscriptionStatus = async (
       );
     }
 
-    // Auto-expire paid plans whose period has ended
+    // Auto-expire paid plans / ended trials
     const enforced = await enforceMerchantSubscriptionExpiry(merchantId, {
       subscription_plan: merchant.subscription_plan,
       subscription_status: merchant.subscription_status,
-      subscription_ends_at: merchant.subscription_ends_at
+      subscription_ends_at: merchant.subscription_ends_at,
+      trial_ends_at: merchant.trial_ends_at,
     });
     subscriptionStatus = enforced.subscriptionStatus;
 
@@ -85,33 +85,17 @@ export const checkSubscriptionStatus = async (
       if (isAllowedExpiredPath(req.path) || isAllowedExpiredPath(req.originalUrl || '')) {
         return next();
       }
+      const isTrialPlan = subscriptionPlan === 'trial';
       return next(
         createError(
-          'انتهى اشتراكك أو تم تعليق حسابك. يرجى تجديد الباقة للاستمرار في استخدام الخدمة.',
+          isTrialPlan
+            ? 'انتهت الفترة التجريبية المجانية. يرجى ترقية باقاتك للاستمرار في استخدام الخدمة.'
+            : 'انتهى اشتراكك أو تم تعليق حسابك. يرجى تجديد الباقة للاستمرار في استخدام الخدمة.',
           403,
           true,
-          'SUBSCRIPTION_EXPIRED'
+          isTrialPlan ? 'TRIAL_EXPIRED' : 'SUBSCRIPTION_EXPIRED'
         )
       );
-    }
-
-    // Trial plan: block after trial_ends_at (except renewal paths)
-    if (subscriptionPlan === 'trial' && trialEndsAt) {
-      const now = new Date();
-      const trialEndDate = new Date(trialEndsAt);
-
-      if (now > trialEndDate) {
-        if (!isAllowedExpiredPath(req.path) && !isAllowedExpiredPath(req.originalUrl || '')) {
-          return next(
-            createError(
-              'انتهت الفترة التجريبية المجانية. يرجى ترقية باقاتك للاستمرار في استخدام الخدمة.',
-              403,
-              true,
-              'TRIAL_EXPIRED'
-            )
-          );
-        }
-      }
     }
 
     next();

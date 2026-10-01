@@ -137,8 +137,15 @@
         animation: float 6s ease-in-out infinite;
       }
     </style>
+    <!-- Meta Pixel (same-origin bootstrap; CSP must allow connect.facebook.net) -->
+    <script src="/meta-pixel.js"></script>
 </head>
   <body class="bg-gray-50 dark:bg-gray-900 transition-colors duration-300">
+    <!-- Meta Pixel noscript -->
+    <noscript><img height="1" width="1" style="display:none"
+      src="https://www.facebook.com/tr?id=2652720098511687&ev=PageView&noscript=1"
+      alt=""
+    /></noscript>
     <!-- Skip to main content link for screen readers -->
     <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:right-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-indigo-600 focus:text-white focus:rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
       التخطي إلى المحتوى الرئيسي

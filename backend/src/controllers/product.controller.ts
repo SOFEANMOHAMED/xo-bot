@@ -8,15 +8,21 @@ import { invalidateProductKeywords } from '../services/cacheService.js';
 import { clearProductKeywordsCache } from '../services/tools/catalogTool.js';
 import { clearProductCache } from '../catalog/product-search.js';
 import { resolveImageSrcForServing } from '../catalog/resolve-product-image.js';
+import { readUploadSrcMedia } from '../catalog/upload-local-media.js';
 import { scheduleProductImageReindex } from '../catalog/visual-embeddings.js';
 
 const MAX_PRODUCT_IMAGES = 10;
 
-/** Accept absolute http(s) URLs used by uploads / CDN */
+/** Accept absolute http(s) URLs used by uploads / CDN — reject SVG data URLs (XSS risk) */
 const imageUrlSchema = z
   .string()
   .refine(
-    (v) => !v || v.startsWith('http://') || v.startsWith('https://') || v.startsWith('data:image/'),
+    (v) => {
+      if (!v) return true;
+      if (v.startsWith('http://') || v.startsWith('https://')) return true;
+      // Allow raster data URLs only (no SVG — can embed scripts when served as image/svg+xml)
+      return /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(v);
+    },
     { message: 'Invalid image URL' }
   );
 
@@ -477,7 +483,7 @@ export const updateProduct = async (
 };
 
 // Get product image (handles both base64 and HTTP URLs)
-// Public endpoint — supports ?img=<galleryUuid>&color=<name> for color-aware bot delivery
+// Public endpoint — supports ?img=&color=&size= for variant-aware bot delivery
 export const getProductImage = async (
   req: Request,
   res: Response,
@@ -493,10 +499,13 @@ export const getProductImage = async (
       typeof req.query.color === 'string' && req.query.color.trim()
         ? req.query.color.trim()
         : null;
+    const sizeQuery =
+      typeof req.query.size === 'string' && req.query.size.trim()
+        ? req.query.size.trim()
+        : null;
 
-    // Get product image from database (merchant-scoped via product row)
     const result = await pool.query(
-      `SELECT image_url, merchant_id, colors
+      `SELECT image_url, merchant_id, colors, sizes
        FROM products 
        WHERE id = $1`,
       [productId]
@@ -515,138 +524,33 @@ export const getProductImage = async (
       primaryImageUrl: product.image_url || null,
       imageId,
       color: colorQuery,
-      colors: product.colors || null
+      size: sizeQuery,
+      colors: product.colors || null,
+      sizes: product.sizes || null,
     });
 
     if (!imageUrl) {
       return next(createError('Image not found', 404));
     }
 
-    // Set CORS headers for all responses
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 
-    // If it's a base64 image, convert it to a data URL response
-    if (imageUrl.startsWith('data:image/')) {
-      const match = imageUrl.match(/data:image\/([^;]+);base64,(.+)/);
-      if (match && match[2]) {
-        const mimeType = match[1];
-        const base64Data = match[2];
-        const imageBuffer = Buffer.from(base64Data, 'base64');
-
-        res.setHeader('Content-Type', `image/${mimeType}`);
-        res.setHeader('Content-Length', imageBuffer.length);
-        res.setHeader('Cache-Control', 'public, max-age=31536000');
-        return res.send(imageBuffer);
-      }
+    const localMedia = readUploadSrcMedia(imageUrl, merchantId);
+    if (localMedia) {
+      res.setHeader('Content-Type', localMedia.mimetype);
+      res.setHeader('Content-Length', localMedia.buffer.length);
+      // Allow long cache only when clients append ?v= (dashboard does after image edits).
+      res.setHeader('Cache-Control', 'public, max-age=86400, must-revalidate');
+      return res.send(localMedia.buffer);
     }
 
-    // Local disk path from upload API (e.g. /uploads/product-image-123.jpg or /uploads/{merchantId}/image.webp)
-    const pathMod = await import('path');
-    const fsMod = await import('fs');
-    const trimmed = imageUrl.trim();
-    if (trimmed.startsWith('/uploads/') || trimmed.startsWith('uploads/')) {
-      const relative = trimmed.startsWith('/') ? trimmed.slice(1) : trimmed;
-      const uploadsRoot = pathMod.default.resolve(process.cwd(), 'uploads');
-      const localPath = pathMod.default.resolve(process.cwd(), relative);
-      const underUploads =
-        localPath === uploadsRoot ||
-        localPath.startsWith(uploadsRoot + pathMod.default.sep);
-      if (!underUploads) {
-        return next(createError('Invalid image path', 400));
-      }
-      if (fsMod.existsSync(localPath) && fsMod.statSync(localPath).isFile()) {
-        const ext = pathMod.default.extname(localPath).toLowerCase();
-        const mimeTypes: Record<string, string> = {
-          '.jpg': 'image/jpeg',
-          '.jpeg': 'image/jpeg',
-          '.png': 'image/png',
-          '.gif': 'image/gif',
-          '.webp': 'image/webp',
-          '.svg': 'image/svg+xml'
-        };
-        res.setHeader('Content-Type', mimeTypes[ext] || 'application/octet-stream');
-        res.setHeader('Cache-Control', 'public, max-age=31536000');
-        return res.sendFile(pathMod.default.resolve(localPath));
-      }
-
-      // ✅ Backward compat: if path is /uploads/filename (no merchantId), also check /uploads/{merchantId}/filename
-      if (merchantId) {
-        const filename = pathMod.default.basename(relative);
-        const merchantPath = pathMod.default.join(process.cwd(), 'uploads', merchantId, filename);
-        if (fsMod.existsSync(merchantPath) && fsMod.statSync(merchantPath).isFile()) {
-          const ext = pathMod.default.extname(merchantPath).toLowerCase();
-          const mimeTypes: Record<string, string> = {
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.png': 'image/png',
-            '.gif': 'image/gif',
-            '.webp': 'image/webp',
-            '.svg': 'image/svg+xml'
-          };
-          res.setHeader('Content-Type', mimeTypes[ext] || 'application/octet-stream');
-          res.setHeader('Cache-Control', 'public, max-age=31536000');
-          return res.sendFile(pathMod.default.resolve(merchantPath));
-        }
-      }
-    }
-
-    // If it's an HTTP/HTTPS URL, check if the file exists locally first
     if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-      // Extract filename from URL (e.g., product-image-1775466193824-953125307.jpg)
-      const urlPath = new URL(imageUrl).pathname;
-      const filename = urlPath.split('/').pop();
-      
-      if (filename) {
-        const path = await import('path');
-        const fs = await import('fs');
-        const localPath = path.default.join(process.cwd(), 'uploads', filename);
-        
-        // If file exists locally in root uploads, serve it directly (legacy files)
-        if (fs.existsSync(localPath)) {
-          const ext = path.default.extname(filename).toLowerCase();
-          const mimeTypes: Record<string, string> = {
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.png': 'image/png',
-            '.gif': 'image/gif',
-            '.webp': 'image/webp',
-            '.svg': 'image/svg+xml'
-          };
-          
-          res.setHeader('Content-Type', mimeTypes[ext] || 'image/jpeg');
-          res.setHeader('Cache-Control', 'public, max-age=31536000');
-          return res.sendFile(localPath);
-        }
-
-        // ✅ Also check merchant-specific subdirectory (new file structure)
-        if (merchantId) {
-          const merchantPath = path.default.join(process.cwd(), 'uploads', merchantId, filename);
-          if (fs.existsSync(merchantPath)) {
-            const ext = path.default.extname(filename).toLowerCase();
-            const mimeTypes: Record<string, string> = {
-              '.jpg': 'image/jpeg',
-              '.jpeg': 'image/jpeg',
-              '.png': 'image/png',
-              '.gif': 'image/gif',
-              '.webp': 'image/webp',
-              '.svg': 'image/svg+xml'
-            };
-            
-            res.setHeader('Content-Type', mimeTypes[ext] || 'image/jpeg');
-            res.setHeader('Cache-Control', 'public, max-age=31536000');
-            return res.sendFile(merchantPath);
-          }
-        }
-      }
-
-      // File not found locally, try redirect as fallback
       return res.redirect(imageUrl);
     }
 
-    // No image available
     return next(createError('Image not found', 404));
   } catch (error) {
     next(error);

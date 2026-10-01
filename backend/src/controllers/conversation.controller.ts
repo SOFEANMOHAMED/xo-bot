@@ -13,6 +13,7 @@ import {
   ensureConversationCustomerName,
   isPlaceholderCustomerName,
 } from '../services/socialProfile.js';
+import { ensureWhatsAppConversationDisplayName } from '../services/whatsappWeb/customerDisplayName.js';
 import { resolveConversationSourcePost } from '../services/conversationSourcePost.js';
 
 const messageSchema = z.object({
@@ -166,6 +167,30 @@ export const getConversations = async (
       );
     }
 
+    // Lazily replace WhatsApp placeholders with phone from PN JID
+    const needsWhatsAppPhone = conversations.filter(
+      (c) =>
+        c.userId &&
+        c.platform === 'whatsapp' &&
+        isPlaceholderCustomerName(c.userName)
+    );
+    if (needsWhatsAppPhone.length > 0) {
+      await Promise.all(
+        needsWhatsAppPhone.slice(0, 20).map(async (c) => {
+          try {
+            c.userName = await ensureWhatsAppConversationDisplayName({
+              merchantId: req.merchantId!,
+              conversationId: c.id,
+              userId: c.userId!,
+              currentName: c.userName,
+            });
+          } catch {
+            /* non-fatal — keep placeholder */
+          }
+        })
+      );
+    }
+
     res.json({
       success: true,
       data: {
@@ -227,6 +252,21 @@ export const getConversation = async (
           merchantId: req.merchantId,
           conversationId: String(conversation.id),
           platform: conversation.platform,
+          userId: conversation.userId,
+          currentName: resolvedUserName,
+        });
+      } catch {
+        /* keep existing */
+      }
+    } else if (
+      conversation.userId &&
+      conversation.platform === 'whatsapp' &&
+      isPlaceholderCustomerName(resolvedUserName)
+    ) {
+      try {
+        resolvedUserName = await ensureWhatsAppConversationDisplayName({
+          merchantId: req.merchantId!,
+          conversationId: String(conversation.id),
           userId: conversation.userId,
           currentName: resolvedUserName,
         });
@@ -1254,61 +1294,6 @@ export const getOrCreateConversationHelper = async (params: {
     };
   } catch (error: any) {
     console.error('Error getting or creating conversation:', error);
-    throw error;
-  }
-};
-
-/**
- * Get recent messages for a conversation
- * Returns last N messages ordered ascending (oldest -> newest)
- * 
- * @param conversationId - Conversation ID
- * @param limit - Number of messages to return (default: 10)
- * @returns Array of messages
- */
-export const getRecentMessages = async (
-  conversationId: string,
-  limit: number = 10
-): Promise<Array<{
-  id: string;
-  conversationId: string;
-  role: string;
-  content: string;
-  metadata: any;
-  intent: string | null;
-  entities: any;
-  createdAt: Date;
-}>> => {
-  try {
-    const result = await pool.query(
-      `SELECT 
-        id,
-        conversation_id as "conversationId",
-        role,
-        content,
-        metadata,
-        intent,
-        entities,
-        created_at as "createdAt"
-       FROM messages
-       WHERE conversation_id = $1
-       ORDER BY created_at DESC
-       LIMIT $2`,
-      [conversationId, limit]
-    );
-
-    return result.rows.map(row => ({
-      id: row.id,
-      conversationId: row.conversationId,
-      role: row.role,
-      content: row.content,
-      metadata: row.metadata || {},
-      intent: row.intent,
-      entities: row.entities || {},
-      createdAt: row.createdAt
-    }));
-  } catch (error: any) {
-    console.error('Error getting recent messages:', error);
     throw error;
   }
 };

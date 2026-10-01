@@ -2,10 +2,10 @@
  * Scenario `collect-info-order` — identity field sequencing + partial multi-field.
  *
  * Contract:
- * - after name only → ask phone (not address)
- * - after phone → ask address
+ * - after name only → ask phone AND address together
+ * - after phone (name already stored) → ask address
  * - name+phone+address in ONE message → ask nothing (await/confirm path)
- * - PARTIAL combos in one message: record given fields; ask ONLY missing ones
+ * - PARTIAL combos in one message: record given fields; ask ALL remaining missing ones
  *   (never re-ask a field provided in the same message)
  */
 import type { ConversationState, MerchantConfig } from '../../core/types.js';
@@ -21,8 +21,11 @@ import {
 } from './test_pipeline_harness_state.js';
 import {
   ingestIdentityAnswerFromBotAsk,
+  isBotIdentityBundleAsk,
+  mayAcceptLlmIdentityField,
   missingIdentityFields,
   resolveIdentityCollectReply,
+  IDENTITY_BUNDLE_ASK_AR,
 } from './collectInfoOrder.js';
 import { buildCollectMissingFieldsMessage } from './orderConfirmationPolicy.js';
 
@@ -108,9 +111,12 @@ async function turn(
 }
 
 /** Ask-templates only — not confirmation copy («• العنوان: …»). */
-const ASK_NAME = /شو اسمك|اسمك الكامل|what is your full name/i;
-const ASK_PHONE = /شو رقم هاتفك|هاتفك\؟|what is your phone number/i;
-const ASK_ADDRESS = /شو عنوان التوصيل|عنوان التوصيل\؟|what is the delivery address/i;
+const ASK_NAME = /شو اسمك|what is your full name/i;
+const ASK_PHONE = /رقم هاتفك|what is your phone number/i;
+const ASK_ADDRESS = /عنوان التوصيل|the delivery address/i;
+const ASK_BUNDLE =
+  /لإكمال الطلب أحتاج اسمك الكامل ورقم هاتفك وعنوان التوصيل|to complete the order I need your full name/i;
+const ASK_PARTIAL = /أحتاج كمان|I still need/i;
 
 // ——— Unit: missingIdentityFields + resolveIdentityCollectReply ———
 {
@@ -142,14 +148,32 @@ const ASK_ADDRESS = /شو عنوان التوصيل|عنوان التوصيل\؟
     'all three → missing none'
   );
 
+  const emptyReply = resolveIdentityCollectReply({
+    language: 'arabic',
+    collected: {},
+    responseText: 'شو اسمك؟',
+  });
+  assert(
+    ASK_BUNDLE.test(emptyReply.replyText),
+    `empty collected must ask bundle, got: ${emptyReply.replyText}`
+  );
+  assert(
+    emptyReply.replyText === IDENTITY_BUNDLE_ASK_AR,
+    'bundle text matches constant'
+  );
+
   const nameOnlyReply = resolveIdentityCollectReply({
     language: 'arabic',
     collected: { name: 'سفيان محمد' },
     responseText: 'شو عنوانك؟',
   });
   assert(
-    ASK_PHONE.test(nameOnlyReply.replyText) && !ASK_ADDRESS.test(nameOnlyReply.replyText),
-    `name only must ask phone only, got: ${nameOnlyReply.replyText}`
+    ASK_PHONE.test(nameOnlyReply.replyText) && ASK_ADDRESS.test(nameOnlyReply.replyText),
+    `name only must ask phone and address, got: ${nameOnlyReply.replyText}`
+  );
+  assert(
+    !ASK_BUNDLE.test(nameOnlyReply.replyText) && ASK_PARTIAL.test(nameOnlyReply.replyText),
+    'name only must ask remaining pair, not the full three-field bundle'
   );
 
   const namePhoneReply = resolveIdentityCollectReply({
@@ -163,6 +187,13 @@ const ASK_ADDRESS = /شو عنوان التوصيل|عنوان التوصيل\؟
       !ASK_PHONE.test(namePhoneReply.replyText),
     `name+phone must ask address only, got: ${namePhoneReply.replyText}`
   );
+
+  const allThreeAsk = buildCollectMissingFieldsMessage('arabic', [
+    'name',
+    'phone',
+    'address',
+  ]);
+  assert(ASK_BUNDLE.test(allThreeAsk), `all three missing → bundle: ${allThreeAsk}`);
 
   const nameAddrAsk = buildCollectMissingFieldsMessage('arabic', ['phone']);
   assert(
@@ -180,12 +211,8 @@ const ASK_ADDRESS = /شو عنوان التوصيل|عنوان التوصيل\؟
     { name: 'سفيان محمد' }
   );
   assert(
-    ASK_PHONE.test(afterName.replyText),
-    `collect-info-order after name asks phone, got: ${afterName.replyText}`
-  );
-  assert(
-    !ASK_ADDRESS.test(afterName.replyText),
-    `collect-info-order after name must not ask address, got: ${afterName.replyText}`
+    ASK_PHONE.test(afterName.replyText) && ASK_ADDRESS.test(afterName.replyText),
+    `collect-info-order after name asks phone+address, got: ${afterName.replyText}`
   );
 }
 
@@ -229,7 +256,7 @@ type PartialCase = {
   message: string;
   extracted: Record<string, string>;
   expectEntities: { name?: string; phone?: string; address?: string };
-  expectAsk: 'name' | 'phone' | 'address' | 'none';
+  expectAsk: 'name' | 'phone' | 'address' | 'phone_address' | 'none';
   order?: 'scrambled';
 };
 
@@ -239,7 +266,7 @@ const PARTIAL_CASES: PartialCase[] = [
     message: 'سفيان محمد',
     extracted: { name: 'سفيان محمد' },
     expectEntities: { name: 'سفيان محمد' },
-    expectAsk: 'phone',
+    expectAsk: 'phone_address',
   },
   {
     id: 'name_phone',
@@ -302,7 +329,7 @@ for (const c of PARTIAL_CASES) {
     // Deliberately wrong LLM copy that re-asks everything — code must override.
     'تمام، شو اسمك الكامل؟ ورقم هاتفك وعنوانك؟',
     c.extracted,
-    'تمام، شو اسمك الكامل؟'
+    IDENTITY_BUNDLE_ASK_AR
   );
   const e = result.updatedState.extracted_entities || {};
   if (c.expectEntities.name) {
@@ -330,6 +357,15 @@ for (const c of PARTIAL_CASES) {
         !ASK_PHONE.test(result.replyText) &&
         !/شو عنوان التوصيل|what is the delivery address/i.test(result.replyText),
       `${c.id}: must not re-ask identity, got: ${result.replyText}`
+    );
+  } else if (c.expectAsk === 'phone_address') {
+    assert(
+      ASK_PHONE.test(result.replyText) && ASK_ADDRESS.test(result.replyText),
+      `${c.id}: must ask phone+address, got: ${result.replyText}`
+    );
+    assert(
+      !ASK_NAME.test(result.replyText) && ASK_PARTIAL.test(result.replyText),
+      `${c.id}: must NOT re-ask name or full bundle, got: ${result.replyText}`
     );
   } else if (c.expectAsk === 'phone') {
     assert(
@@ -359,6 +395,43 @@ for (const c of PARTIAL_CASES) {
       `${c.id}: must NOT re-ask phone/address, got: ${result.replyText}`
     );
   }
+}
+
+{
+  const ingested = ingestIdentityAnswerFromBotAsk({
+    lastBotReply: IDENTITY_BUNDLE_ASK_AR,
+    userMessage: 'سفيان محمد 09552222 الحسينية دمشق',
+    collected: {},
+  });
+  assert(
+    ingested.name === 'سفيان محمد' &&
+      ingested.phone === '09552222' &&
+      String(ingested.address || '').includes('الحسينية'),
+    `ingest after bundle multi: got ${JSON.stringify(ingested)}`
+  );
+}
+
+{
+  const ingested = ingestIdentityAnswerFromBotAsk({
+    lastBotReply: IDENTITY_BUNDLE_ASK_AR,
+    userMessage: 'سفيان محمد',
+    collected: {},
+  });
+  assert(
+    ingested.name === 'سفيان محمد' && !ingested.phone && !ingested.address,
+    `ingest after bundle name-only: got ${JSON.stringify(ingested)}`
+  );
+  const ask = resolveIdentityCollectReply({
+    language: 'arabic',
+    collected: ingested,
+    responseText: 'x',
+  });
+  assert(
+    ASK_PHONE.test(ask.replyText) &&
+      ASK_ADDRESS.test(ask.replyText) &&
+      !ASK_BUNDLE.test(ask.replyText),
+    `after bundle name-only chase phone+address, got: ${ask.replyText}`
+  );
 }
 
 // ——— Ingest path: multi-field in one reply when bot asked for name only ———
@@ -401,6 +474,90 @@ for (const c of PARTIAL_CASES) {
   assert(
     ASK_ADDRESS.test(ask.replyText) && !ASK_NAME.test(ask.replyText),
     `after ingest name+phone ask address only: ${ask.replyText}`
+  );
+}
+
+// ——— LLM identity gate: shipping / product questions must never become a name ———
+{
+  const shippingQ = 'في توصيل ع الشام';
+  assert(
+    !mayAcceptLlmIdentityField({
+      field: 'name',
+      proposed: shippingQ,
+      userMessage: shippingQ,
+      lastBotReply: 'تمام، اخترت اللون الأسود! هل حابب أكمل الطلب الآن؟',
+      collected: {},
+    }),
+    'LLM must not accept a shipping question as customer name'
+  );
+  assert(
+    !mayAcceptLlmIdentityField({
+      field: 'name',
+      proposed: 'قبل اكمال الطلب بدي أعرف في توصيل ع الشام',
+      userMessage: 'قبل اكمال الطلب بدي أعرف في توصيل ع الشام',
+      lastBotReply: IDENTITY_BUNDLE_ASK_AR,
+      collected: {},
+    }),
+    'LLM must not accept a long shipping question even during identity collect'
+  );
+  assert(
+    mayAcceptLlmIdentityField({
+      field: 'name',
+      proposed: 'سفيان محمد',
+      userMessage: 'سفيان محمد',
+      lastBotReply: 'تمام، شو اسمك الكامل؟',
+      collected: {},
+    }),
+    'LLM may accept a short name when bot asked for name'
+  );
+  assert(
+    mayAcceptLlmIdentityField({
+      field: 'phone',
+      proposed: '09552222',
+      userMessage: 'سفيان محمد 09552222 الحسينية دمشق',
+      lastBotReply: IDENTITY_BUNDLE_ASK_AR,
+      collected: {},
+    }),
+    'LLM may accept phone grounded in a multi-field identity blob'
+  );
+  assert(
+    !mayAcceptLlmIdentityField({
+      field: 'name',
+      proposed: 'أحمد',
+      userMessage: 'بدي الساعة السوداء',
+      lastBotReply: 'أي لون بتحب؟',
+      collected: {},
+    }),
+    'LLM must not invent a name that is not in the user message'
+  );
+}
+
+{
+  const freeFormAsk =
+    'بالنسبة للتوصيل إلى الشام، نقدر نوصل لك الطلب. بس قبل ما نثبت الطلب، ممكن تشاركني باسمك ورقم هاتفك وعنوانك؟';
+  assert(
+    isBotIdentityBundleAsk(freeFormAsk),
+    'free-form LLM multi-field ask must count as identity bundle'
+  );
+  const ingested = ingestIdentityAnswerFromBotAsk({
+    lastBotReply: freeFormAsk,
+    userMessage: 'سفيان محمد',
+    collected: {},
+  });
+  assert(
+    ingested.name === 'سفيان محمد' && !ingested.phone && !ingested.address,
+    `free-form ask + short name → name only, got ${JSON.stringify(ingested)}`
+  );
+  const ask = resolveIdentityCollectReply({
+    language: 'arabic',
+    collected: ingested,
+    responseText: 'تمام، شو اسمك الكامل؟',
+  });
+  assert(
+    ASK_PHONE.test(ask.replyText) &&
+      ASK_ADDRESS.test(ask.replyText) &&
+      !ASK_NAME.test(ask.replyText),
+    `after free-form name ingest ask phone+address, got: ${ask.replyText}`
   );
 }
 

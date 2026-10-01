@@ -153,3 +153,16 @@ export function resolveQuantityFromMessage(
 
   return null;
 }
+
+/**
+ * Single quantity owner for the live path — digits / Arabic number words only.
+ * The model must not write quantity onto state; callers use this (or interpreter
+ * set_quantity) exclusively.
+ */
+export function resolveQuantity(
+  messageText: string,
+  productName: string | null | undefined
+): number | null {
+  if (!productName?.trim()) return null;
+  return resolveQuantityFromMessage(messageText, productName);
+}

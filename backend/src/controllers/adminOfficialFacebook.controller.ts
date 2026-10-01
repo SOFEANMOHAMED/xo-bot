@@ -23,6 +23,7 @@ import {
   unlinkPlatformFacebookPage,
   toPublicPlatformPage,
 } from '../services/platformFacebookPage.js';
+import { signOAuthState } from '../utils/oauthState.js';
 import { OFFICIAL_PAGE_BOT_DEFAULT_SYSTEM_MESSAGE } from '../services/officialPageBot.js';
 import pool from '../database/connection.js';
 
@@ -69,13 +70,11 @@ export const connectOfficialFacebook = async (
       (req.body as { adminBasePath?: string })?.adminBasePath
     );
 
-    const state = Buffer.from(
-      JSON.stringify({
-        purpose: 'official_page',
-        adminId: req.merchantId,
-        adminBasePath,
-      })
-    ).toString('base64');
+    const state = signOAuthState({
+      purpose: 'official_page',
+      adminId: req.merchantId,
+      adminBasePath,
+    });
 
     const scopes = [
       'pages_show_list',

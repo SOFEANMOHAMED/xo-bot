@@ -15,10 +15,20 @@ interface BotPlaygroundProps {
   services?: Service[];
   settings: MerchantSettings;
   onNewQuery: () => void;
+  /** Manual simulation button only — real chat orders persist on the server. */
   onAddOrder: (order: Order) => void;
+  /** Refresh merchant orders after the server persists a playground order. */
+  onOrdersRefresh?: () => void | Promise<void>;
 }
 
-const BotPlayground: React.FC<BotPlaygroundProps> = ({ products, services = [], settings, onNewQuery, onAddOrder }) => {
+const BotPlayground: React.FC<BotPlaygroundProps> = ({
+  products,
+  services = [],
+  settings,
+  onNewQuery,
+  onAddOrder,
+  onOrdersRefresh,
+}) => {
   // Safe initialization with fallback to prevent undefined error
   const [messages, setMessages] = useState<ChatMessage[]>([
     { 
@@ -145,79 +155,19 @@ const BotPlayground: React.FC<BotPlaygroundProps> = ({ products, services = [], 
       if (aiResponse.conversationId && !currentConversationId) {
         setConversationId(aiResponse.conversationId);
       }
-      
-      // Extract order data from response if present
-      const orderDataMatch = responseText.match(/\[ORDER_DATA\]([\s\S]*?)\[\/ORDER_DATA\]/);
-      let cleanedResponse = responseText.replace(/\[ORDER_DATA\][\s\S]*?\[\/ORDER_DATA\]/g, '').trim();
-      
-      if (orderDataMatch) {
-        try {
-          const orderData = JSON.parse(orderDataMatch[1].trim());
-          
-          // Validate order data
-          if (orderData.customerName && orderData.customerPhone && orderData.customerAddress && orderData.products && orderData.products.length > 0) {
-            // Validate that product IDs exist in products list
-            const validProducts = orderData.products.filter((item: any) => {
-              return products?.some(p => p.id === item.productId);
-            });
-            
-            if (validProducts.length === 0) {
-              logger.warn('No valid products found in order data');
-            } else {
-              // Create order
-              const orderId = `#ORD-${Math.floor(Math.random() * 10000)}`;
-              
-              // Calculate total from valid products
-              const total = orderData.total || validProducts.reduce((sum: number, item: any) => {
-                const product = products?.find(p => p.id === item.productId);
-                return sum + ((product?.price || item.price) * (item.quantity || 1));
-              }, 0);
-              
-              const newOrder: Order = {
-                id: `ord_${Date.now()}`,
-                externalId: orderId,
-                customerName: orderData.customerName.trim(),
-                customerEmail: orderData.customerEmail?.trim() || `${orderData.customerPhone.replace(/\s+/g, '')}@chat-order.com`,
-                total: total,
-                currency: settings?.storeCurrency || 'USD',
-                status: 'pending',
-                date: new Date(),
-                source: 'manual',
-                items: validProducts.map((item: any) => {
-                  const product = products?.find(p => p.id === item.productId);
-                  return {
-                    productId: item.productId,
-                    productName: item.productName || product?.name || 'منتج غير معروف',
-                    quantity: item.quantity || 1,
-                    price: product?.price || item.price || 0,
-                    currency: settings?.storeCurrency || 'USD',
-                    color: item.variant?.color || item.color || null,
-                    size: item.variant?.size || item.size || null,
-                  };
-                })
-              };
-              
-              // Add order to orders list
-              onAddOrder(newOrder);
-              
-              // Single success banner (avoid duplicating the same text inside the bot bubble)
-              const orderSuccessMsg: ChatMessage = {
-                id: (Date.now() + 2).toString(),
-                role: 'system',
-                content: `✅ تم استلام طلبك بنجاح! رقم الطلب: ${orderId}. يمكنك رؤيته في قسم "الطلبات".`,
-                timestamp: new Date()
-              };
-              
-              setMessages(prev => [...prev, orderSuccessMsg]);
-              setOrderCreated(true);
-            }
-          } else {
-            logger.warn('Incomplete order data:', orderData);
-          }
-        } catch (err) {
-          logger.error('Error parsing order data:', err);
-          // Don't show error to user, just log it
-        }
+
+      // Orders persist on the server (same path as WhatsApp/Telegram). Never create client-side.
+      const cleanedResponse = responseText.replace(/\[ORDER_DATA\][\s\S]*?\[\/ORDER_DATA\]/g, '').trim();
+      if (aiResponse.orderCreated) {
+        setOrderCreated(true);
+        const orderSuccessMsg: ChatMessage = {
+          id: (Date.now() + 2).toString(),
+          role: 'system',
+          content: '✅ تم استلام طلبك بنجاح! يمكنك رؤيته في قسم "الطلبات".',
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, orderSuccessMsg]);
+        void onOrdersRefresh?.();
       }
 
       const fallbackText = cleanedResponse || 'عذراً، لم أتمكن من إرسال رد. يرجى المحاولة مرة أخرى.';
@@ -305,7 +255,9 @@ const BotPlayground: React.FC<BotPlaygroundProps> = ({ products, services = [], 
         id: `ord_${Date.now()}`,
         externalId: orderId,
         customerName: 'عميل المحادثة (تجريبي)',
-        customerEmail: 'chat_customer@example.com',
+        customerEmail: '0500000000@chat-order.com',
+        customerPhone: '0500000000',
+        customerAddress: 'عنوان تجريبي',
         total: randomProduct.price,
         currency: settings.storeCurrency,
         status: 'pending',

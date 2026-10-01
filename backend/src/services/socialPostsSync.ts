@@ -87,6 +87,24 @@ export async function ensureSocialStorySchema(): Promise<void> {
   storySchemaEnsured = true;
 }
 
+let commentReactionSchemaEnsured = false;
+
+/** Idempotent: react_on_comment_enabled on social_posts. */
+export async function ensureSocialCommentReactionSchema(): Promise<void> {
+  if (commentReactionSchemaEnsured) return;
+
+  await pool.query(`
+    ALTER TABLE social_posts
+      ADD COLUMN IF NOT EXISTS react_on_comment_enabled BOOLEAN NOT NULL DEFAULT false
+  `);
+  await pool.query(`
+    ALTER TABLE social_posts
+      ADD COLUMN IF NOT EXISTS comment_reaction_type VARCHAR(20) NOT NULL DEFAULT 'LIKE'
+  `);
+
+  commentReactionSchemaEnsured = true;
+}
+
 function parseMetaTimestamp(value: unknown): string | null {
   if (value == null || value === '') return null;
   if (typeof value === 'number' || /^\d+(\.\d+)?$/.test(String(value).trim())) {

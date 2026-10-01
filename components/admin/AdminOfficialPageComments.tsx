@@ -1,5 +1,5 @@
 /**
- * Admin: Official XO Bot Facebook page comment automation.
+ * Admin: Official XO Bot Facebook/Instagram comment automation.
  * Mirrors merchant SocialAutomationPanel (per-post) but platform-scoped — no products/CRM.
  */
 
@@ -26,6 +26,9 @@ import {
   COMMENT_PUBLIC_REPLY_PRESETS,
   COMMENT_DM_AFTER_PRESETS,
 } from '../../constants/commentReplyPresets';
+import EmojiPicker from '../EmojiPicker';
+
+type Platform = 'facebook' | 'instagram';
 
 /** Presets tuned for the official XO Bot page (signup / product education). */
 const PLATFORM_PUBLIC_PRESETS = [
@@ -56,12 +59,21 @@ const emptyPostSettings = {
   publicReplyText: '',
   sendDmOnComment: false,
   privateReplyText: '',
+  reactOnCommentEnabled: false,
 };
 
 const postLabel = (p: any) => {
   const caption = String(p?.caption || '').trim();
   if (caption) return caption;
   return p?.external_post_id ? `منشور ${p.external_post_id}` : 'منشور بدون نص';
+};
+
+const postAutomationStatus = (p: any) => {
+  const parts = [
+    p?.comment_reply_enabled ? 'رد' : null,
+    p?.react_on_comment_enabled ? 'لايك' : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(' + ') : 'غير مفعّل';
 };
 
 const PostThumbnail: React.FC<{ url?: string | null; size?: 'sm' | 'md' }> = ({
@@ -92,8 +104,11 @@ const AdminOfficialPageComments: React.FC = () => {
   const [pageLinked, setPageLinked] = useState(false);
   const [pageName, setPageName] = useState<string | null>(null);
   const [pageId, setPageId] = useState<string>('');
+  const [instagramLinked, setInstagramLinked] = useState(false);
+  const [igUsername, setIgUsername] = useState<string | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
 
+  const [platform, setPlatform] = useState<Platform>('facebook');
   const [posts, setPosts] = useState<any[]>([]);
   const [rules, setRules] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -124,9 +139,36 @@ const AdminOfficialPageComments: React.FC = () => {
       setPageLinked(!!status.linked);
       setPageName(status.page?.pageName || null);
       setPageId(status.page?.pageId || '');
+
+      let igUserId = status.page?.instagram?.igUserId || null;
+      let igUser = status.page?.instagram?.igUsername || null;
+
+      // Reuse content-publishing accounts resolver: refreshes + persists IG if missing in DB
+      if (status.linked && !igUserId) {
+        try {
+          const accountsRes = await apiService.getOfficialContentAccounts();
+          const igAccount = (accountsRes.accounts || []).find(
+            (a) => a.platform === 'instagram'
+          );
+          if (igAccount) {
+            igUserId = igAccount.accountRef;
+            const label = igAccount.accountLabel || '';
+            igUser = label.startsWith('@') ? label.slice(1) : label || null;
+          }
+        } catch {
+          // keep status-only IG flags
+        }
+      }
+
+      setInstagramLinked(!!igUserId);
+      setIgUsername(igUser);
+      if (!igUserId) {
+        setPlatform((p) => (p === 'instagram' ? 'facebook' : p));
+      }
     } catch (e: any) {
       showError(e?.message || 'فشل تحميل حالة الصفحة');
       setPageLinked(false);
+      setInstagramLinked(false);
     } finally {
       setStatusLoading(false);
     }
@@ -135,9 +177,10 @@ const AdminOfficialPageComments: React.FC = () => {
   const loadData = useCallback(
     async (opts?: { preserveSelection?: boolean }) => {
       if (!pageLinked) return;
+      if (platform === 'instagram' && !instagramLinked) return;
       setLoading(true);
       try {
-        const res = await apiService.getOfficialPagePosts({ limit: 50 });
+        const res = await apiService.getOfficialPagePosts({ platform, limit: 50 });
         const nextPosts = res.posts || [];
         setPosts(nextPosts);
 
@@ -150,6 +193,7 @@ const AdminOfficialPageComments: React.FC = () => {
               publicReplyText: selected.public_reply_text || '',
               sendDmOnComment: !!selected.send_dm_on_comment,
               privateReplyText: selected.private_reply_text || '',
+              reactOnCommentEnabled: !!selected.react_on_comment_enabled,
             });
           }
         }
@@ -159,37 +203,43 @@ const AdminOfficialPageComments: React.FC = () => {
         setLoading(false);
       }
     },
-    [pageLinked, showError]
+    [pageLinked, instagramLinked, platform, showError]
   );
 
-  const loadRulesForPost = useCallback(
-    async (postId: string) => {
-      if (!postId) {
-        setRules([]);
-        return;
-      }
-      try {
-        const rulesRes = await apiService.getOfficialPageKeywordRules(postId);
-        setRules(rulesRes.rules || []);
-      } catch {
-        setRules([]);
-      }
-    },
-    []
-  );
+  const loadRulesForPost = useCallback(async (postId: string) => {
+    if (!postId) {
+      setRules([]);
+      return;
+    }
+    try {
+      const rulesRes = await apiService.getOfficialPageKeywordRules(postId);
+      setRules(rulesRes.rules || []);
+    } catch {
+      setRules([]);
+    }
+  }, []);
 
   useEffect(() => {
     loadStatus();
   }, [loadStatus]);
 
+  // Reset selection only when page/platform changes — not when loadData identity changes
+  // (otherwise a post-save reload can wipe reactOnCommentEnabled back to false).
+  useEffect(() => {
+    if (!pageLinked) return;
+    setSelectedPostId('');
+    setPostSettings(emptyPostSettings);
+    setRules([]);
+    setPosts([]);
+    setPostPickerOpen(false);
+    setPostSearch('');
+  }, [pageLinked, platform]);
+
   useEffect(() => {
     if (pageLinked) {
-      setSelectedPostId('');
-      setPostSettings(emptyPostSettings);
-      setRules([]);
-      loadData();
+      void loadData();
     }
-  }, [pageLinked, loadData]);
+  }, [pageLinked, platform, loadData]);
 
   useEffect(() => {
     if (!postPickerOpen) return;
@@ -249,6 +299,7 @@ const AdminOfficialPageComments: React.FC = () => {
       publicReplyText: p.public_reply_text || '',
       sendDmOnComment: !!p.send_dm_on_comment,
       privateReplyText: p.private_reply_text || '',
+      reactOnCommentEnabled: !!p.react_on_comment_enabled,
     });
     resetRuleForm();
     loadRulesForPost(p.id);
@@ -259,7 +310,7 @@ const AdminOfficialPageComments: React.FC = () => {
   const handleSync = async () => {
     setSyncing(true);
     try {
-      const res = await apiService.syncOfficialPagePosts();
+      const res = await apiService.syncOfficialPagePosts(platform);
       const total = (res.results || []).reduce((s, r) => s + (r.synced || 0), 0);
       showSuccess(`تمت مزامنة ${total} منشوراً`);
       await loadData({ preserveSelection: true });
@@ -277,15 +328,30 @@ const AdminOfficialPageComments: React.FC = () => {
     }
     setSaving(true);
     try {
-      await apiService.updateOfficialPagePostCommentSettings({
+      const saved = await apiService.updateOfficialPagePostCommentSettings({
         socialPostId: selectedPostId,
         commentReplyEnabled: postSettings.commentReplyEnabled,
         publicReplyText: postSettings.publicReplyText,
         sendDmOnComment: postSettings.sendDmOnComment,
         privateReplyText: postSettings.privateReplyText,
+        reactOnCommentEnabled: postSettings.reactOnCommentEnabled,
       });
       showSuccess('تم حفظ إعدادات المنشور');
       await loadData({ preserveSelection: true });
+      // Apply RETURNING row after reload so a stale list cannot clear the like toggle
+      const post = (saved as { post?: any })?.post;
+      if (post?.id) {
+        setPostSettings({
+          commentReplyEnabled: !!post.comment_reply_enabled,
+          publicReplyText: post.public_reply_text || '',
+          sendDmOnComment: !!post.send_dm_on_comment,
+          privateReplyText: post.private_reply_text || '',
+          reactOnCommentEnabled: !!post.react_on_comment_enabled,
+        });
+        setPosts((prev) =>
+          prev.map((p) => (p.id === post.id ? { ...p, ...post } : p))
+        );
+      }
     } catch (e: any) {
       showError(e?.message || 'فشل الحفظ');
     } finally {
@@ -370,14 +436,12 @@ const AdminOfficialPageComments: React.FC = () => {
             ردود تعليقات صفحة XO Bot
           </h2>
           <p className="text-slate-400 text-sm mt-2">
-            أتمتة الرد العام والرسالة الخاصة على تعليقات منشورات الصفحة الرسمية — معزولة تماماً عن
-            بيانات التجار.
+            أتمتة الرد العام والرسالة الخاصة على تعليقات منشورات الصفحة الرسمية (فيسبوك وإنستغرام) —
+            معزولة تماماً عن بيانات التجار.
           </p>
         </header>
         <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-6 space-y-3">
-          <p className="text-amber-100 font-medium">
-            لم تُربط صفحة فيسبوك الرسمية بعد.
-          </p>
+          <p className="text-amber-100 font-medium">لم تُربط صفحة فيسبوك الرسمية بعد.</p>
           <p className="text-sm text-slate-400">
             اربط الصفحة أولاً من الإعدادات العامة (قسم بوت صفحة XO Bot)، ثم عد هنا لمزامنة المنشورات
             وتفعيل الردود.
@@ -394,6 +458,13 @@ const AdminOfficialPageComments: React.FC = () => {
     );
   }
 
+  const channelLabel =
+    platform === 'instagram'
+      ? igUsername
+        ? `@${igUsername}`
+        : 'إنستغرام'
+      : pageName || pageId;
+
   return (
     <div className="p-4 lg:p-6 space-y-5 max-w-6xl">
       <header className="space-y-2">
@@ -402,8 +473,8 @@ const AdminOfficialPageComments: React.FC = () => {
           ردود تعليقات صفحة XO Bot
         </h2>
         <p className="text-slate-400 text-sm">
-          الصفحة:{' '}
-          <span className="text-white font-medium">{pageName || pageId}</span>
+          القناة الحالية:{' '}
+          <span className="text-white font-medium">{channelLabel}</span>
           {' · '}
           الرد يتم فقط على المنشورات التي تفعّلها. الرسالة الخاصة نص ثابت (بدون AI)، ثم يستمر بوت
           الصفحة في المحادثة إن وُجد.
@@ -421,7 +492,7 @@ const AdminOfficialPageComments: React.FC = () => {
           <button
             type="button"
             onClick={handleSync}
-            disabled={syncing}
+            disabled={syncing || (platform === 'instagram' && !instagramLinked)}
             className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm disabled:opacity-60"
           >
             <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
@@ -430,423 +501,553 @@ const AdminOfficialPageComments: React.FC = () => {
         </div>
 
         <div className="p-5 space-y-5">
-          <div className="grid lg:grid-cols-2 gap-5">
-            {/* Mobile picker */}
-            <div className="space-y-2 lg:hidden" ref={postPickerRef}>
-              <div className="flex items-center justify-between gap-2">
-                <label className="text-sm font-bold text-slate-200">اختيار المنشور</label>
-                <div className="flex items-center gap-2 text-[10px] text-slate-500">
-                  {loading && <span>تحميل…</span>}
-                  {!loading && posts.length > 0 && <span>{posts.length} منشور</span>}
+          <div className="flex flex-wrap gap-2 items-center justify-between">
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setPlatform('facebook')}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+                  platform === 'facebook'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                فيسبوك
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!instagramLinked) {
+                    showError(
+                      'لا يوجد حساب إنستغرام مربوط بالصفحة الرسمية — تأكد أن حساب الأعمال مرتبط بصفحة فيسبوك من Meta Business'
+                    );
+                    return;
+                  }
+                  setPlatform('instagram');
+                }}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+                  platform === 'instagram'
+                    ? 'bg-pink-600 text-white'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                } ${!instagramLinked ? 'opacity-50' : ''}`}
+                title={
+                  instagramLinked
+                    ? undefined
+                    : 'اربط إنستغرام بحساب أعمال مرتبط بصفحة فيسبوك الرسمية'
+                }
+              >
+                إنستغرام
+                {!instagramLinked && (
+                  <span className="mr-1 text-[10px] opacity-80">(غير مربوط)</span>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {platform === 'instagram' && !instagramLinked ? (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+              حساب إنستغرام الرسمي غير مربوط. يجب أن يكون حساب إنستغرام للأعمال مرتبطاً بصفحة فيسبوك
+              الرسمية في Meta، ثم أعد ربط الصفحة من الإعدادات العامة إن لزم.
+            </div>
+          ) : (
+            <div className="grid lg:grid-cols-2 gap-5">
+              {/* Mobile picker */}
+              <div className="space-y-2 lg:hidden" ref={postPickerRef}>
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-sm font-bold text-slate-200">اختيار المنشور</label>
+                  <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                    {loading && <span>تحميل…</span>}
+                    {!loading && posts.length > 0 && <span>{posts.length} منشور</span>}
+                  </div>
                 </div>
-              </div>
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (posts.length === 0) return;
-                    setPostPickerOpen((o) => !o);
-                  }}
-                  disabled={loading || posts.length === 0}
-                  className={`w-full flex items-center gap-3 p-3 rounded-xl border text-right transition disabled:opacity-60 ${
-                    postPickerOpen
-                      ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-slate-950'
-                      : selectedPost
-                        ? 'border-indigo-500/40 bg-indigo-950/30'
-                        : 'border-slate-700 bg-slate-950'
-                  }`}
-                >
-                  {selectedPost ? (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (posts.length === 0) return;
+                      setPostPickerOpen((o) => !o);
+                    }}
+                    disabled={loading || posts.length === 0}
+                    className={`w-full flex items-center gap-3 p-3 rounded-xl border text-right transition disabled:opacity-60 ${
+                      postPickerOpen
+                        ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-slate-950'
+                        : selectedPost
+                          ? 'border-indigo-500/40 bg-indigo-950/30'
+                          : 'border-slate-700 bg-slate-950'
+                    }`}
+                  >
+                    {selectedPost ? (
+                      <>
+                        <PostThumbnail url={selectedPost.thumbnail_url} size="md" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-slate-100 line-clamp-2">
+                            {postLabel(selectedPost)}
+                          </p>
+                          <span
+                            className={`inline-flex mt-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                              selectedPost.comment_reply_enabled ||
+                              selectedPost.react_on_comment_enabled
+                                ? 'bg-emerald-900/50 text-emerald-300'
+                                : 'bg-slate-800 text-slate-400'
+                            }`}
+                          >
+                            {postAutomationStatus(selectedPost)}
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-14 h-14 rounded-lg bg-slate-800 flex items-center justify-center text-slate-500">
+                          <ImageIcon size={22} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm text-slate-300">
+                            {posts.length === 0
+                              ? 'لا منشورات بعد — اضغط مزامنة'
+                              : 'اختر منشوراً لضبط الردود…'}
+                          </p>
+                        </div>
+                      </>
+                    )}
+                    <ChevronDown
+                      size={18}
+                      className={`text-slate-500 flex-shrink-0 transition-transform ${
+                        postPickerOpen ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </button>
+
+                  {postPickerOpen && (
                     <>
-                      <PostThumbnail url={selectedPost.thumbnail_url} size="md" />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-slate-100 line-clamp-2">
-                          {postLabel(selectedPost)}
-                        </p>
-                        <span
-                          className={`inline-flex mt-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                            selectedPost.comment_reply_enabled
-                              ? 'bg-emerald-900/50 text-emerald-300'
-                              : 'bg-slate-800 text-slate-400'
-                          }`}
-                        >
-                          {selectedPost.comment_reply_enabled ? 'مفعّل للرد' : 'غير مفعّل'}
-                        </span>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="w-14 h-14 rounded-lg bg-slate-800 flex items-center justify-center text-slate-500">
-                        <ImageIcon size={22} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm text-slate-300">
-                          {posts.length === 0
-                            ? 'لا منشورات بعد — اضغط مزامنة'
-                            : 'اختر منشوراً لضبط الردود…'}
-                        </p>
+                      <div
+                        className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+                        aria-hidden
+                        onClick={() => setPostPickerOpen(false)}
+                      />
+                      <div className="fixed z-50 inset-x-3 bottom-[max(1rem,env(safe-area-inset-bottom))] max-h-[min(70dvh,32rem)] rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden flex flex-col">
+                        <div className="flex items-center justify-between px-3 pt-3 pb-2 border-b border-slate-800">
+                          <p className="text-sm font-bold text-slate-100">المنشورات</p>
+                          <button
+                            type="button"
+                            onClick={() => setPostPickerOpen(false)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-800"
+                          >
+                            <X size={16} />
+                          </button>
+                        </div>
+                        <div className="p-2 border-b border-slate-800">
+                          <div className="relative">
+                            <Search
+                              size={14}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500"
+                            />
+                            <input
+                              ref={postSearchRef}
+                              type="search"
+                              value={postSearch}
+                              onChange={(e) => setPostSearch(e.target.value)}
+                              placeholder="بحث في المنشورات…"
+                              className="w-full rounded-lg border border-slate-700 bg-slate-950 pr-9 pl-3 py-2.5 text-sm text-slate-100"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex-1 min-h-0 overflow-y-auto">
+                          {filteredPosts.length === 0 ? (
+                            <p className="text-xs text-slate-500 p-4 text-center">لا نتائج</p>
+                          ) : (
+                            filteredPosts.map((p) => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => selectPost(p)}
+                                className={`w-full flex items-start gap-3 p-3 text-right border-b border-slate-800/80 ${
+                                  selectedPostId === p.id
+                                    ? 'bg-indigo-950/40'
+                                    : 'hover:bg-slate-800/60'
+                                }`}
+                              >
+                                <PostThumbnail url={p.thumbnail_url} />
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-xs font-medium text-slate-100 line-clamp-2">
+                                    {postLabel(p)}
+                                  </p>
+                                  <p className="text-[10px] text-slate-500 mt-1">
+                                    {postAutomationStatus(p)}
+                                  </p>
+                                </div>
+                                {selectedPostId === p.id && (
+                                  <Check size={16} className="text-indigo-400 mt-1" />
+                                )}
+                              </button>
+                            ))
+                          )}
+                        </div>
                       </div>
                     </>
                   )}
-                  <ChevronDown
-                    size={18}
-                    className={`text-slate-500 flex-shrink-0 transition-transform ${
-                      postPickerOpen ? 'rotate-180' : ''
-                    }`}
-                  />
-                </button>
+                </div>
+              </div>
 
-                {postPickerOpen && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-40 bg-black/50 lg:hidden"
-                      aria-hidden
-                      onClick={() => setPostPickerOpen(false)}
-                    />
-                    <div className="fixed z-50 inset-x-3 bottom-[max(1rem,env(safe-area-inset-bottom))] max-h-[min(70dvh,32rem)] rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden flex flex-col">
-                      <div className="flex items-center justify-between px-3 pt-3 pb-2 border-b border-slate-800">
-                        <p className="text-sm font-bold text-slate-100">المنشورات</p>
-                        <button
-                          type="button"
-                          onClick={() => setPostPickerOpen(false)}
-                          className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-800"
-                        >
-                          <X size={16} />
-                        </button>
-                      </div>
-                      <div className="p-2 border-b border-slate-800">
-                        <div className="relative">
-                          <Search
-                            size={14}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500"
-                          />
-                          <input
-                            ref={postSearchRef}
-                            type="search"
-                            value={postSearch}
-                            onChange={(e) => setPostSearch(e.target.value)}
-                            placeholder="بحث في المنشورات…"
-                            className="w-full rounded-lg border border-slate-700 bg-slate-950 pr-9 pl-3 py-2.5 text-sm text-slate-100"
-                          />
+              {/* Desktop list */}
+              <div className="hidden lg:block space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-slate-200">المنشورات</h4>
+                  {loading && <span className="text-[10px] text-slate-500">تحميل…</span>}
+                </div>
+                <div className="max-h-[28rem] overflow-y-auto space-y-2 border border-slate-800 rounded-xl p-2">
+                  {posts.length === 0 && (
+                    <p className="text-xs text-slate-500 p-3 text-center">
+                      لا منشورات بعد — اضغط مزامنة
+                    </p>
+                  )}
+                  {posts.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => selectPost(p)}
+                      className={`w-full text-right p-2 rounded-lg border text-xs transition ${
+                        selectedPostId === p.id
+                          ? 'border-indigo-500 bg-indigo-950/40'
+                          : 'border-transparent hover:bg-slate-800/60'
+                      }`}
+                    >
+                      <div className="flex gap-2">
+                        <PostThumbnail url={p.thumbnail_url} size="md" />
+                        <div className="min-w-0 flex-1">
+                          <p className="line-clamp-2 text-slate-100">{postLabel(p)}</p>
+                          <p className="text-[10px] text-slate-500 mt-0.5">
+                            {postAutomationStatus(p)}
+                          </p>
                         </div>
                       </div>
-                      <div className="flex-1 min-h-0 overflow-y-auto">
-                        {filteredPosts.length === 0 ? (
-                          <p className="text-xs text-slate-500 p-4 text-center">لا نتائج</p>
-                        ) : (
-                          filteredPosts.map((p) => (
-                            <button
-                              key={p.id}
-                              type="button"
-                              onClick={() => selectPost(p)}
-                              className={`w-full flex items-start gap-3 p-3 text-right border-b border-slate-800/80 ${
-                                selectedPostId === p.id
-                                  ? 'bg-indigo-950/40'
-                                  : 'hover:bg-slate-800/60'
-                              }`}
-                            >
-                              <PostThumbnail url={p.thumbnail_url} />
-                              <div className="min-w-0 flex-1">
-                                <p className="text-xs font-medium text-slate-100 line-clamp-2">
-                                  {postLabel(p)}
-                                </p>
-                                <p className="text-[10px] text-slate-500 mt-1">
-                                  {p.comment_reply_enabled ? 'مفعّل للرد' : 'غير مفعّل'}
-                                </p>
-                              </div>
-                              {selectedPostId === p.id && (
-                                <Check size={16} className="text-indigo-400 mt-1" />
-                              )}
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* Desktop list */}
-            <div className="hidden lg:block space-y-2">
-              <div className="flex items-center justify-between">
-                <h4 className="text-sm font-bold text-slate-200">المنشورات</h4>
-                {loading && <span className="text-[10px] text-slate-500">تحميل…</span>}
-              </div>
-              <div className="max-h-[28rem] overflow-y-auto space-y-2 border border-slate-800 rounded-xl p-2">
-                {posts.length === 0 && (
-                  <p className="text-xs text-slate-500 p-3 text-center">
-                    لا منشورات بعد — اضغط مزامنة
-                  </p>
-                )}
-                {posts.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => selectPost(p)}
-                    className={`w-full text-right p-2 rounded-lg border text-xs transition ${
-                      selectedPostId === p.id
-                        ? 'border-indigo-500 bg-indigo-950/40'
-                        : 'border-transparent hover:bg-slate-800/60'
-                    }`}
-                  >
-                    <div className="flex gap-2">
-                      <PostThumbnail url={p.thumbnail_url} size="md" />
-                      <div className="min-w-0 flex-1">
-                        <p className="line-clamp-2 text-slate-100">{postLabel(p)}</p>
-                        <p className="text-[10px] text-slate-500 mt-0.5">
-                          {p.comment_reply_enabled ? 'مفعّل للرد' : 'غير مفعّل'}
-                        </p>
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Settings panel */}
-            <div className="space-y-4">
-              {!selectedPostId ? (
-                <div className="rounded-xl border border-dashed border-slate-700 py-12 px-4 text-center">
-                  <p className="text-sm text-slate-500">اختر منشوراً لضبط الردود</p>
+                    </button>
+                  ))}
                 </div>
-              ) : (
-                <>
-                  <label className="flex items-center justify-between p-3 border border-slate-800 rounded-xl bg-slate-950/50">
-                    <span className="text-sm font-bold text-slate-200">
-                      تفعيل الرد على تعليقات هذا المنشور
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={postSettings.commentReplyEnabled}
-                      onChange={(e) =>
-                        setPostSettings((s) => ({
-                          ...s,
-                          commentReplyEnabled: e.target.checked,
-                        }))
-                      }
-                      className="w-4 h-4 accent-indigo-500"
-                    />
-                  </label>
+              </div>
 
-                  <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1">
-                      نص الرد العام (تحت التعليق)
-                    </label>
-                    <select
-                      key={`pub-${presetNonce.reply}`}
-                      className="w-full mb-2 text-xs rounded-lg border border-slate-700 bg-slate-950 py-2 px-3 text-slate-200"
-                      value=""
-                      onChange={(e) => {
-                        const p = PLATFORM_PUBLIC_PRESETS.find((x) => x.id === e.target.value);
-                        if (!p) return;
-                        setPostSettings((s) => ({ ...s, publicReplyText: p.body }));
-                        setPresetNonce((n) => ({ ...n, reply: n.reply + 1 }));
-                      }}
-                    >
-                      <option value="">— إدراج قالب جاهز —</option>
-                      {PLATFORM_PUBLIC_PRESETS.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.label}
-                        </option>
-                      ))}
-                    </select>
-                    <textarea
-                      value={postSettings.publicReplyText}
-                      onChange={(e) =>
-                        setPostSettings((s) => ({ ...s, publicReplyText: e.target.value }))
-                      }
-                      rows={3}
-                      className="w-full text-sm rounded-lg border border-slate-700 bg-slate-950 p-3 text-slate-100"
-                      placeholder="اكتب الرد أو اختر قالباً…"
-                    />
+              {/* Settings panel */}
+              <div className="space-y-4">
+                {!selectedPostId ? (
+                  <div className="rounded-xl border border-dashed border-slate-700 py-12 px-4 text-center">
+                    <p className="text-sm text-slate-500">اختر منشوراً لضبط الردود</p>
                   </div>
-
-                  <label className="flex items-center justify-between p-3 border border-slate-800 rounded-xl bg-slate-950/50">
-                    <div>
-                      <span className="text-sm font-bold text-slate-200 block">
-                        رسالة خاصة بعد التعليق
+                ) : (
+                  <>
+                    <label className="flex items-center justify-between p-3 border border-slate-800 rounded-xl bg-slate-950/50">
+                      <span className="text-sm font-bold text-slate-200">
+                        تفعيل الرد على تعليقات هذا المنشور
                       </span>
-                      <span className="text-[10px] text-slate-500">نص ثابت — بدون AI</span>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={postSettings.sendDmOnComment}
-                      onChange={(e) =>
-                        setPostSettings((s) => ({
-                          ...s,
-                          sendDmOnComment: e.target.checked,
-                        }))
-                      }
-                      className="w-4 h-4 accent-indigo-500"
-                    />
-                  </label>
+                      <input
+                        type="checkbox"
+                        checked={postSettings.commentReplyEnabled}
+                        onChange={(e) =>
+                          setPostSettings((s) => ({
+                            ...s,
+                            commentReplyEnabled: e.target.checked,
+                          }))
+                        }
+                        className="w-4 h-4 accent-indigo-500"
+                      />
+                    </label>
 
-                  {postSettings.sendDmOnComment && (
+                    {platform === 'facebook' ? (
+                      <label className="flex items-center justify-between gap-3 p-3 border border-slate-800 rounded-xl bg-slate-950/50">
+                        <div>
+                          <span className="text-sm font-bold text-slate-200 block">
+                            لايك على التعليق
+                          </span>
+                          <span className="text-[10px] text-slate-500">
+                            الصفحة تعمل إعجاب (👍) على التعليق تلقائياً
+                          </span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={postSettings.reactOnCommentEnabled}
+                          onChange={(e) =>
+                            setPostSettings((s) => ({
+                              ...s,
+                              reactOnCommentEnabled: e.target.checked,
+                            }))
+                          }
+                          className="w-4 h-4 accent-indigo-500 flex-shrink-0"
+                        />
+                      </label>
+                    ) : (
+                      <p className="text-[11px] text-slate-500 px-1">
+                        لايك الصفحة على التعليقات متاح على فيسبوك فقط.
+                      </p>
+                    )}
+
                     <div>
+                      <label className="block text-xs font-medium text-slate-400 mb-1">
+                        نص الرد العام (تحت التعليق)
+                      </label>
                       <select
-                        key={`dm-${presetNonce.dm}`}
+                        key={`pub-${presetNonce.reply}`}
                         className="w-full mb-2 text-xs rounded-lg border border-slate-700 bg-slate-950 py-2 px-3 text-slate-200"
                         value=""
                         onChange={(e) => {
-                          const p = PLATFORM_DM_PRESETS.find((x) => x.id === e.target.value);
+                          const p = PLATFORM_PUBLIC_PRESETS.find((x) => x.id === e.target.value);
                           if (!p) return;
-                          setPostSettings((s) => ({ ...s, privateReplyText: p.body }));
-                          setPresetNonce((n) => ({ ...n, dm: n.dm + 1 }));
+                          setPostSettings((s) => ({ ...s, publicReplyText: p.body }));
+                          setPresetNonce((n) => ({ ...n, reply: n.reply + 1 }));
                         }}
                       >
-                        <option value="">— إدراج قالب رسالة خاصة —</option>
-                        {PLATFORM_DM_PRESETS.map((p) => (
+                        <option value="">— إدراج قالب جاهز —</option>
+                        {PLATFORM_PUBLIC_PRESETS.map((p) => (
                           <option key={p.id} value={p.id}>
                             {p.label}
                           </option>
                         ))}
                       </select>
-                      <textarea
-                        value={postSettings.privateReplyText}
+                      <div className="relative">
+                        <textarea
+                          value={postSettings.publicReplyText}
+                          onChange={(e) =>
+                            setPostSettings((s) => ({ ...s, publicReplyText: e.target.value }))
+                          }
+                          rows={3}
+                          className="w-full text-sm rounded-lg border border-slate-700 bg-slate-950 p-3 pl-10 text-slate-100"
+                          placeholder="اكتب الرد أو اختر قالباً…"
+                        />
+                        <div className="absolute bottom-1 left-1">
+                          <EmojiPicker
+                            align="left"
+                            onEmojiSelect={(emoji) =>
+                              setPostSettings((s) => ({
+                                ...s,
+                                publicReplyText: s.publicReplyText + emoji,
+                              }))
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <label className="flex items-center justify-between p-3 border border-slate-800 rounded-xl bg-slate-950/50">
+                      <div>
+                        <span className="text-sm font-bold text-slate-200 block">
+                          رسالة خاصة بعد التعليق
+                        </span>
+                        <span className="text-[10px] text-slate-500">نص ثابت — بدون AI</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={postSettings.sendDmOnComment}
                         onChange={(e) =>
                           setPostSettings((s) => ({
                             ...s,
-                            privateReplyText: e.target.value,
+                            sendDmOnComment: e.target.checked,
                           }))
                         }
-                        rows={3}
-                        className="w-full text-sm rounded-lg border border-slate-700 bg-slate-950 p-3 text-slate-100"
-                        placeholder="مرحباً {{name}}! …"
+                        className="w-4 h-4 accent-indigo-500"
                       />
-                      <p className="text-[10px] text-slate-500 mt-1">
-                        متغيرات: {'{{name}}'} · {'{{comment}}'}
-                      </p>
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={handleSavePostSettings}
-                    disabled={saving}
-                    className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm disabled:opacity-60"
-                  >
-                    {saving ? 'جاري الحفظ…' : 'حفظ إعدادات المنشور'}
-                  </button>
-
-                  {/* Keyword rules */}
-                  <div className="pt-4 border-t border-slate-800 space-y-3">
-                    <h4 className="text-sm font-bold text-slate-200">قواعد الكلمات المفتاحية</h4>
-                    <p className="text-[11px] text-slate-500">
-                      إن طابق التعليق كلمة، يُستخدم نص القاعدة بدل القالب العام.
-                    </p>
-
-                    <input
-                      type="text"
-                      value={ruleForm.keywords}
-                      onChange={(e) =>
-                        setRuleForm((f) => ({ ...f, keywords: e.target.value }))
-                      }
-                      placeholder="كلمات مفصولة بفاصلة: سعر، اشتراك، تجربة…"
-                      className="w-full text-sm rounded-lg border border-slate-700 bg-slate-950 p-2.5 text-slate-100"
-                    />
-                    <textarea
-                      value={ruleForm.publicReplyText}
-                      onChange={(e) =>
-                        setRuleForm((f) => ({ ...f, publicReplyText: e.target.value }))
-                      }
-                      rows={2}
-                      placeholder="رد عام لهذه القاعدة (اختياري)"
-                      className="w-full text-sm rounded-lg border border-slate-700 bg-slate-950 p-2.5 text-slate-100"
-                    />
-                    <label className="flex items-center gap-2 text-xs text-slate-300">
-                      <input
-                        type="checkbox"
-                        checked={ruleForm.privateReplyEnabled}
-                        onChange={(e) =>
-                          setRuleForm((f) => ({
-                            ...f,
-                            privateReplyEnabled: e.target.checked,
-                          }))
-                        }
-                        className="accent-indigo-500"
-                      />
-                      رسالة خاصة لهذه القاعدة
                     </label>
-                    {ruleForm.privateReplyEnabled && (
-                      <textarea
-                        value={ruleForm.privateReplyText}
-                        onChange={(e) =>
-                          setRuleForm((f) => ({
-                            ...f,
-                            privateReplyText: e.target.value,
-                          }))
-                        }
-                        rows={2}
-                        className="w-full text-sm rounded-lg border border-slate-700 bg-slate-950 p-2.5 text-slate-100"
-                        placeholder="نص الرسالة الخاصة"
-                      />
+
+                    {postSettings.sendDmOnComment && (
+                      <div>
+                        <select
+                          key={`dm-${presetNonce.dm}`}
+                          className="w-full mb-2 text-xs rounded-lg border border-slate-700 bg-slate-950 py-2 px-3 text-slate-200"
+                          value=""
+                          onChange={(e) => {
+                            const p = PLATFORM_DM_PRESETS.find((x) => x.id === e.target.value);
+                            if (!p) return;
+                            setPostSettings((s) => ({ ...s, privateReplyText: p.body }));
+                            setPresetNonce((n) => ({ ...n, dm: n.dm + 1 }));
+                          }}
+                        >
+                          <option value="">— إدراج قالب رسالة خاصة —</option>
+                          {PLATFORM_DM_PRESETS.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.label}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="relative">
+                          <textarea
+                            value={postSettings.privateReplyText}
+                            onChange={(e) =>
+                              setPostSettings((s) => ({
+                                ...s,
+                                privateReplyText: e.target.value,
+                              }))
+                            }
+                            rows={3}
+                            className="w-full text-sm rounded-lg border border-slate-700 bg-slate-950 p-3 pl-10 text-slate-100"
+                            placeholder="مرحباً {{name}}! …"
+                          />
+                          <div className="absolute bottom-1 left-1">
+                            <EmojiPicker
+                              align="left"
+                              onEmojiSelect={(emoji) =>
+                                setPostSettings((s) => ({
+                                  ...s,
+                                  privateReplyText: s.privateReplyText + emoji,
+                                }))
+                              }
+                            />
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-1">
+                          متغيرات: {'{{name}}'} · {'{{comment}}'}
+                        </p>
+                      </div>
                     )}
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={handleSaveRule}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium"
-                      >
-                        {editingRuleId ? <Pencil size={12} /> : <Plus size={12} />}
-                        {editingRuleId ? 'تحديث القاعدة' : 'إضافة قاعدة'}
-                      </button>
-                      {editingRuleId && (
+
+                    <button
+                      type="button"
+                      onClick={handleSavePostSettings}
+                      disabled={saving}
+                      className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm disabled:opacity-60"
+                    >
+                      {saving ? 'جاري الحفظ…' : 'حفظ إعدادات المنشور'}
+                    </button>
+
+                    <div className="pt-4 border-t border-slate-800 space-y-3">
+                      <h4 className="text-sm font-bold text-slate-200">قواعد الكلمات المفتاحية</h4>
+                      <p className="text-[11px] text-slate-500">
+                        إن طابق التعليق كلمة، يُستخدم نص القاعدة بدل القالب العام.
+                      </p>
+
+                      <input
+                        type="text"
+                        value={ruleForm.keywords}
+                        onChange={(e) =>
+                          setRuleForm((f) => ({ ...f, keywords: e.target.value }))
+                        }
+                        placeholder="كلمات مفصولة بفاصلة: سعر، اشتراك، تجربة…"
+                        className="w-full text-sm rounded-lg border border-slate-700 bg-slate-950 p-2.5 text-slate-100"
+                      />
+                      <div className="relative">
+                        <textarea
+                          value={ruleForm.publicReplyText}
+                          onChange={(e) =>
+                            setRuleForm((f) => ({ ...f, publicReplyText: e.target.value }))
+                          }
+                          rows={2}
+                          placeholder="رد عام لهذه القاعدة (اختياري)"
+                          className="w-full text-sm rounded-lg border border-slate-700 bg-slate-950 p-2.5 pl-10 text-slate-100"
+                        />
+                        <div className="absolute bottom-1 left-1">
+                          <EmojiPicker
+                            align="left"
+                            onEmojiSelect={(emoji) =>
+                              setRuleForm((f) => ({
+                                ...f,
+                                publicReplyText: f.publicReplyText + emoji,
+                              }))
+                            }
+                          />
+                        </div>
+                      </div>
+                      <label className="flex items-center gap-2 text-xs text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={ruleForm.privateReplyEnabled}
+                          onChange={(e) =>
+                            setRuleForm((f) => ({
+                              ...f,
+                              privateReplyEnabled: e.target.checked,
+                            }))
+                          }
+                          className="accent-indigo-500"
+                        />
+                        رسالة خاصة لهذه القاعدة
+                      </label>
+                      {ruleForm.privateReplyEnabled && (
+                        <div className="relative">
+                          <textarea
+                            value={ruleForm.privateReplyText}
+                            onChange={(e) =>
+                              setRuleForm((f) => ({
+                                ...f,
+                                privateReplyText: e.target.value,
+                              }))
+                            }
+                            rows={2}
+                            className="w-full text-sm rounded-lg border border-slate-700 bg-slate-950 p-2.5 pl-10 text-slate-100"
+                            placeholder="نص الرسالة الخاصة"
+                          />
+                          <div className="absolute bottom-1 left-1">
+                            <EmojiPicker
+                              align="left"
+                              onEmojiSelect={(emoji) =>
+                                setRuleForm((f) => ({
+                                  ...f,
+                                  privateReplyText: f.privateReplyText + emoji,
+                                }))
+                              }
+                            />
+                          </div>
+                        </div>
+                      )}
+                      <div className="flex gap-2">
                         <button
                           type="button"
-                          onClick={resetRuleForm}
-                          className="px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-white"
+                          onClick={handleSaveRule}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium"
                         >
-                          إلغاء
+                          {editingRuleId ? <Pencil size={12} /> : <Plus size={12} />}
+                          {editingRuleId ? 'تحديث القاعدة' : 'إضافة قاعدة'}
                         </button>
-                      )}
-                    </div>
+                        {editingRuleId && (
+                          <button
+                            type="button"
+                            onClick={resetRuleForm}
+                            className="px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-white"
+                          >
+                            إلغاء
+                          </button>
+                        )}
+                      </div>
 
-                    <ul className="space-y-2">
-                      {rules.map((r) => (
-                        <li
-                          key={r.id}
-                          className="flex items-start justify-between gap-2 p-2.5 rounded-lg bg-slate-950 border border-slate-800 text-xs"
-                        >
-                          <div className="min-w-0">
-                            <p className="text-slate-200 font-medium">
-                              {(Array.isArray(r.keywords) ? r.keywords : []).join('، ')}
-                            </p>
-                            {r.public_reply_text && (
-                              <p className="text-slate-500 mt-1 line-clamp-2">
-                                {r.public_reply_text}
+                      <ul className="space-y-2">
+                        {rules.map((r) => (
+                          <li
+                            key={r.id}
+                            className="flex items-start justify-between gap-2 p-2.5 rounded-lg bg-slate-950 border border-slate-800 text-xs"
+                          >
+                            <div className="min-w-0">
+                              <p className="text-slate-200 font-medium">
+                                {(Array.isArray(r.keywords) ? r.keywords : []).join('، ')}
                               </p>
-                            )}
-                          </div>
-                          <div className="flex gap-1 flex-shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => handleEditRule(r)}
-                              className="p-1.5 rounded text-slate-400 hover:text-indigo-300 hover:bg-slate-800"
-                            >
-                              <Pencil size={12} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteRule(r.id)}
-                              className="p-1.5 rounded text-slate-400 hover:text-red-400 hover:bg-slate-800"
-                            >
-                              <Trash2 size={12} />
-                            </button>
-                          </div>
-                        </li>
-                      ))}
-                      {rules.length === 0 && (
-                        <p className="text-[11px] text-slate-500 text-center py-2">
-                          لا قواعد لهذا المنشور
-                        </p>
-                      )}
-                    </ul>
-                  </div>
-                </>
-              )}
+                              {r.public_reply_text && (
+                                <p className="text-slate-500 mt-1 line-clamp-2">
+                                  {r.public_reply_text}
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex gap-1 flex-shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleEditRule(r)}
+                                className="p-1.5 rounded text-slate-400 hover:text-indigo-300 hover:bg-slate-800"
+                              >
+                                <Pencil size={12} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteRule(r.id)}
+                                className="p-1.5 rounded text-slate-400 hover:text-red-400 hover:bg-slate-800"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          </li>
+                        ))}
+                        {rules.length === 0 && (
+                          <p className="text-[11px] text-slate-500 text-center py-2">
+                            لا قواعد لهذا المنشور
+                          </p>
+                        )}
+                      </ul>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

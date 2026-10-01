@@ -9,8 +9,11 @@
  */
 
 import {
+  detectsWantsAlternativesIntent,
   hasCustomerRequestBlock,
-  normalizeCustomerRequest
+  normalizeCustomerRequest,
+  stripUnsolicitedAlternativeSuggestions,
+  stripUnsolicitedCrossSellMentions,
 } from './customerRequest.js';
 import {
   isProductInfoRequest,
@@ -70,8 +73,12 @@ const modelSignalCases: Array<{ name: string; raw: unknown; expect: Expect }> = 
 const heuristicInfoFallbackCases: Array<{ text: string; expectInfo: boolean }> = [
   { text: 'بدي معلومات أكثر عن المنتج', expectInfo: true },
   { text: 'تمام ممكن تعطيني معلومات اكتر عنه', expectInfo: true },
+  { text: 'شو تكلفة الشحن ع المعضمية', expectInfo: true },
+  { text: 'في توصيل ع الشام', expectInfo: true },
+  { text: 'how much is shipping', expectInfo: true },
   { text: 'نعم', expectInfo: false },
-  { text: 'أكد الطلب', expectInfo: false }
+  { text: 'أكد الطلب', expectInfo: false },
+  { text: 'المعضمية', expectInfo: false },
 ];
 
 function assert(cond: boolean, msg: string): void {
@@ -128,6 +135,76 @@ function run(): void {
     'should keep model response text'
   );
   passed++;
+
+  // Live bug: shipping-cost Q while identity incomplete + model collect_info → must NOT identity-hijack
+  {
+    const shippingAsk = resolveOrderNextAction({
+      aiNextAction: 'collect_info',
+      fieldsComplete: false,
+      fieldsWereCompleteBeforeTurn: false,
+      wasAwaitingConfirmation: false,
+      userMessage: 'شو تكلفة الشحن ع المعضمية',
+      language: 'arabic',
+      collectedInfo: {
+        product_name: 'قميص',
+        size: 'm',
+      },
+      responseText:
+        'تكلفة الشحن للمعضمية تعتمد على سياسة الشحن في المتجر.',
+      modelAsksProductInfo: false,
+      missingFields: ['name', 'phone', 'address'],
+      turnIntent: 'other',
+      lastBotReply:
+        'نقدر نضيف منتج ثاني، أو نكمّل الطلب؟',
+    });
+    assert(
+      shippingAsk.nextAction === 'present_product',
+      `shipping Q must present_product, got ${shippingAsk.nextAction}`
+    );
+    assert(
+      shippingAsk.reason === 'product_info_request_blocks_checkout',
+      `expected product_info_request_blocks_checkout, got ${shippingAsk.reason}`
+    );
+    assert(
+      /شحن|توصيل|shipping/i.test(shippingAsk.responseText),
+      'must keep shipping answer, not identity template'
+    );
+    assert(
+      !/لإكمال الطلب أحتاج اسمك الكامل/.test(shippingAsk.responseText),
+      'must not replace shipping answer with identity bundle'
+    );
+    passed++;
+  }
+
+  // turnIntent product_qa also blocks identity template
+  {
+    const viaIntent = resolveOrderNextAction({
+      aiNextAction: 'collect_info',
+      fieldsComplete: false,
+      fieldsWereCompleteBeforeTurn: false,
+      wasAwaitingConfirmation: false,
+      userMessage: 'شو تكلفة الشحن ع المعضمية',
+      language: 'arabic',
+      collectedInfo: { product_name: 'قميص', size: 'm' },
+      responseText: 'تكلفة الشحن حسب سياسة المتجر.',
+      modelAsksProductInfo: false,
+      missingFields: ['name', 'phone', 'address'],
+      turnIntent: 'product_qa',
+    });
+    assert(
+      viaIntent.nextAction === 'present_product',
+      `product_qa turn must present_product, got ${viaIntent.nextAction}`
+    );
+    assert(
+      viaIntent.reason === 'turn_intent_product_qa',
+      `expected turn_intent_product_qa, got ${viaIntent.reason}`
+    );
+    assert(
+      !/لإكمال الطلب أحتاج اسمك الكامل/.test(viaIntent.responseText),
+      'product_qa must not inject identity bundle'
+    );
+    passed++;
+  }
 
   // Model says NOT product info → heuristic alone on dialect alternatives should not force present_product
   // (alternatives are handled by catalog prompts + wants_alternatives, not order rails)
@@ -207,6 +284,51 @@ function run(): void {
     !/جاهز للتأكيد/.test(photoColor.responseText),
     'incomplete-order color reply must not show confirmation summary'
   );
+  passed++;
+
+  // ——— Unsolicited alternatives gate ———
+  assert(
+    !detectsWantsAlternativesIntent('شو سعر القميص'),
+    'price ask is not wants-alternatives'
+  );
+  assert(
+    detectsWantsAlternativesIntent('عندك شي تاني؟'),
+    'explicit something-else is wants-alternatives'
+  );
+  {
+    const stripped = stripUnsolicitedAlternativeSuggestions(
+      'سعر القميص هو 553 دولار أمريكي. إذا حابب، عندنا كمان ساعة بسعر 200 ريال سعودي. هل تبحث عن شيء معين؟'
+    );
+    assert(
+      !/ساعة/.test(stripped) && /سعر القميص/.test(stripped),
+      `must strip volunteer watch pitch, got: ${stripped}`
+    );
+  }
+  {
+    // Live bug phrasing: «عندنا ساعة كمان» + full watch pitch mid-shirt checkout.
+    const liveBug = stripUnsolicitedCrossSellMentions({
+      replyText:
+        'حبيبي، قبل ما أكمل طلبك للقميص مقاس XL، حابب أذكرك إنه عندنا ساعة كمان بسعر 200 ريال سعودي. الساعة مصنوعة من خامات عالية الجودة، وتتميز بتصميم عصري يناسب كل الأوقات. كمان، هي عملية جداً وتضيف لمسة أنيقة لأي إطلالة. حابب تعرف تفاصيل أكثر عن الساعة أو نكمل طلب القميص؟',
+      activeProductNames: ['قميص'],
+      otherProductNames: ['ساعة'],
+      language: 'arabic',
+    });
+    assert(
+      !/ساعة|200\s*ريال/i.test(liveBug),
+      `live upsell must not keep watch pitch, got: ${liveBug}`
+    );
+  }
+  {
+    // When customer asked for alternatives, keep the other product name.
+    const kept = stripUnsolicitedCrossSellMentions({
+      replyText: 'عندنا كمان ساعة بسعر 200 ريال. حابب تفاصيل؟',
+      activeProductNames: ['قميص'],
+      otherProductNames: [],
+      language: 'arabic',
+    });
+    // Phrase strip still runs; empty otherProductNames → phrase-only path.
+    assert(typeof kept === 'string' && kept.length > 0, 'must return a string');
+  }
   passed++;
 
   console.log(`✅ SalesGPT golden tests passed: ${passed}`);

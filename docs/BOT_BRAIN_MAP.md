@@ -1,140 +1,242 @@
-# خريطة عقل البوت (SalesGPT) — مرجع تشخيص وإصلاح
+# خريطة عقل البوت (SalesGPT) — من استقبال الرسالة حتى إرسال الرد
 
-> **الغرض:** مرجع تشغيل وتشخيص دقيق. أي خلل في الرد / السلة / التأكيد / الصورة / اللون يُتتبَّع من هنا إلى الملف والشرط المحدد.  
-> **الحقيقة في الكود:** هذا الملف يصف السلوك الحالي في المستودع (فرع `main` المستعاد من GitHub). عند تغيير منطق حرج: حدّث هذا الملف في نفس الـ PR.  
-> **اللغة:** الشرح بالعربية؛ المعرّفات والمسارات والـ `next_action` بالإنجليزية كما في الكود.
-
----
-
-## 0. مبدأ ملكية القرار (مهم جداً)
-
-| الطبقة | ماذا تملك؟ | ماذا لا تملك؟ |
-|--------|------------|----------------|
-| **النموذج (LLM)** | نص الرد، اقتراح `next_action`، استخراج حقول، أعلام `customer_request` | الأسعار، المخزون، السلة، إنشاء الطلب، اللون النهائي من الكتالوج، إرفاق الصورة فعلياً |
-| **الكود** | البحث في الكتالوج، السلة، اكتمال الطلب، تأكيد الطلب، الألوان، الصور، الـ grounding، التصعيد | اختراع نص مبيعات طويل (إلا رسائل القالب عند منع التسريب) |
-
-**قاعدة ذهبية للتشخيص:** إذا المشكلة «قال شيئاً خاطئاً» → غالباً prompt / grounding. إذا المشكلة «نفّذ فعلاً خاطئاً» (طلب / سلة / صورة) → غالباً policy / pipeline، وليس الـ LLM وحده.
+> **الغرض:** مرجع تشغيل وتشخيص دقيق بعد توحيد ملكية الرد (`ReplyPolicy` + سياسة الهوية المجمّعة).  
+> **الحقيقة في الكود:** يصف السلوك الحي في المستودع. عند تغيير منطق حرج: حدّث هذا الملف في نفس الـ PR.  
+> **اللغة:** الشرح بالعربية؛ المعرّفات والمسارات و`next_action` بالإنجليزية كما في الكود.
 
 ---
 
-## 1. المداخل (من أين تدخل الرسالة؟)
+## 0. مبدأ ملكية القرار
 
-كل القنوات الحية + تجربة البوت تصل لنفس العقل عبر مسار واحد:
+| الطبقة | تملك | لا تملك |
+|--------|------|---------|
+| **LLM** | مسودة `response_text` + اقتراح `next_action` + `customer_request` + `extracted_info` استشاري | السلة، إنشاء الطلب، اللون/المقاس النهائي، قوالب الهوية/اللون/await/confirm، إرفاق الصورة |
+| **المفسّر (Interpreter)** | نية مغلقة (whitelist/LLM مغلق)، كتابة سلة/هوية/متغير على الحالة، إسهام في `next_action` | نص مبيعات طويل حر |
+| **ReplyPolicy / القوالب** | النص الصادر النهائي للقرارات المملوكة (جمع هوية، لون/مقاس، await، confirm، cancel، سلة) | فهم نية حرّة |
+| **الكود الحتمي** | تركيز المنتج، اكتمال الطلب، I4 تأكيد، صور، grounding | — |
+
+**قاعدة تشخيص:** «قال خطأ» → غالباً prompt/grounding. «نفّذ فعل خطأ» (طلب/سلة/صورة) → غالباً policy/pipeline.
+
+**مصادر حقيقة واحدة (SSOT):**
+
+| القرار | المالك |
+|--------|--------|
+| نص الرد الصادر للقرارات القالبية | `replyPolicy.ts` (`composeOutboundReply` / `applyPostAgentReplyPolicy`) |
+| سؤال الهوية | `collectInfoOrder.ts` |
+| سؤال لون/مقاس | `variantEngine/ask.ts` (+ غلاف `orderColorPolicy`) |
+| تأكيد الطلب النهائي | `resolveConfirmFinalize` (I4) داخل `orderConfirmationPolicy.ts` |
+| بوابة استبدال القالب | `deterministicReplyGate.ts` (`mayReplaceWithOrderTemplate`) |
+| CTA السلة | `cartActionCta.ts` |
+| تتبع من كتب الرد | `replyOwnership.ts` (ظل — لا يغيّر النص) |
+
+---
+
+## 1. المداخل — من أين تدخل الرسالة؟
 
 ```
-[قناة] → (بوابات قبل الدماغ) → runSalesBotTurn / handleIncomingMessage
-       → processMessage (orchestrator)
-       → processWithSalesGPT (pipeline)
-       → SalesGPTAgent.step (عند الحاجة)
-       → [وسوم ORDER_DATA / IMAGE] → إرسال للعميل + حفظ DB
+[قناة] → بوابات ما قبل الدماغ
+       → runSalesBotTurn  (قنوات حية)
+       → handleIncomingMessage  (bot/index.ts)
+       → processMessage  (core/orchestrator.ts)
+       → processWithSalesGPT  (services/salesgpt/index.ts)
+       → [وسوم ORDER_DATA / IMAGE] → إرسال + حفظ DB
 ```
 
-| المدخل | الملف / المسار | يمر عبر |
-|--------|----------------|---------|
+| المدخل | الملف | يمر عبر |
+|--------|-------|---------|
 | واتساب Web | `services/whatsappWeb/inbound.ts` | `runSalesBotTurn` |
-| واتساب (Baileys/قديم) | `controllers/whatsapp.controller.ts` | نفس نمط skip ثم SalesGPT |
-| فيسبوك | `controllers/facebook.controller.ts` | `runSalesBotTurn` / مسار مشترك |
+| واتساب | `controllers/whatsapp.controller.ts` | نفس النمط |
+| فيسبوك | `controllers/facebook.controller.ts` | `runSalesBotTurn` |
 | إنستغرام | `controllers/instagram.controller.ts` | نفس النمط |
-| تيليجرام | (controllers/telegram*) | نفس الدماغ |
-| تجربة البوت (لوحة التاجر) | `controllers/ai.controller.ts` | `handleIncomingMessage` مباشرة ثم `appendOrderDataIfConfirmed` |
+| تيليجرام | controllers تيليجرام | نفس الدماغ |
+| تجربة البوت (لوحة) | `controllers/ai.controller.ts` | `handleIncomingMessage` مباشرة |
 
-**نقطة الدخول الموحدة للعقل:**
+**نقاط الدخول:**
 
-1. `bot/index.ts` → `handleIncomingMessage`
+1. `bot/index.ts` → `handleIncomingMessage` (إعداد `MerchantConfig` ثم `processMessage`)
 2. `core/orchestrator.ts` → `processMessage` → **دائماً** `processWithSalesGPT`
 3. `services/salesgpt/index.ts` → الدماغ الكامل
-4. `services/channels/botTurn.ts` → `runSalesBotTurn` (قنوات حية: دماغ + ORDER_DATA + تصعيد + حفظ رسائل)
+4. `services/channels/botTurn.ts` → `runSalesBotTurn` (دماغ + ORDER_DATA + تصعيد + حفظ)
 
-**إعداد التاجر الموحّد:** `services/buildMerchantBotConfig.ts`  
-يفرض `use_full_ai_mode: true` لكل القنوات وتجربة البوت.
+إعداد التاجر: `services/buildMerchantBotConfig.ts` (`use_full_ai_mode: true`).
 
 ---
 
-## 2. بوابات ما قبل الدماغ (قد لا يصل الطلب لـ SalesGPT أصلاً)
+## 2. بوابات ما قبل الدماغ
 
-افحص هذه أولاً إذا «البوت ما ردّ»:
+افحص أولاً إن «البوت ما ردّ»:
 
-| الشرط | السلوك | أين |
-|-------|--------|-----|
-| `bot_disabled` أو `status === 'human'` | تخطّي الرد | inbound / controllers |
-| آخر رسالة من موظف بشري خلال **5 دقائق** | تخطّي الرد | نفس المواضع |
-| الخطة لا تشمل Sales Bot (`hasSalesBot`) | تخطّي | plan limits |
-| حد استهلاك الردود الشهرية | تخطّي / رفض | plan limits |
-| فشل تقني في الـ orchestrator | رد خطأ عام + `failed: true` | `botTurn.ts` |
+| الشرط | السلوك |
+|-------|--------|
+| `bot_disabled` أو `status === 'human'` | تخطّي الرد |
+| آخر رسالة موظف خلال 5 دقائق | تخطّي |
+| الخطة بلا Sales Bot | تخطّي |
+| حد استهلاك شهري | تخطّي/رفض |
+| فشل orchestrator | رد خطأ + `failed: true` |
 
 بعد نجاح الدماغ:
 
 | الحدث | السلوك |
 |-------|--------|
-| `<ESCALATE>` في النص أو `shouldEscalate` | `escalateConversationToHuman` + مرحلة `handoff` |
-| `next_action === confirm_order` + بيانات كاملة | إلحاق `[ORDER_DATA]...[/ORDER_DATA]` ثم القناة تفسّره وتحفظ الطلب |
+| `<ESCALATE>` أو `shouldEscalate` | تصعيد بشري + مرحلة `handoff` |
+| `next_action === confirm_order` + اكتمال | إلحاق `[ORDER_DATA]...[/ORDER_DATA]` ثم حفظ الطلب |
 
 ---
 
-## 3. مخطط التدفق الشامل (Pipeline)
+## 3. مخطط التدفق الحي داخل `processWithSalesGPT`
 
 ```mermaid
 flowchart TD
-  A[رسالة العميل] --> B{بوابات قناة؟}
-  B -->|تخطي| Z[حفظ رسالة فقط / صمت]
-  B -->|متابعة| C[detectLanguage]
-  C --> D[استراتيجيات بحث المنتج -1..3]
-  D --> E{noMatchForSpecificQuery؟}
-  E -->|نعم| F[products فارغة + overview فقط]
-  E -->|لا| G[products + activeProductId + CatalogAwareness]
-  F --> H{عميل عائد بعد طلب؟}
-  G --> H
-  H -->|نعم| I[injectContextNote + تفريغ entities]
-  H -->|لا| J[restoreState من history + state]
-  I --> K[humanStep]
-  J --> K
-  K --> L{Cart sync متعدد المنتجات؟}
-  L -->|نعم| M[رد حتمي بدون AI + add_to_cart]
-  L -->|لا| N{Add-another fast-path؟}
-  N -->|نعم| O[lockDraftIntoCart + رد قالب]
-  N -->|لا| P{Confirm fast-path؟}
-  P -->|نعم| Q[confirm_order بدون AI]
-  P -->|لا| R[agent.step — استدعاء LLM]
-  R --> S{no-match grounding خرق؟}
-  S -->|نعم| T[استبدال الرد بقالب صادق]
-  S -->|لا| U[متابعة]
-  T --> U
-  U --> V{next_action = send_image؟}
-  V -->|نعم| W[إرفاق IMAGE tag بلون واعٍ]
-  V -->|لا| X[stripFalseImageDeliveryClaims]
-  W --> Y[resolveOrderColor + تحديث state + cart]
-  X --> Y
-  Y --> AA{gateConfirmWhenColorInvalid}
-  AA --> AB{model wantsAddAnother؟}
-  AB -->|نعم| AC[lockDraftIntoCart]
-  AB -->|لا| AD[ensureCartForCheckout إن await/confirm]
-  AC --> AE[إرجاع replyText + next_action + updatedState]
-  AD --> AE
+  A[رسالة العميل] --> B[لغة + تركيز منتج resolveFocus]
+  B --> C[Interpreter: whitelist ثم LLM مغلق]
+  C --> D{cancel_order مطبّق؟}
+  D -->|نعم| E[early return: رسالة إلغاء]
+  D -->|لا| F[عميل عائد؟ حقن سياق]
+  F --> G[Early rails بالترتيب]
+  G --> G1[تصحيح متغير / لون-مقاس]
+  G1 --> G2[إجابة pending color/size]
+  G2 --> G3[إلغاء / حذف سطر interim]
+  G3 --> G4[مزامنة سلة متعددة]
+  G4 --> G5[إضافة منتج آخر]
+  G5 --> G6[Confirm fast-path I4]
+  G6 --> H{أحدها أعاد رداً كاملاً؟}
+  H -->|نعم| Z[replyText نهائي]
+  H -->|لا| I[agent.step — LLM]
+  I --> J[Grounding: no-match / OOS / catalog]
+  J --> K[حقائق المفسّر → next_action]
+  K --> L[صورة إن طلب صريح]
+  L --> M[groundInterpreterReply]
+  M --> N[resolveProductOrderColor]
+  N --> O[gateConfirmWhenVariantsInvalid]
+  O --> P[add-another بعد الـ agent إن لزم]
+  P --> Q[ensureCartForCheckout إن await/confirm]
+  Q --> R[applyPostAgentReplyPolicy]
+  R --> S[bindPendingBotQuestion]
+  S --> Z
 ```
+
+**قاعدة الفوز:**
+
+- **Early rail** يعيد رداً كاملاً → الـ LLM لا يعمل.
+- بعد الـ agent: `applyPostAgentReplyPolicy` هو **آخر مالك للنص** للقرارات القالبية (ليس «آخر كاتب عشوائي»).
 
 ---
 
-## 4. مراحل المحادثة (Stages 1–9)
+## 4. ترتيب Early Rails (قبل الـ LLM)
 
-المصدر: `services/salesgpt/stages.ts` + اشتقاق من `next_action` في `agent.ts`.
+كلها داخل `services/salesgpt/index.ts`؛ أي مسار ناجح يُرجع `replyText` فوراً (`aiCallsCount: 0`):
 
-| stage_id | الاسم | هدف المرحلة | `current_stage` (قديم) |
-|----------|-------|-------------|-------------------------|
-| 1 | مقدمة / ترحيب | استقبال، تعريف مرة واحدة | `discover` |
-| 2 | اكتشاف الاحتياجات | سؤال مفتوح | `discover` |
-| 3 | عرض القيمة | ربط الوصف بحاجة العميل | `offer` |
-| 4 | عرض الحلول / المنتج | سعر + 2–3 فوائد + سؤال قرار | `offer` |
-| 5 | اعتراضات | رد من الوصف/السياسات فقط | `objection` |
-| 6 | إغلاق البيع | دفع نحو الشراء | `close` |
-| 7 | جمع معلومات الطلب | حقل واحد لكل رد | `close` |
-| 8 | تأكيد الطلب | ملخص + طلب موافقة صريحة | `close` |
-| 9 | إنهاء / تصعيد | شكر أو handoff بشري | `close` أو `handoff` |
+| # | الحدث | الملفات / البناء |
+|---|--------|------------------|
+| 0 | Interpreter `cancel_order` | `buildOrderCancelledMessage` |
+| 1 | تصحيح متغير (لون/مقاس) | `resolveVariantChange` + رسائل updated/unchanged/unavailable/ask_which |
+| 2 | إجابة `pending_bot_question` | `pendingBotQuestion` + `buildPendingSelectMessage` / unavailable |
+| 3 | إلغاء كلي / حذف سطر | `interimCancelMatchers` + `cartLineRemoval` + قوالب `replyPolicy` |
+| 4 | سلة متعددة منتجات | `buildCartSyncedMessage` |
+| 5 | إضافة منتج آخر | `lockDraftIntoCart` + `buildAddedToCartMessage` |
+| 6 | Confirm fast-path | `resolveConfirmFinalize` + `buildOrderConfirmedMessage` |
 
-**مصدر الحقيقة للمرحلة:** `conversation_state.salesgpt_stage_id`  
-يُكتب فقط عبر `applySalesGPTStage` / `applyFreshConversationStage` / `applyHandoffStage`  
-(`conversationStateSync.ts`).
+نصوص الـ early rails تمر عبر `ownReply` → `logReplyOwnership` (ظل).
 
-**اشتقاق المرحلة من `next_action`:**
+---
+
+## 5. المفسّر (Interpreter)
+
+المجلد: `services/salesgpt/interpreter/`
+
+| ملف | دور |
+|-----|-----|
+| `index.ts` | واجهة: whitelist أولاً؛ ثم LLM إن `INTERPRETER_MODE=flip` للأنواع المقلوبة |
+| `whitelist.ts` | هوية بعد سؤال بوت، pending لون/مقاس، إلغاء/حذف، handoff، نعم/لا عند await |
+| `apply.ts` | كتابة الحالة فقط (سلة، entities، أعلام) — **بدون نص رد** |
+| `nextAction.ts` / `turnFacts.ts` | تقليل `next_action` من الحقائق؛ لا يصدر `confirm_order` (I4 فقط) |
+| `ground.ts` | صدق الرد بعد الـ agent |
+| `flip.ts` | أنواع مسموح للـ LLM بتطبيقها حياً |
+
+بعد تطبيق هوية (`provide_identity_field`): إن checkout جاهز → `await_confirmation`؛ وإلا `collect_info`.
+
+---
+
+## 6. داخل `SalesGPTAgent.step`
+
+الملف: `services/salesgpt/agent.ts`
+
+```
+1. أدوات عند الحاجة (ProductSearch…)
+2. بناء سياق منتج + كتالوج + سلة في الـ prompt
+3. استدعاء AI واحد → response_text + next_action + extracted_info + customer_request
+4. ingest هوية من سؤال البوت السابق (collectInfoOrder)
+5. TurnIntent → فرض browse (صورة / Q&A)
+6. بدائل / إضافة أخرى → إبعاد عن checkout عند الحاجة
+7. resolveOrderNextAction (سكك الطلب داخل الـ agent)
+8. <ESCALATE> → end_conversation
+9. اشتقاق stage من next_action
+10. إرجاع turnIntent مع النتيجة
+```
+
+الموديل **يقترح**؛ النص النهائي للقوالب يُستبدل لاحقاً في `applyPostAgentReplyPolicy`.
+
+---
+
+## 7. ReplyPolicy — مالك النص بعد الـ agent
+
+الملف: `services/salesgpt/replyPolicy.ts`
+
+### 7.1 `applyPostAgentReplyPolicy` — ترتيب الأولوية
+
+1. إن دور طلبي + لون ناقص → قالب `ask_variant` (لون) + `collect_info`
+2. وإلا مقاس ناقص → قالب مقاس + `collect_info`
+3. إن checkout مكتمل و`next_action` ∈ {await / collect_info / close_sale} → **قالب await مرة واحدة** (مع ملخص السلة المسعّر)
+4. إن `collect_info` وهوية ناقصة → قالب هوية من `collectInfoOrder`
+5. وإلا تمرير النص (بعد تنظيف سؤال لون مخترع لمنتج بلا ألوان)
+
+**حاسم:** لون/مقاس ناقص **يهزم** await — لا يُعرض ملخص تأكيد قبل اكتمال المتغيرات.
+
+### 7.2 بوابة الاستبدال
+
+`mayReplaceWithOrderTemplate({ nextAction, turnIntent })`:
+
+- يسمح: `collect_info` / `await_confirmation` / `confirm_order` / `close_sale` / `add_to_cart` أو intent ∈ {cart_edit, checkout, finalize}
+- يمنع: `browse_media` / `product_qa` — لا تُسرق ردود التصفح لقالب جمع
+
+### 7.3 `composeOutboundReply`
+
+بناة أحداث مبكرة (cancel، cart_remove، photo clarify…) — early rails تستدعيها بدل string literals متناثرة.
+
+---
+
+## 8. سياسة الهوية (بعد التوحيد)
+
+الملف: `services/salesgpt/collectInfoOrder.ts`  
+التفويض الحي: `buildCollectMissingFieldsMessage` → `resolveIdentityCollectReply`.
+
+| الحالة | رد البوت |
+|--------|----------|
+| الثلاثة ناقصة | Bundle: «أحتاج اسمك الكامل ورقم هاتفك وعنوان التوصيل» |
+| اثنان ناقصان | Partial: «أحتاج كمان X وY» |
+| واحد ناقص | سؤال حقل واحد |
+| الثلاثة موجودة | لا يُعاد سؤال هوية → مسار await/confirm |
+
+البرومبت (`prompts.ts` / `stages.ts` / `agent.ts`): النظام يسأل الهوية؛ الموديل **لا يخترع** قوالب جمع.
+
+---
+
+## 9. مراحل المحادثة (1–9)
+
+المصدر: `stages.ts` + اشتقاق من `next_action` في `agent.ts`.
+
+| stage_id | الهدف | ملاحظة بعد التوحيد |
+|----------|-------|---------------------|
+| 1 | ترحيب | |
+| 2 | اكتشاف احتياج | |
+| 3–4 | قيمة / عرض منتج | |
+| 5 | اعتراض | |
+| 6 | إغلاق بيع | |
+| 7 | جمع معلومات | النظام يسأل الهوية مجمّعة + لون/مقاس بقوالب |
+| 8 | تأكيد | await أو confirm |
+| 9 | إنهاء / handoff | |
+
+**مصدر الحقيقة:** `conversation_state.salesgpt_stage_id` عبر `conversationStateSync.ts`.
 
 | next_action | stage_id |
 |-------------|----------|
@@ -147,425 +249,248 @@ flowchart TD
 | `await_confirmation` / `confirm_order` | 8 |
 | `end_conversation` | 9 |
 
-لا يوجد استدعاء AI منفصل لتحديد المرحلة. المرحلة مشتقة دائماً.
-
 ---
 
-## 5. قيم `next_action` (عقد القرار)
+## 10. قيم `next_action`
 
-ما يسمح به النموذج في JSON (`SALESGPT_MODEL_NEXT_ACTIONS`):
-
+من النموذج (استشاري):  
 `greet` · `discover_needs` · `present_product` · `handle_objection` · `close_sale` · `collect_info` · `await_confirmation` · `confirm_order` · `send_image` · `end_conversation`
 
-قيم يضيفها **الكود فقط** (ليست من مخرجات النموذج الخام عادةً):
+من الكود فقط عادةً: `add_to_cart` · مسار handoff عبر sanitize.
 
-| action | المعنى |
-|--------|--------|
-| `add_to_cart` | قفل مسودة في السلة / مزامنة سلة متعددة (`conversationCart.ts`) |
-| `handoff` | تصعيد بشري (عبر sanitize / escalate) |
+### متى `confirm_order`؟ (I4 فقط)
 
-### متى يُسمح بـ `confirm_order`؟
+`resolveConfirmFinalize` يتطلب معاً:
 
-فقط إذا تحققت معاً (في `resolveOrderNextAction` و/أو fast-path):
+1. هوية حقيقية (اسم + هاتف + عنوان)
+2. سلة/مسودة مكتملة + لون/مقاس صالح إن لزم
+3. نية إنهاء صريحة (موافقة، أو رفض إضافة بعد سؤال upsell)
+4. سياق يسمح (awaiting / اكتمال سابق / رفض المزيد بعد سؤال إضافة)
+5. ليس تصفح منتج / ليس نزاع على ادعاء بوت سابق
 
-1. اكتمال الهوية: اسم + هاتف + عنوان (قيم حقيقية، ليست placeholders).
-2. اكتمال السلة أو مسودة قابلة للقفل (منتج + لون/مقاس إن وُجدا في الكتالوج).
-3. نية إنهاء صريحة من العميل: موافقة (`customerAffirmsOrder`) **أو** رفض إضافة المزيد بينما البوت سأل «هل تريد شيئاً آخر؟».
-4. السياق يسمح: البوت كان يطلب تأكيداً **أو** الحقول كانت مكتملة قبل هذه الرسالة **أو** رفض الإضافة بعد سؤال upsell.
-5. اللون (إن وُجد في المنتج) صالح في الكتالوج (`gateConfirmWhenColorInvalid`).
+وإلا → `await_confirmation` أو `collect_info` أو تمرير browse.
 
-غير ذلك → أقصى ما يصل إليه الكود عادةً `await_confirmation` أو `collect_info`.
-
-**إنشاء الطلب في القناة:** فقط عندما `next_action === confirm_order` **و** النص الظاهر للعميل غير فارغ (`shouldAppendOrderData`) ثم `appendOrderDataIfConfirmed`.
+إنشاء الطلب في القناة: فقط `next_action === confirm_order` + نص ظاهر غير فارغ (`shouldAppendOrderData`).
 
 ---
 
-## 6. `TurnIntent` — تصنيف الدور قبل سكك الطلب
+## 11. TurnIntent
 
-الملف: `services/salesgpt/turnIntent.ts`
+الملف: `turnIntent.ts`
 
-**الأولوية (من الأعلى):**
+الأولوية: `finalize` → `browse_media` → `product_qa` → `cart_edit` → `other`
 
-1. `finalize` — تأكيد/إنهاء طلب (ما لم تكن صورة في نفس النفس)
-2. `browse_media` — طلب صورة صريح أو لون بعد عرض صورة
-3. `product_qa` — تفاصيل منتج / بدائل
-4. `cart_edit` — إضافة منتج آخر
-5. `other`
+| Intent | أثر |
+|--------|-----|
+| `browse_media` | يفرض `send_image`؛ يمنع اختطاف checkout |
+| `product_qa` | يبقي present؛ يمنع ملخص طلب |
+| `cart_edit` | يميل لـ present؛ يمنع تأكيد مبكر |
+| `finalize` | يمر لسكك الطلب |
 
-| Intent | يفرض `next_action` | يمنع |
-|--------|-------------------|------|
-| `browse_media` | `send_image` | `collect_info` / `await_confirmation` / `confirm_order` |
-| `product_qa` | `present_product` (إلا send_image أو end_conversation) | اختطاف checkout |
-| `cart_edit` | يميل لـ `present_product` | تأكيد مبكر |
-| `finalize` | يمر لسكك الطلب | — |
-
-`isExplicitPhotoRequest`: يجب وجود مفردات صورة + نية إرسال/عرض (عربي/إنجليزي). ليس كل «ابعث» صورة.
+صورة فقط عند `isExplicitPhotoRequest` في الرسالة الحالية (ليس لون بعد عرض صورة قديم).
 
 ---
 
-## 7. أعلام `customer_request` (من النموذج)
+## 12. تركيز المنتج والكتالوج
 
-الملف: `services/salesgpt/customerRequest.ts`
+`resolveFocus.ts` + STEP 1 في `index.ts` — أول إصابة تفوز:
 
-```ts
-{
-  wants_alternatives: boolean,
-  asks_product_info: boolean,
-  wants_photo: boolean,
-  ready_to_confirm: boolean,
-  wants_add_another: boolean
-}
-```
+1. مذكور في الرسالة الحالية (ومنشآت كلمة مفتاحية)
+2. منتج `pending_bot_question` (قابل للبيع)
+3. مذكور في آخر رد بوت
+4. تركيز السلة / `last_recommended_products`
+5. بذرة إعلان `product_id` (آخر ملاذ)
 
-- الفهم للنية ينتمي للنموذج؛ الكود يطبّع ويعزّز بـ heuristics.
-- `ready_to_confirm` **وحده لا يكفي** لإنشاء طلب — `orderConfirmationPolicy` يفرض البوابة.
-- غياب الكتلة → كل الأعلام `false` (محافظ).
+**OOS:** إقرار بوجوده دون لون/مقاس/سلة.  
+**noMatch:** لا صورة عشوائية + `catalogGrounding`.
 
 ---
 
-## 8. بحث المنتج وتركيز الكتالوج (قبل الـ Agent)
+## 13. السلة والمتغيرات
 
-الملف: `services/salesgpt/resolveFocus.ts` + `index.ts` — STEP 1
+| ملف | دور |
+|-----|-----|
+| `conversationCart.ts` | مسودة vs سلة، lock، ensureCheckout، ملخصات |
+| `cartLineOps.ts` | add/merge/update/remove بالـ lineId |
+| `cartLineRemoval.ts` | مطابقة حذف من أسماء/متغيرات السطور |
+| `cartSummary.ts` | تسعير متعدد العملات بلا جمع خاطئ |
+| `cartActionCta.ts` | «نقدر نضيف منتج ثاني، أو نكمّل الطلب؟» |
+| `variantEngine/*` | محاور لون/مقاس، سؤال، pending، بوابة confirm |
+| `orderColorPolicy.ts` | حل لون كتالوج + غلاف ask/unavailable |
+| `resolveVariantChange.ts` | تصحيح «مو أسود بدي أحمر» |
+| `pendingBotQuestion.ts` | ربط سؤال لون/مقاس الصادر ببصمة القالب فقط |
+| `arabicQuantityWords.ts` | كمية من النص |
 
-`resolveFocus` — ترتيب ثابت (أول إصابة تفوز):
-
-| # | المصدر | ملاحظة |
-|---|--------|--------|
-| 1 | منتج مذكور في **الرسالة الحالية** (أسماء / كلمات مفتاحية / ذكر صورة من تاريخ المستخدم) | يشمل OOS للإقرار بعدم التوفر |
-| 2 | منتج `pending_bot_question` | **sellable فقط** |
-| 3 | منتج مذكور في **آخر رد بوت** | **sellable فقط** |
-| 4 | تركيز السلة / `last_recommended_products` | **sellable فقط** |
-| 5 | بذرة إعلان `extracted_entities.product_id` | **فقط إن لم يوجد شيء أعلاه** — بلا لصق |
-
-**OOS:** لا يصبح هدف لون/مقاس ولا سطر سلة؛ الرد: «موجود لكن غير متوفر». خيارات اللون/المقاس دائماً من المنتج المركّز القابل للبيع فقط.
-
-**عدم تطابق حقيقي (`noMatchForSpecificQuery`):**
-
-`hadSpecificSearchIntent && !searchMatchedQuery`
-
-عندها: لا يُعتبر صف عشوائي من التوب «المنتج النشط»، ولا تُرفق صورة عشوائية، ويُفعَّل فحص `catalogGrounding` (`validateCatalogReplyGrounding` يرفض إنكار لون حقيقي أو عرض علامات تجارية كألوان).
-
-دائماً يُرفق: `getProductsOverview` + `getCatalogMeta` كـ `CatalogAwareness`.
-
----
-
-## 9. مسارات حتمية بدون LLM (Fast-paths)
-
-تحدث **قبل** `agent.step` داخل `processWithSalesGPT`:
-
-### 9.1 مزامنة سلة متعددة المنتجات
-
-- الشرط: `shouldSyncMultiProductCart(message, mentionedProducts)` وليس سؤال معلومات/صورة.
-- السلوك: بناء سطور من المنتجات المذكورة + كميات آمنة → رسالة قالب → `next_action: add_to_cart`، `aiCallsCount: 0`.
-
-### 9.2 إضافة منتج آخر (`add_to_cart`)
-
-- الشرط: نية إضافة أخرى + مسودة مكتملة أو سلة غير فارغة.
-- السلوك: `lockDraftIntoCart` → رسالة شكر/ملخص سلة → stage 4.
-
-### 9.3 تأكيد طلب حتمي (`confirm_order`)
-
-- الشرط: كنا في مسار إغلاق (`awaiting_order_confirmation` أو stage 6/7/8 أو آخر رد طلب تأكيداً) **و** الاكتمال **و** اللون صالح **و** موافقة أو رفض إضافة بعد سؤال upsell **و** ليس سؤال معلومات منتج.
-- السلوك: رسالة تأكيد قالب + `ensureCartForCheckout` بدون استدعاء AI.
-
-### 9.4 عميل عائد بعد طلب
-
-- `last_order` موجود + `message_count === 0` + stage طازج (1).
-- يحقن ملاحظة سياق للنموذج ويفرغ entities؛ يمنع التأكيد التلقائي لطلب جديد.
-
----
-
-## 10. داخل `SalesGPTAgent.step` (قلب الرد)
-
-الملف: `services/salesgpt/agent.ts`
-
-```
-1. أدوات (إن products فارغة وليس no-match) → ProductSearch فقط حالياً في المسار الحي
-2. بناء سياق المنتج + الكتالوج في الـ prompt
-3. استدعاء AI واحد: نص + next_action + extracted_info + customer_request
-4. تطبيع next_action أو fallback من المرحلة
-4.1 TurnIntent → فرض browse actions
-4.1b/c بدائل / إضافة أخرى → إبعاد عن checkout
-4.2 resolveOrderNextAction (سكك الطلب)
-4.3 كشف <ESCALATE> → end_conversation + نية complaint
-5. اشتقاق stage من next_action
-6. إضافة الرد للتاريخ (بدون markers)
-```
-
-**الأدوات المعرفة** (`tools.ts`) — متاحة للتعريف؛ التنفيذ الحي في `step` يستدعي أساساً `ProductSearch` عند فراغ المنتجات:
-
-- `ProductSearch`
-- `ProductDetails`
-- `ShowCatalog`
-- `CatalogOverview`
-- `CheckAvailability`
-
----
-
-## 11. سكك تأكيد الطلب (`orderConfirmationPolicy`)
-
-الملف: `services/salesgpt/orderConfirmationPolicy.ts` — الدالة المركزية: `resolveOrderNextAction`
-
-ترتيب القرارات داخل الدالة:
-
-1. إن `browse_media` / `product_qa` → إخراج فوري آمن (لا ملخص طلب).
-2. إن طلب معلومات منتج → `present_product` (أو send_image / end).
-3. إلغاء صريح والطلب مكتمل → `end_conversation` + رسالة إلغاء.
-4. «لا» عند سؤال التأكيد (وليس سؤال إضافة) → توضيح غموض، يبقى `await_confirmation` (لا تأكيد).
-5. ~~لون بعد عرض صورة → `send_image`~~ **أُزيل** (`preferSendImage` / `variantAfterPhotoOffer`) — الصورة فقط عند طلب صريح في الرسالة الحالية.
-6. `allowedToFinalize` → `confirm_order` + رسالة شكر آمنة.
-7. غير مكتمل → `collect_info` + سؤال الحقل الناقص **من القالب الحتمي** (`collectInfoOrder`: اسم → هاتف → عنوان) **فقط** عندما `mayReplaceWithOrderTemplate` (next_action طلبي / turnIntent cart|finalize) — لا على تحية أو سعر أو browse.
-8. مكتمل بلا إنهاء صريح → `await_confirmation` + ملخص إن لزم.
-9. وإلا تمرير `aiNextAction`.
-
-**Heuristics مساعدة:**
-
-| دالة | دور |
-|------|-----|
-| `customerAffirmsOrder` | نعم / أكد / تم… (مع استثناء إلغاء ومعلومات منتج) |
-| `customerDeclinesMoreItems` | لا قصيرة بعد سؤال «شيء آخر؟» |
-| `customerCancelsOrder` | إلغاء الطلب |
-| `botReplyAsksForConfirmation` | هل آخر رد بوت يطلب تأكيداً؟ |
-| `botReplyAsksToAddMore` | هل سأل إضافة منتج؟ |
-| `isProductInfoRequest` | يمنع التأكيد والـ fast-path |
-| `isPrematureCheckoutCopy` | يكشف تسريب ملخص طلب مبكر |
-| `shouldAppendOrderData` | يمنع ORDER_DATA صامت بدون نص للعميل |
-
----
-
-## 12. السلة (`conversationCart`)
-
-الملف: `services/salesgpt/conversationCart.ts`
-
-**الملكية:** الكود يكتب السلة؛ النموذج لا يخترع JSON سلة.
-
-| مفهوم | المعنى |
-|-------|--------|
-| Draft line | المنتج قيد النقاش في `extracted_entities` (لون/مقاس/كمية) قبل القفل |
-| `cart.items[]` | سطور مؤكدة داخل المحادثة |
-| `lockDraftIntoCart` | نقل المسودة إلى سطر سلة ومسح حقول المنتج من المسودة |
-| `ensureCartForCheckout` | قبل await/confirm: ضمان وجود سطر سلة من المسودة |
-| `fillCartVariantsFromDraft` | كتابة اللون/المقاس على السطر المطابق فوراً؛ إن السلة فارغة والمسودة مكتملة تُرقّى لسطر |
-| `replaceCartItems` | **دمج** المنتجات المذكورة في السلة (لا حذف السطور القائمة؛ الكميات لا تُصفَّر) عبر `cartLineOps.mergeCartLines` |
-| `cartLineOps.ts` | واجهة ضيقة: `addCartLine` / `mergeCartLines` / `updateCartLineById` / `removeCartLineById` |
-| `clearDraftOnFocusChange` | عند تغيّر المنتج المركّز: مسح product/color/size من المسودة (لا توريث بين SKUs) |
-| `canonicalizeLineColor` | لون السطر من كتالوج **نفس** المنتج فقط؛ إن لا ألوان → `null` |
-| `resolveLineCurrency` | عملة السطر من المنتج ثم عملة المتجر — بلا افتراض `USD` ثابت في `normalizeCart` |
-| `interimCancelMatchers.ts` | **INTERIM** إلغاء كلي / حذف سطر / كشف تصحيح متغير (`isInterimVariantCorrectionIntent`) — يُستبدل بمفسّر LLM لاحقاً |
-| `resolveVariantChange.ts` | قرار نقي: تطبيق لون إيجابي / بدون تغيير / غير متوفر / اسأل أي سطر؛ الكتابة عبر `updateCartLineById` |
-| `matchCartLinesForRemoval` | مطابقة أسماء/متغيرات **سطور السلة فقط** (بلا قوائم أسماء منتجات) |
-| `cartLineOps.removeCartLineById` | حذف السطر عبر معرّف السطر |
-
-**عقد اللون (PHASE 2A FIX 1):** اللون ملك السطر، لا المسودة العامة. منتج بلا `colors` لا يرث لوناً من مسودة/سلة منتج آخر.
-
-**تصحيح المتغير (PHASE 2C ITEM 2):** «لا ما بدي اسود بدي احمر» / «غيّر للأحمر» يختار اللون **الإيجابي** عبر `resolveWantedCatalogColor` (النفي في `orderColorPolicy`); «تم التحديث»/`حدّثت طلبك` فقط عند تغيّر السلة فعلياً؛ لونان لنفس المنتج → اسأل أي سطر.
-
-**اكتمال الدفع (`isCheckoutReady`):**
-
-- دائماً: `name` + `phone` + `address`
-- إن السلة فارغة: مسودة مكتملة (`product` + لون/مقاس إن لزم)
-- إن السلة فيها عناصر + منتج مركّز: تحقق لون/مقاس لذلك SKU
-
-`ADD_TO_CART_ACTION = 'add_to_cart'`
-
----
-
-## 13. سياسة اللون (`orderColorPolicy`)
-
-الملف: `services/salesgpt/orderColorPolicy.ts` + استخدام في `index.ts`
-
-**مصدر الحقيقة:** رسالة العميل + تاريخ رسائله + `product.colors`.  
-استخراج النموذج استشاري ولا يطغى على اختيار العميل المثبت.
-
-| الحالة | السلوك |
-|--------|--------|
-| رقم خيار («2»، «رقم 2») | يُترجم لخيار الكتالوج |
-| لون نصي يطابق الكتالوج | يُعتمد |
-| غموض بين خيارين | سؤال توضيح؛ `color = null` |
-| لون AI مرفوض | رسالة «غير متوفر» + قائمة الخيارات |
-| محاولة `confirm_order` بلون باطل | `gateConfirmWhenColorInvalid` يُرجع لـ await + طلب لون |
+**اكتمال الدفع (`isCheckoutReady`):** name + phone + address + لون/مقاس للسطر المركّز إن لزم.
 
 ---
 
 ## 14. الصور
 
-| الشرط | النتيجة |
-|-------|---------|
-| الرسالة الحالية تطلب صورة صراحة (`isExplicitPhotoRequest`) وليست رفضاً (`isExplicitPhotoRefusal`) وليست no-match | إلحاق `[IMAGE: url]` بعد تنظيف التعليق |
-| اختيار اللون/المقاس رداً على `pending_bot_question` | **لا صورة** — يُسجَّل المتغير على سطر المنتج فقط |
-| فرض قالب «أي لون بتحب؟» عند نقص اللون | **فقط** إن `mayReplaceWithOrderTemplate` (طلب/سلة) — لا على تحية/سعر/تفاصيل |
-| رفض صريح («ما بدي الصورة») | لا صورة حتى لو ذكرت كلمة صورة |
-| اختيار المنتج للصورة | ذكر حالي → اسم في collectedInfo → activeProductId → products[0] |
-| لون مطلوب | `resolveProductImageForBot` (صورة بلون إن وُجدت) |
-| نموذج ادّعى إرسال صورة دون طلب صريح | `stripFalseImageDeliveryClaims` |
-| no-match + طلب صورة | لا صورة عشوائية |
-
-**أُزيلت heuristics تاريخية:** `preferSendImage` · `variantAfterPhotoOffer` · `lastAssistantOfferedPhoto` · `previousUserAskedForPhoto` · `lastAssistantAskedColorChoice` · `isCatalogOrShortColorReply`
-
-الكلمات المفتاحية لطلب الصورة: انظر `isExplicitPhotoRequest`. حالة السؤال المعلّق: `pendingBotQuestion.ts` (`pending_bot_question` + `pending_bot_question_product_id`).
+| شرط | نتيجة |
+|-----|--------|
+| طلب صورة صريح + ليس رفض + ليس no-match | `[IMAGE: url]` بعد تنظيف caption |
+| إجابة pending لون/مقاس | لا صورة |
+| ادّعى الموديل إرسال صورة بلا طلب | يُشقّط الادعاء |
+| عدة منتجات بلا تحديد | سؤال توضيح من `replyPolicy` |
 
 ---
 
-## 15. Grounding عند عدم وجود المنتج
+## 15. سكك الطلب داخل الـ agent (`resolveOrderNextAction`)
 
-الملف: `services/salesgpt/catalogGrounding.ts`
+الملف: `orderConfirmationPolicy.ts`
 
-يُفعَّل فقط عند `noMatchForSpecificQuery`.
+1. browse/product_qa → خروج آمن  
+2. معلومات منتج (مع استثناء الإجابة على سؤال هوية) → present  
+3. إلغاء مكتمل → end + رسالة إلغاء  
+4. «لا» عند تأكيد (لا upsell) → توضيح، يبقى await  
+5. I4 finalize → confirm  
+6. غير مكتمل + بوابة قالب → collect بقوالب الهوية  
+7. مكتمل بلا إنهاء → await  
+8. وإلا تمرير  
 
-`violatesNoMatchGrounding`: الرد يذكر سعراً **ليس** في نظرة الكتالوج **ولا** يعترف بعدم التوفر → يُستبدل بقالب صادق (`buildNoMatchFallbackMessage`).
-
-هذا **ليس** كاشف هلوسة عاماً لكل الردود.
-
----
-
-## 16. الـ Prompt والشخصية
-
-الملف: `services/salesgpt/prompts.ts`
-
-- مراحل 1–9 + قواعد: رد قصير، سؤال واحد، لا اختلاق أسعار، إقناع من الوصف فقط.
-- جمع الحقول: **حقل واحد لكل رسالة** بالترتيب الحتمي في الكود: اسم → هاتف → عنوان (`collectInfoOrder.ts` / `buildCollectMissingFieldsMessage`). عدة حقول في رسالة واحدة تُقبل؛ لا يُعاد سؤال مُجاب.
-- مسار `<ESCALATE>` عند طلب إنسان / إحباط شديد.
-- سياسات المتجر (شحن، دفع، إرجاع) من `MerchantConfig` تُحقن في الـ system prompt.
+بعد الـ agent، `applyPostAgentReplyPolicy` يعيد فرض القوالب حسب الاكتمال (انظر §7).
 
 ---
 
-## 17. حالة المحادثة `ConversationState` (ما يُحفَظ)
-
-أهم الحقول التي يعتمد عليها الدماغ:
+## 16. حالة المحادثة `ConversationState`
 
 | حقل | دور |
 |-----|-----|
-| `salesgpt_stage_id` | المرحلة 1–9 |
-| `current_stage` | مشتق (أو `handoff`) |
-| `extracted_entities` | name, phone, address, product_*, color, size, quantity |
-| `cart` | `{ items, status, updatedAt }` |
-| `awaiting_order_confirmation` | true بعد `await_confirmation` |
-| `last_recommended_products` | تركيز المنتج / مصادر ORDER_DATA |
-| `last_order` | سياق عميل عائد |
-| `message_count` | تمييز أول دور بعد إعادة التعيين |
+| `salesgpt_stage_id` | مرحلة 1–9 |
+| `extracted_entities` | هوية + منتج + لون/مقاس/كمية |
+| `cart` | سطور الطلب داخل المحادثة |
+| `awaiting_order_confirmation` | بعد await |
+| `pending_bot_question` (+ product_id) | محور معلّق |
+| `last_recommended_products` | تركيز |
+| `last_order` | عميل عائد |
+| `message_count` | أول دور بعد reset |
 | `language` | arabic / english |
-| `last_intent` | نية آخر دور |
 
-بعد `confirm_order` الناجح في القناة: `resetConversationAfterOrder` → stage 1 + الاحتفاظ بـ `last_order` المختصر.
+بعد confirm ناجح في القناة: `resetConversationAfterOrder` → stage 1 + `last_order` مختصر.
 
 ---
 
-## 18. ما بعد الدماغ (القناة)
+## 17. ما بعد الدماغ (القناة)
 
 ```
 replyText
   → appendOrderDataIfConfirmed (إن confirm_order)
   → escalate إن لزم
-  → stripInternalControlMarkers
-  → parseBotReplyTags → IMAGE + ORDER_DATA
-  → إرسال نص/صورة عبر القناة
-  → persistOrderIfPresent إن ORDER_DATA كامل
-  → تحديث conversations.conversation_state
+  → stripInternalControlMarkers / prepareBotReplyForCustomer
+  → parse IMAGE + ORDER_DATA
+  → إرسال نص/صورة
+  → persistOrder إن ORDER_DATA
+  → تحديث conversation_state في DB
 ```
 
-ملفات: `botTurn.ts`, `buildMerchantBotConfig.ts`, `channelBotOrder.ts`, `response/sanitize-reply.ts`
+ملفات: `botTurn.ts` · `buildMerchantBotConfig.ts` · `channelBotOrder.ts` · `response/sanitize-reply.ts`
 
 ---
 
-## 19. خريطة الملفات (مرجع سريع)
+## 18. فهرس ملفات العقل (حسب المسؤولية)
 
-```
-backend/src/
-├── bot/index.ts                    # handleIncomingMessage
-├── core/orchestrator.ts            # processMessage → SalesGPT فقط
-├── core/types.ts                   # Intent, Stage, ConversationState, Product…
-├── pipelines/smart-pipeline/       # غلاف يعيد تصدير processWithSalesGPT
-├── services/
-│   ├── buildMerchantBotConfig.ts   # إعداد تاجر موحّد + ORDER_DATA
-│   ├── channels/botTurn.ts         # دورة قناة كاملة
-│   ├── escalation.ts               # تحويل لموظف
-│   └── salesgpt/
-│       ├── index.ts                # PIPELINE الرئيسي (بحث + fast-paths + صور + state)
-│       ├── agent.ts                # step + LLM + TurnIntent + order rails
-│       ├── stages.ts               # أوصاف 1–9
-│       ├── prompts.ts              # system prompts
-│       ├── tools.ts                # أدوات الكتالوج
-│       ├── turnIntent.ts           # تصنيف الدور
-│       ├── customerRequest.ts      # أعلام JSON
-│       ├── orderConfirmationPolicy.ts  # بوابات التأكيد
-│       ├── conversationCart.ts     # السلة
-│       ├── orderColorPolicy.ts     # الألوان
-│       ├── catalogGrounding.ts     # no-match
-│       ├── conversationStateSync.ts# كتابة المرحلة
-│       └── productKeywords.ts      # كلمات البحث
-├── catalog/                        # search / overview / image resolve
-└── response/                       # sanitize, image caption, escalate markers
-```
+### المدخل والتوجيه
 
-اختبارات ذهبية مهمة عند أي إصلاح منطق:
+| ملف | مسؤولية |
+|-----|---------|
+| `bot/index.ts` | `handleIncomingMessage` |
+| `core/orchestrator.ts` | `processMessage` → SalesGPT |
+| `services/channels/botTurn.ts` | دورة القناة الحية |
+| `services/buildMerchantBotConfig.ts` | إعداد تاجر + ORDER_DATA |
 
-- `test_turn_intent_golden.ts`
-- `test_customer_request_golden.ts`
-- `test_conversation_cart.ts`
-- `test_verification_matrix.ts`
+### خط الأنابيب والرد
 
----
+| ملف | مسؤولية |
+|-----|---------|
+| `salesgpt/index.ts` | `processWithSalesGPT` — orchestration |
+| `salesgpt/agent.ts` | LLM step + TurnIntent + resolveOrder داخل الـ agent |
+| `salesgpt/replyPolicy.ts` | **SSOT نص القوالب بعد الـ agent + بناة early** |
+| `salesgpt/replyOwnership.ts` | لوج ظل لملكية الرد |
+| `salesgpt/deterministicReplyGate.ts` | متى يُسمح باستبدال القالب |
+| `salesgpt/collectInfoOrder.ts` | **SSOT هوية** (bundle / partial / single) |
+| `salesgpt/orderConfirmationPolicy.ts` | I4 + await/confirm/cancel + تفويض جمع |
+| `salesgpt/prompts.ts` / `stages.ts` | تعليمات الموديل + وصف المراحل |
+| `salesgpt/turnIntent.ts` | تصنيف الدور |
+| `salesgpt/customerRequest.ts` | أعلام JSON من الموديل |
+| `salesgpt/pastBotClaimDispute.ts` | نزاع على ادعاء بوت سابق |
 
-## 20. دليل تشخيص المشاكل (من العرض إلى السبب)
+### كتالوج وتركيز
 
-| العرض | ابدأ من | تحقق من |
-|-------|---------|---------|
-| البوت لا يرد أبداً | §2 بوابات القناة | human mode، 5 دقائق، الخطة، الحدود |
-| يرد منتجاً خاطئاً | §8 بحث | 0a ذكر حالي vs seed إعلان vs history |
-| يقول سعر/منتج غير موجود | §15 grounding + §8 no-match | هل `hadSpecificSearchIntent`؟ |
-| يطلب اسم/عنوان أثناء طلب صورة | §6 TurnIntent + §11 | هل `browse_media` فُرض؟ |
-| يرسل صورة بلا طلب | §14 + agent 4.1 | `allowSendImage` / demote |
-| لا يرسل صورة رغم الطلب | §14 + تركيز منتج | `send_image`؟ منتج بلا `imageUrl`؟ |
-| لون خاطئ على الطلب | §13 | تاريخ المستخدم vs AI |
-| أكّد طلباً بدون «نعم» | §5 + §11 + §9.3 | `allowedToFinalize` / fast-path |
-| «نعم» ولم يُنشأ طلب | §5 اكتمال + لون + ORDER_DATA | `isCheckoutReady`، `shouldAppendOrderData` |
-| سلة بمنتجين صارت كمية 2 لواحد | §12 `coerceSafeQuantity` / sync | `messageSignalsBothProducts` |
-| أراد منتجاً إضافياً فتم التأكيد | §9.2 + `wants_add_another` | هل `lockDraft` أم confirm؟ |
-| تصعيد لا يحدث | `<ESCALATE>` + sanitize | `shouldEscalate` في botTurn |
-| تجربة البوت تختلف عن واتساب | §1 | نفس `handleIncomingMessage`؛ فرق فقط في الإرسال والحفظ |
+| ملف | مسؤولية |
+|-----|---------|
+| `salesgpt/resolveFocus.ts` | تركيز المنتج |
+| `salesgpt/productKeywords.ts` | نية بحث محددة |
+| `salesgpt/catalogGrounding.ts` | صدق عند no-match |
+| `catalog/product-search.js` | بحث/توب/تفاصيل |
 
-**ترتيب تتبع لوج دور واحد:**
+### سلة ومتغيرات
 
-1. هل دخل `processWithSalesGPT`؟
-2. أي استراتيجية منتج اختيرت؟ (`searchMatchedQuery` / `noMatch`)
-3. هل خرج من fast-path قبل LLM؟
-4. إن LLM: ما `customer_request` و `aiNextAction`؟
-5. ما `TurnIntent` النهائي؟
-6. ما `reason` من `resolveOrderNextAction`؟
-7. ما `effectiveNextAction` بعد بوابات اللون/السلة؟
-8. هل أُلحق `ORDER_DATA` أو `IMAGE`؟
+| ملف | مسؤولية |
+|-----|---------|
+| `salesgpt/conversationCart.ts` | سلة + رسائل add/sync |
+| `salesgpt/cartLineOps.ts` / `cartLineRemoval.ts` | عمليات السطر |
+| `salesgpt/cartSummary.ts` / `cartActionCta.ts` | ملخص + CTA |
+| `salesgpt/variantEngine/*` | محاور، سؤال، بوابة، خط |
+| `salesgpt/orderColorPolicy.ts` | لون كتالوج |
+| `salesgpt/resolveVariantChange.ts` | تصحيح متغير |
+| `salesgpt/pendingBotQuestion.ts` | سؤال معلّق لون/مقاس |
+| `salesgpt/interimCancelMatchers.ts` | أفعال إلغاء/حذف |
+| `salesgpt/arabicQuantityWords.ts` | كمية |
 
----
+### مفسّر
 
-## 21. الخطوط الحمراء (عقود لا تُكسر)
+| ملف | مسؤولية |
+|-----|---------|
+| `salesgpt/interpreter/index.ts` | تشغيل الدور |
+| `whitelist.ts` / `apply.ts` / `nextAction.ts` / `turnFacts.ts` / `ground.ts` / `validate.ts` / `flip.ts` | كما في §5 |
 
-1. لا اختلاق سعر/منتج/مخزون/لون/مقاس/سياسة خارج البيانات المحقونة.
-2. لا `confirm_order` → لا `ORDER_DATA` → لا طلب في DB.
-3. لا خلط عملات ولا اختراع سعر صرف.
-4. لا إعلان «أضفت/أرسلت صورة/ثبّت الطلب» إلا إذا نفّذ الكود ذلك.
-5. لا بيع منتج نافد أو لون خارج الكتالوج.
-6. طلب صورة أو سؤال تفاصيل المنتج لا يُخطَف إلى checkout.
-7. المرحلة تُشتق من `next_action`؛ لا AI منفصل للمرحلة.
-8. السلة ملك الكود.
+### حالة ومراحل
+
+| ملف | مسؤولية |
+|-----|---------|
+| `salesgpt/conversationStateSync.ts` | كتابة stage آمنة |
+| `salesgpt/stages.ts` | أوصاف 1–9 |
+| `salesgpt/tools.ts` | أدوات الموديل |
+
+### اختبارات مرجعية
+
+| سكربت npm | يغطي |
+|-----------|------|
+| `test-collect-info-order` | سياسة الهوية المجمّعة |
+| `test-reply-policy` | مصفوفة compose / أولويات |
+| `test-browse-not-collect` | browse لا يُسرق لجمع |
+| `test-p0-cart-integrity` / `test-p0-color-focus` | سلة ولون |
+| `test-verification-matrix` | تأكيد / ORDER_DATA / مراحل |
+| `test-v4-size-pipeline` | مقاس |
+| `test-interpreter-*` | مفسّر |
 
 ---
 
-## 22. ملخص مسار الحياة لطلب ناجح
+## 19. مسار تشخيص سريع
 
-```
-تصفح/ترحيب (1–2)
-  → تركيز منتج (بحث 0a/1/2)
-  → عرض (4) ± صورة عند طلب صريح (send_image)
-  → اعتراضات إن وجدت (5)
-  → جمع حقول واحداً واحداً (7) + لون/مقاس من الكتالوج
-  → ملخص + await_confirmation (8)
-  → موافقة صريحة من العميل
-  → confirm_order (كود) + ORDER_DATA
-  → حفظ الطلب في القناة + reset المحادثة (stage 1 + last_order)
-```
-
-أي انحراف عن هذا المسار يجب أن يطابق قسماً صريحاً أعلاه (fast-path، browse، إلغاء، تصعيد، no-match). وإلا فهو خلل يُصلَح في الملف المشار إليه.
+| العرض | افحص أولاً |
+|-------|------------|
+| بوت صامت | بوابات قناة (§2) ثم pm2/logs |
+| يسأل اسم ثم هاتف ثم عنوان واحداً واحداً | تأكد أن `dist` محدّث؛ يفترض Bundle/Partial من `collectInfoOrder` |
+| ملخص تأكيد قبل اختيار لون | `applyPostAgentReplyPolicy` — variant يجب أن يهزم await |
+| صورة بلا طلب | `resolvePhotoDecision` / `isExplicitPhotoRequest` |
+| طلب أُنشئ قبل «نعم» | هل خرج `confirm_order`؟ I4 + `shouldAppendOrderData` |
+| رد تصفح صار سؤال اسم | `mayReplaceWithOrderTemplate` + TurnIntent browse |
+| لون/مقاس ما يُسجَّل بعد سؤال البوت | هل النص الصادر طابق بصمة القالب؟ `bindPendingBotQuestion` |
+| من غيّر الرد آخر مرة؟ | لوج `SalesGPT: replyOwnership` (`replyOwnership.ts`) |
 
 ---
 
-*آخر مزامنة مع الكود: بعد استعادة `SOFEANMOHAMED/xo-bot` @ `2ddd948` (SalesGPT الحي). لا يوجد Brain v2 في هذا المستودع حالياً.*
+## 20. عقد صيانة هذا الملف
+
+عند تغيير أي من التالي، حدّث الأقسام ذات الصلة في **نفس الـ PR**:
+
+- ترتيب early rails أو `applyPostAgentReplyPolicy`
+- سياسة الهوية (bundle / partial)
+- شروط I4 / `confirm_order`
+- TurnIntent أو بوابة القالب
+- مسار الصورة أو pending
+- إنشاء ORDER_DATA أو reset بعد الطلب
+
+**آخر مزامنة مع الكود:** توحيد ReplyPolicy + هوية مجمّعة + post-agent compose واحد.

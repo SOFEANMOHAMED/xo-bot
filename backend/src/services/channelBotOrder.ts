@@ -7,6 +7,7 @@ import type { Pool } from 'pg';
 import type { ConversationState, Entities } from '../core/types.js';
 import { logger } from '../utils/logger.js';
 import { clearAbandonedCheckoutFromState } from './abandonedCheckout/index.js';
+import { clearProductInterestReminderFromState } from './abandonedCheckout/productInterestAsk.js';
 import { notifyMerchantNewOrderAsync } from './notifyMerchantNewOrder.js';
 import { resolveOrderChannelSource } from '../utils/orderSource.js';
 import { applyFreshConversationStage } from './salesgpt/conversationStateSync.js';
@@ -49,6 +50,7 @@ export function resetConversationAfterOrder(
   updatedState.message_count = 0;
   updatedState.awaiting_order_confirmation = false;
   clearAbandonedCheckoutFromState(updatedState);
+  clearProductInterestReminderFromState(updatedState);
 }
 
 export type ChannelOrderSettings = {

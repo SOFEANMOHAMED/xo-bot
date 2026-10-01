@@ -1,6 +1,6 @@
 /**
  * Test script for hybrid orchestrator conversation helpers
- * Tests: getOrCreateConversationHelper, appendMessage, patchConversationState, getRecentMessages, setConversationError
+ * Tests: getOrCreateConversationHelper, appendMessage, patchConversationState, setConversationError
  *
  * Uses a throwaway merchant on xobot_test — never a hardcoded or LIMIT 1 production id.
  */
@@ -10,7 +10,6 @@ import {
   getOrCreateConversationHelper,
   appendMessage,
   patchConversationState,
-  getRecentMessages,
   setConversationError
 } from '../controllers/conversation.controller.js';
 import crypto from 'crypto';
@@ -109,31 +108,17 @@ async function runTest() {
     );
     console.log('Appended assistant message:', messageId2.id);
 
-    // ==================== TEST 4: getRecentMessages ====================
-    console.log('\n--- Test 4: getRecentMessages ---');
-    const recentMessages = await getRecentMessages(conversationId, 10);
-    console.log('Recent messages:', {
-      count: recentMessages.length,
-      messages: recentMessages.map(m => ({
-        role: m.role,
-        content: m.content.substring(0, 50),
-        intent: m.intent,
-        entities: m.entities
-      }))
-    });
-
-    if (recentMessages.length !== 2) {
-      throw new Error(`Expected 2 messages, got ${recentMessages.length}`);
+    // Verify both messages persisted (append only — no getRecentMessages helper).
+    const msgCount = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM messages WHERE conversation_id = $1`,
+      [conversationId]
+    );
+    if (msgCount.rows[0]?.n !== 2) {
+      throw new Error(`Expected 2 messages, got ${msgCount.rows[0]?.n}`);
     }
 
-    // SQL is ORDER BY created_at DESC (newest first). Comment in the helper
-    // says oldest→newest but the query is not reversed — assert actual SQL.
-    if (recentMessages[0].role !== 'assistant' || recentMessages[1].role !== 'user') {
-      throw new Error('Messages order or roles incorrect');
-    }
-
-    // ==================== TEST 5: patchConversationState ====================
-    console.log('\n--- Test 5: patchConversationState (merge state) ---');
+    // ==================== TEST 4: patchConversationState ====================
+    console.log('\n--- Test 4: patchConversationState (merge state) ---');
     const patched1 = await patchConversationState(conversationId, {
       conversation_state: {
         lead_score: 75,
@@ -161,7 +146,7 @@ async function runTest() {
     }
 
     // Test merging (not overwriting)
-    console.log('\n--- Test 5b: patchConversationState (merge, not overwrite) ---');
+    console.log('\n--- Test 4b: patchConversationState (merge, not overwrite) ---');
     const patched2 = await patchConversationState(conversationId, {
       conversation_state: {
         last_product_viewed: 'product_xyz',
@@ -185,8 +170,8 @@ async function runTest() {
       throw new Error('Conversation state merge not working correctly');
     }
 
-    // ==================== TEST 6: setConversationError ====================
-    console.log('\n--- Test 6: setConversationError ---');
+    // ==================== TEST 5: setConversationError ====================
+    console.log('\n--- Test 5: setConversationError ---');
     const errorResult = await setConversationError(
       conversationId,
       'Test error: AI service unavailable'
@@ -245,4 +230,3 @@ async function runTest() {
 }
 
 runTest();
-

@@ -26,6 +26,7 @@ import {
   formatCartSummary as formatPricedCartSummary,
   type CartSummaryOptions,
 } from './cartSummary.js';
+import { buildCartActionCta } from './cartActionCta.js';
 
 export {
   addCartLine,
@@ -114,6 +115,9 @@ export function normalizeCart(
         currency: own || storeFallback,
         color: sanitizeCollectedText(item.color),
         size: sanitizeCollectedText(item.size),
+        ...(item.variants && typeof item.variants === 'object'
+          ? { variants: { ...item.variants } }
+          : {}),
         addedAt: item.addedAt || new Date().toISOString(),
       };
     });
@@ -776,6 +780,45 @@ function stripLeadingAl(token: string): string {
   return token.replace(/^ال/, '');
 }
 
+/**
+ * Curated e-commerce broken plurals (singular ↔ plural).
+ * Keys/values are fed through normalizeArabic at use time.
+ * Not full morphology — only common retail nouns.
+ */
+const BROKEN_PLURAL_PAIRS: ReadonlyArray<readonly [string, string]> = Object.freeze([
+  ['قميص', 'قمصان'],
+  ['كتاب', 'كتب'],
+  ['حذاء', 'أحذية'],
+  ['ثوب', 'أثواب'],
+  ['ثوب', 'ثياب'],
+  ['جهاز', 'أجهزة'],
+  ['هاتف', 'هواتف'],
+  ['حقيبة', 'حقائب'],
+  ['شنطة', 'شنط'],
+  ['خاتم', 'خواتم'],
+  ['فستان', 'فساتين'],
+  ['بنطلون', 'بناطيل'],
+  ['سروال', 'سراويل'],
+  ['كوب', 'أكواب'],
+  ['طبق', 'أطباق'],
+  ['صندوق', 'صناديق'],
+  ['كرسي', 'كراسي'],
+  ['جزمة', 'جزم'],
+]);
+
+function brokenPluralFormsFor(base: string): Set<string> {
+  const normalizedBase = normalizeArabic(stripLeadingAl(base));
+  const out = new Set<string>();
+  if (!normalizedBase) return out;
+  for (const [singular, plural] of BROKEN_PLURAL_PAIRS) {
+    const s = normalizeArabic(singular);
+    const p = normalizeArabic(plural);
+    if (normalizedBase === s) out.add(p);
+    if (normalizedBase === p) out.add(s);
+  }
+  return out;
+}
+
 /** Singular / dual / plural surface forms for a catalog name (documented interim). */
 function productNameSurfaceForms(name: string): Set<string> {
   const base = stripLeadingAl(name);
@@ -785,6 +828,9 @@ function productNameSurfaceForms(name: string): Set<string> {
     for (const suffix of ['', 'ه', 'ة', 'ين', 'ات', 'ون', 'تين', 'تان', 'ان']) {
       forms.add(stem + suffix);
     }
+  }
+  for (const broken of brokenPluralFormsFor(base)) {
+    forms.add(broken);
   }
   return forms;
 }
@@ -916,21 +962,13 @@ export function buildAddedToCartMessage(
       cart.items.length > 1
         ? 'تمام، حدّثت طلبك.'
         : `تمام، أضفت ${item.productName} لطلبك.`;
-    return (
-      `${label}\n` +
-      `${summary}\n\n` +
-      `نقدر نضيف منتج ثاني، أو نكمّل الطلب؟`
-    );
+    return `${label}\n${summary}\n\n${buildCartActionCta(language)}`;
   }
   const label =
     cart.items.length > 1
       ? 'Got it — your order is updated.'
       : `Got it — I added ${item.productName} to your order.`;
-  return (
-    `${label}\n` +
-    `${summary}\n\n` +
-    `We can add another product, or finish the order.`
-  );
+  return `${label}\n${summary}\n\n${buildCartActionCta(language)}`;
 }
 
 export function buildCartSyncedMessage(
@@ -940,15 +978,7 @@ export function buildCartSyncedMessage(
 ): string {
   const summary = formatPricedCartSummary(cart.items, language, opts);
   if (language === 'arabic') {
-    return (
-      `تمام، هذا طلبك:\n` +
-      `${summary}\n\n` +
-      `نقدر نضيف منتج ثاني، أو نكمّل الطلب؟`
-    );
+    return `تمام، هذا طلبك:\n${summary}\n\n${buildCartActionCta(language)}`;
   }
-  return (
-    `Got it — this is your order:\n` +
-    `${summary}\n\n` +
-    `We can add another product, or finish the order.`
-  );
+  return `Got it — this is your order:\n${summary}\n\n${buildCartActionCta(language)}`;
 }

@@ -16,6 +16,7 @@ import {
 } from '../services/facebookPageWebhooks.js';
 import { scheduleFacebookPageHistorySync } from '../services/metaConversationHistorySync.js';
 import { clearMerchantChannelConversations } from '../services/metaConversationCleanup.js';
+import { signOAuthState } from '../utils/oauthState.js';
 
 export { FACEBOOK_PAGE_SUBSCRIBED_FIELDS, subscribeFacebookPageWebhooks };
 export const getIntegrations = async (
@@ -178,9 +179,7 @@ export const connectFacebook = async (
 
     // Generate OAuth URL
     // pages_show_list is required for GET /me/accounts (especially on mobile Meta dialogs).
-    const state = Buffer.from(
-      JSON.stringify({ purpose: 'merchant', merchantId: req.merchantId })
-    ).toString('base64');
+    const state = signOAuthState({ purpose: 'merchant', merchantId: req.merchantId });
     const scopes = [
       'pages_show_list',
       'pages_manage_metadata',
@@ -587,10 +586,10 @@ export const connectShopify = async (
       });
     }
 
-    // Generate OAuth URL
-    const state = Buffer.from(JSON.stringify({ merchantId: req.merchantId, shopDomain: normalizedDomain })).toString('base64');
+    // Generate OAuth URL (HMAC-signed state — prevents merchantId forgery)
+    const state = signOAuthState({ merchantId: req.merchantId, shopDomain: normalizedDomain });
     const scopes = 'read_products,write_products,read_orders,write_orders,read_customers';
-    const authUrl = `https://${normalizedDomain}/admin/oauth/authorize?client_id=${shopifyApiKey}&scope=${scopes}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
+    const authUrl = `https://${normalizedDomain}/admin/oauth/authorize?client_id=${shopifyApiKey}&scope=${scopes}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}`;
 
     res.json({
       success: true,

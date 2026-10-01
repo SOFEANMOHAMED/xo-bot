@@ -379,6 +379,29 @@ function run(): void {
     passed += 3;
   }
 
+  // Broken plurals: «قمصان» must resolve to catalog «قميص»; «أحذية» to «حذاء».
+  {
+    const shoes: Product = {
+      id: 'shoes-broken-plural',
+      name: 'حذاء',
+      price: 100,
+      currency: 'USD',
+      stock: 5,
+    };
+    const catalog = [shirtProduct, shoes, watchProduct];
+    const shirtsMention = findProductsMentionedInText('عندكم قمصان؟', catalog);
+    assert(
+      shirtsMention.some((p) => p.id === SHIRT_ID),
+      `قمصان must match قميص, got ${shirtsMention.map((p) => p.name).join(',')}`
+    );
+    const shoesMention = findProductsMentionedInText('بدي أحذية', catalog);
+    assert(
+      shoesMention.some((p) => p.id === 'shoes-broken-plural'),
+      `أحذية must match حذاء, got ${shoesMention.map((p) => p.name).join(',')}`
+    );
+    passed += 2;
+  }
+
   console.log(`✅ conversation cart merge policy: ${passed} checks passed`);
 }
 

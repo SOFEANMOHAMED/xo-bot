@@ -2,22 +2,17 @@
  * INTERIM — verb matchers for whole-order cancel vs remove-one-line,
  * plus variant-correction / negation detection used by resolveVariantChange.
  *
- * WHY this exists: the LLM interpreter that should own cancel/remove/variant
- * intent is not restored yet. Keep this module tiny and replace it wholesale
- * later. Do NOT grow it into product-name understanding — line targeting uses
- * cart line names/variants only (see matchCartLinesForRemoval).
+ * WHY this exists: deterministic cancel/remove verbs remain until the LLM
+ * interpreter covers free-form phrasing. Do NOT grow product-name understanding
+ * — line targeting uses cart line names/variants only (see matchCartLinesForRemoval).
  *
  * Color negation against a product's catalog options lives in orderColorPolicy
- * (`isCatalogColorNegated` / `resolveWantedCatalogColor`); this module only
- * decides WHETHER the utterance is a correction vs cancel/remove.
+ * / variantEngine; this module only decides WHETHER the utterance is a
+ * correction vs cancel/remove — without a hard-coded color/size word list.
  */
 import { normalizeArabic } from '../../catalog/product-search.js';
 
 export type InterimCancelKind = 'whole_cancel' | 'partial_remove' | 'none';
-
-/** Color / size lexemes used to spot variant corrections (INTERIM). */
-const VARIANT_OPTION_PATTERN =
-  /(?:احمر|أحمر|أسود|اسود|ابيض|أبيض|ازرق|أزرق|اخضر|أخضر|اصفر|بني|رمادي|وردي|ذهبي|فضي|بيج|كحلي|لون|مقاس|red|black|white|blue|green|yellow|brown|pink|gold|silver|navy|beige|color|size|\b(?:xs|s|m|l|xl|xxl)\b)/i;
 
 /** Documented phrases the interim matcher must classify (unit-tested). */
 export const INTERIM_CANCEL_TEST_CASES: ReadonlyArray<{
@@ -49,6 +44,7 @@ export const INTERIM_VARIANT_CORRECTION_TEST_CASES: ReadonlyArray<{
   { phrase: 'لا ما بدي اسود بدي احمر', isCorrection: true, note: 'negation + positive color' },
   { phrase: 'مو الأسود، الأحمر', isCorrection: true, note: 'مو + alternative' },
   { phrase: 'غيّر اللون للأحمر', isCorrection: true, note: 'change color verb' },
+  { phrase: 'عدل المقاس لـ s', isCorrection: true, note: 'عدل size correction' },
   { phrase: 'خليه أحمر', isCorrection: true, note: 'خليه + color' },
   { phrase: 'الأسود', isCorrection: false, note: 'bare selection is not a correction' },
   { phrase: 'الغي القميص', isCorrection: false, note: 'line remove is not a correction' },
@@ -103,33 +99,35 @@ export function isInterimPartialRemoveVerb(messageText: string): boolean {
 /**
  * Customer is rejecting the current option and asking for another color/size
  * («لا ما بدي اسود بدي احمر»), not cancelling the order.
- * INTERIM — replace when the LLM interpreter owns this decision.
+ * Cue-based only — no catalog color/size lexicon.
  */
 export function isInterimVariantCorrectionIntent(messageText: string): boolean {
   if (!messageText?.trim()) return false;
   const normalized = normalizeArabic(messageText);
-  if (!VARIANT_OPTION_PATTERN.test(normalized) && !VARIANT_OPTION_PATTERN.test(messageText)) {
+
+  // Soft decline / defer — not a variant correction.
+  if (
+    /^(لا|لأ)\s*(شكرا|شكراً)?\s*(بس)?/i.test(normalized) &&
+    !/(ما\s*بدي|مو|مش|غير|بدل|خليه|بدي\s+\S+)/.test(normalized)
+  ) {
     return false;
   }
-  // Avoid \\b — it is unreliable on Arabic letters in JS.
-  if (/^(لا|لأ|مو|مش)(?:\s|[،,]|$)/.test(normalized)) return true;
-  if (/(غير|بدل|حول|غيّر)(?:\s|$)/.test(normalized)) return true;
-  if (/(?:خليه|خليها|خلي|غيره|غيرها)(?:\s|$)/.test(normalized)) return true;
-  if (
-    /(مو|مش)\s*(?:ال)?(هيك|هذا|هيدا|اسود|أسود|احمر|أحمر|ابيض|أبيض)/.test(normalized)
-  ) {
+
+  // Avoid \\b — unreliable on Arabic letters in JS.
+  if (/^(لا|لأ|مو|مش)(?:\s|[،,]|$)/.test(normalized)) {
+    if (/^(لا|لأ|مو|مش)$/.test(normalized)) return false;
+    // «لا شكراً» alone is not a correction.
+    if (/^(لا|لأ)\s*(شكرا|شكراً)\s*$/i.test(normalized)) return false;
     return true;
   }
+  if (/(غير|بدل|حول|غيّر|عدل|عدّل)(?:\s|$)/.test(normalized)) return true;
+  if (/(?:خليه|خليها|خلي|غيره|غيرها)(?:\s|$)/.test(normalized)) return true;
+  if (/(مو|مش)\s*(?:ال)?(هيك|هذا|هيدا)/.test(normalized)) return true;
   if (
-    /(بدي|ابي|ابغى|أريد|اريد)\s*(ها|ه|اها)?\s*(لون\s*)?(احمر|أحمر|اسود|أسود|ابيض|أبيض|ازرق|أزرق|اخضر|أخضر|red|black|white)/.test(
-      normalized
-    )
+    /(ما\s*بدي|بلاش|بدون)/.test(normalized) &&
+    /(بدي|ابي|ابغى|غير|بدل|خليه)/.test(normalized)
   ) {
-    // Bare «بدي أحمر» is a selection — require a rejection/change cue.
-    if (/^(لا|لأ|مو|مش)(?:\s|[،,]|$)/.test(normalized)) return true;
-    if (/(غير|بدل|حول|غيّر|خليه|خليها)/.test(normalized)) return true;
-    if (/(ما\s*بدي|بلاش|بدون)/.test(normalized)) return true;
-    return false;
+    return true;
   }
   return false;
 }

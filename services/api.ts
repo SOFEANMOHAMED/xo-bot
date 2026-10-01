@@ -866,6 +866,9 @@ class ApiService {
         abandonedReminderEnabled?: boolean;
         abandonedReminderDelayMinutes?: number;
         abandonedReminderMessage?: string;
+        productInterestReminderEnabled?: boolean;
+        productInterestReminderDelayMinutes?: number;
+        productInterestReminderMessage?: string;
       };
       planCapabilities?: {
         hasSalesBot: boolean;
@@ -1146,6 +1149,8 @@ class ApiService {
     return this.request<{
       response: string;
       conversationId: string | null;
+      orderCreated?: boolean;
+      mergedParts?: number;
     }>('/ai/chat', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -1498,6 +1503,7 @@ class ApiService {
     publicReplyText?: string | null;
     sendDmOnComment?: boolean;
     privateReplyText?: string | null;
+    reactOnCommentEnabled?: boolean;
   }) {
     return this.request<{ message: string; post: any }>(
       '/integrations/social/posts/comment-settings',
@@ -1605,6 +1611,43 @@ class ApiService {
     if (socialPostId) q.set('socialPostId', socialPostId);
     const qs = q.toString();
     return this.request<{ rules: any[] }>(`/integrations/social/keyword-rules${qs ? `?${qs}` : ''}`);
+  }
+
+  async getFaqs() {
+    return this.request<{ faqs: import('../types').MerchantFaq[] }>('/faqs');
+  }
+
+  async createFaq(payload: {
+    question: string;
+    answer: string;
+    priority?: number;
+    isActive?: boolean;
+  }) {
+    return this.request<{ faq: import('../types').MerchantFaq }>('/faqs', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateFaq(
+    faqId: string,
+    payload: {
+      question?: string;
+      answer?: string;
+      priority?: number;
+      isActive?: boolean;
+    }
+  ) {
+    return this.request<{ faq: import('../types').MerchantFaq }>(`/faqs/${faqId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteFaq(faqId: string) {
+    return this.request<{ message: string }>(`/faqs/${faqId}`, {
+      method: 'DELETE',
+    });
   }
 
   async createSocialKeywordRule(payload: Record<string, unknown>) {
@@ -2165,6 +2208,85 @@ class ApiService {
     }>('/admin/acquisition');
   }
 
+  async getAdminAcquisitionLinks() {
+    return this.request<
+      Array<{
+        id: string;
+        code: string;
+        name: string | null;
+        path: string;
+        source: string | null;
+        medium: string | null;
+        campaign: string | null;
+        content: string | null;
+        term: string | null;
+        clickCount: number;
+        signups: number;
+        paid: number;
+        isActive: boolean;
+        createdAt: string;
+        url: string;
+      }>
+    >('/admin/acquisition/links');
+  }
+
+  async createAdminAcquisitionLink(payload: {
+    name?: string;
+    code?: string;
+    path?: string;
+    utm_source?: string;
+    utm_medium?: string;
+    utm_campaign?: string;
+    utm_content?: string;
+    utm_term?: string;
+  }) {
+    return this.request<{
+      id: string;
+      code: string;
+      name: string | null;
+      path: string;
+      source: string | null;
+      medium: string | null;
+      campaign: string | null;
+      content: string | null;
+      term: string | null;
+      clickCount: number;
+      signups: number;
+      paid: number;
+      isActive: boolean;
+      createdAt: string;
+      url: string;
+    }>('/admin/acquisition/links', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateAdminAcquisitionLink(id: string, isActive: boolean) {
+    return this.request<{
+      id: string;
+      code: string;
+      isActive: boolean;
+      url: string;
+    }>(`/admin/acquisition/links/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isActive }),
+    });
+  }
+
+  async resolveAcquisitionLink(code: string) {
+    return this.request<{
+      code: string;
+      path: string;
+      source: string | null;
+      medium: string | null;
+      campaign: string | null;
+      content: string | null;
+      term: string | null;
+      destination: string;
+    }>(`/acquisition/go/${encodeURIComponent(code)}`, { method: 'GET' }, false);
+  }
+
   async getAffiliateStats() {
     return this.request<{
       referralCode: string;
@@ -2212,6 +2334,8 @@ class ApiService {
       status: 'active' | 'suspended' | 'expired';
       isTrial: boolean;
       trialEndsAt?: Date;
+      subscriptionStartsAt?: string | null;
+      subscriptionEndsAt?: string | null;
       llmUsage?: {
         promptTokens: number;
         completionTokens: number;
@@ -2254,6 +2378,8 @@ class ApiService {
     subscription_status?: string;
     isTrial?: boolean;
     trial_ends_at?: Date;
+    subscription_starts_at?: Date | null;
+    subscription_ends_at?: Date | null;
   }) {
     return this.request<{
       id: string;
@@ -2264,11 +2390,23 @@ class ApiService {
       status: 'active' | 'suspended' | 'expired';
       isTrial: boolean;
       trialEndsAt?: string;
+      subscriptionStartsAt?: string;
+      subscriptionEndsAt?: string;
     }>('/admin/users', {
       method: 'POST',
       body: JSON.stringify({
         ...data,
-        trial_ends_at: data.trial_ends_at ? data.trial_ends_at.toISOString() : undefined
+        trial_ends_at: data.trial_ends_at ? data.trial_ends_at.toISOString() : undefined,
+        subscription_starts_at: data.subscription_starts_at
+          ? data.subscription_starts_at.toISOString()
+          : data.subscription_starts_at === null
+            ? null
+            : undefined,
+        subscription_ends_at: data.subscription_ends_at
+          ? data.subscription_ends_at.toISOString()
+          : data.subscription_ends_at === null
+            ? null
+            : undefined,
       })
     });
   }
@@ -2284,6 +2422,8 @@ class ApiService {
       status: 'active' | 'suspended' | 'expired';
       isTrial: boolean;
       trialEndsAt?: Date;
+      subscriptionStartsAt?: string | null;
+      subscriptionEndsAt?: string | null;
     }>(`/admin/users/${id}`);
   }
 
@@ -2292,8 +2432,20 @@ class ApiService {
     email?: string;
     subscription_plan?: string;
     subscription_status?: string;
-    trial_ends_at?: Date | null;
+    trial_ends_at?: Date | string | null;
+    subscription_starts_at?: Date | string | null;
+    subscription_ends_at?: Date | string | null;
   }) {
+    const body: Record<string, unknown> = { ...data };
+    if (data.trial_ends_at instanceof Date) {
+      body.trial_ends_at = data.trial_ends_at.toISOString();
+    }
+    if (data.subscription_starts_at instanceof Date) {
+      body.subscription_starts_at = data.subscription_starts_at.toISOString();
+    }
+    if (data.subscription_ends_at instanceof Date) {
+      body.subscription_ends_at = data.subscription_ends_at.toISOString();
+    }
     return this.request<{
       id: string;
       email: string;
@@ -2301,10 +2453,12 @@ class ApiService {
       subscription_plan: string;
       subscription_status: string;
       trial_ends_at?: Date | null;
+      subscription_starts_at?: Date | null;
+      subscription_ends_at?: Date | null;
       created_at: Date;
     }>(`/admin/users/${id}`, {
       method: 'PUT',
-      body: JSON.stringify(data),
+      body: JSON.stringify(body),
     });
   }
 
@@ -2615,7 +2769,7 @@ class ApiService {
     }>('/admin/facebook/official/inbox/unread-count');
   }
 
-  async syncOfficialPagePosts() {
+  async syncOfficialPagePosts(platform?: 'facebook' | 'instagram') {
     return this.request<{
       message: string;
       results: Array<{
@@ -2623,15 +2777,21 @@ class ApiService {
         platform: string;
         accountRef: string;
         pageName?: string | null;
+        igUsername?: string | null;
       }>;
     }>('/admin/facebook/official/posts/sync', {
       method: 'POST',
-      body: JSON.stringify({}),
+      body: JSON.stringify(platform ? { platform } : {}),
     });
   }
 
-  async getOfficialPagePosts(params?: { limit?: number; offset?: number }) {
+  async getOfficialPagePosts(params?: {
+    platform?: 'facebook' | 'instagram';
+    limit?: number;
+    offset?: number;
+  }) {
     const q = new URLSearchParams();
+    if (params?.platform) q.set('platform', params.platform);
     if (params?.limit) q.set('limit', String(params.limit));
     if (params?.offset) q.set('offset', String(params.offset));
     const qs = q.toString();
@@ -2646,6 +2806,7 @@ class ApiService {
     publicReplyText?: string | null;
     sendDmOnComment?: boolean;
     privateReplyText?: string | null;
+    reactOnCommentEnabled?: boolean;
   }) {
     return this.request<{ message: string; post: any }>(
       '/admin/facebook/official/posts/comment-settings',

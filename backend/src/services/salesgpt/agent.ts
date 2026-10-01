@@ -18,9 +18,6 @@ import {
 } from './prompts.js';
 import { getSalesGPTTools, executeTool, type ToolContext, type SalesGPTTool } from './tools.js';
 import {
-    searchProducts,
-    getTopProducts,
-    getProductById,
     type ProductOverviewRow,
     type CatalogMetaSummary
 } from '../../catalog/product-search.js';
@@ -50,8 +47,10 @@ import {
     isPrematureCheckoutCopy,
 } from './orderConfirmationPolicy.js';
 import {
+    detectsWantsAlternativesIntent,
     hasCustomerRequestBlock,
     normalizeCustomerRequest,
+    stripUnsolicitedCrossSellMentions,
     type CustomerRequestSignals
 } from './customerRequest.js';
 import { formatColorOptionsForDisplay } from '../../catalog/color-options.js';
@@ -67,8 +66,8 @@ import {
 import {
     browseMediaCaptionFallback,
     isExplicitPhotoRequest,
-    isExplicitPhotoRefusal,
     nextActionForBrowseTurn,
+    resolvePhotoDecision,
     resolveTurnIntent,
     type TurnIntent,
 } from './turnIntent.js';
@@ -76,6 +75,7 @@ import { isPastBotClaimDispute } from './pastBotClaimDispute.js';
 import {
     ingestIdentityAnswerFromBotAsk,
     isAnsweringIdentityTurn,
+    mayAcceptLlmIdentityField,
 } from './collectInfoOrder.js';
 
 /** Values the sales-response model may return in JSON `next_action` */
@@ -197,6 +197,7 @@ export interface SalesGPTResult {
     aiCallsCount: number;
     /** Structured understanding from the model for this turn. */
     customerRequest?: CustomerRequestSignals;
+    turnIntent?: TurnIntent;
 }
 
 /**
@@ -208,7 +209,6 @@ export interface CatalogAwareness {
     overview: ProductOverviewRow[];
     meta?: CatalogMetaSummary;
     activeProductId?: string | null;
-    isExploring?: boolean;
     /** Customer turn named/queried a specific product (not generic browsing). */
     hadSpecificSearchIntent?: boolean;
     /** True when strategies -1/0a/0/1/2 found a catalog hit (not Strategy 3 fallback). */
@@ -357,7 +357,7 @@ export class SalesGPTAgent {
         }
 
         // Step 2: Build product context (active + catalog awareness)
-        const productContext = this.buildProductContext(products, catalog);
+        const productContext = this.buildProductContext(products, catalog, messageText);
 
         this.currentProductsHaveColors = products.some(p => p.colors && p.colors.length > 0);
         this.currentProductsHaveSizes = products.some(p => p.sizes && p.sizes.length > 0);
@@ -383,6 +383,19 @@ export class SalesGPTAgent {
             productContext,
             toolContext
         );
+
+        // Never let free-form cross-sells survive a specific product Q&A turn.
+        if (!detectsWantsAlternativesIntent(messageText)) {
+            const otherNames = (catalog?.overview || [])
+                .filter((row) => !products.some((p) => p.id === row.id))
+                .map((row) => row.name);
+            response = stripUnsolicitedCrossSellMentions({
+                replyText: response,
+                activeProductNames: products.map((p) => p.name),
+                otherProductNames: otherNames,
+                language: this.config.language === 'english' ? 'english' : 'arabic',
+            });
+        }
 
         // Step 4: next_action is the sole decision source (fallback only if model omits it)
         let nextAction: string;
@@ -431,6 +444,10 @@ export class SalesGPTAgent {
         const wantsAddAnotherTrusted =
             customerRequest?.wantsAddAnother === true &&
             detectsAddAnotherIntent(messageText);
+        // Gate wantsAlternatives: model flag alone must not invent cross-sell routing.
+        const wantsAlternativesTrusted =
+            customerRequest?.wantsAlternatives === true &&
+            detectsWantsAlternativesIntent(messageText);
         const answeringIdentityAsk = isAnsweringIdentityTurn({
             lastBotReply,
             collectedBeforeIngest,
@@ -440,11 +457,21 @@ export class SalesGPTAgent {
             ? {
                   ...customerRequest,
                   wantsAddAnother: wantsAddAnotherTrusted,
+                  wantsAlternatives: wantsAlternativesTrusted,
                   // Same S10 hole: asks_product_info during identity answer → product_qa.
                   asksProductInfo:
                       answeringIdentityAsk ? false : customerRequest.asksProductInfo,
               }
             : customerRequest;
+        const photoDecision = resolvePhotoDecision({
+            messageText,
+            customerRequest: customerRequestForIntent,
+        });
+        const wantsFinalizeIntent =
+            customerAffirmsOrder(messageText) ||
+            (customerDeclinesMoreItems(messageText) &&
+                botReplyAsksToAddMore(lastBotReply)) ||
+            customerRequest?.readyToConfirm === true;
         const turnIntent: TurnIntent = resolveTurnIntent({
             userMessage: messageText,
             customerRequest: customerRequestForIntent,
@@ -453,11 +480,7 @@ export class SalesGPTAgent {
                 (customerRequest?.asksProductInfo === true ||
                     isProductInfoRequest(messageText) ||
                     isPastBotClaimDispute(messageText)),
-            isFinalizing:
-                customerAffirmsOrder(messageText) ||
-                (customerDeclinesMoreItems(messageText) &&
-                    botReplyAsksToAddMore(lastBotReply)) ||
-                customerRequest?.readyToConfirm === true,
+            isFinalizing: wantsFinalizeIntent,
         });
 
         // Force photo/Q&A actions before any checkout rewrite can run.
@@ -468,7 +491,7 @@ export class SalesGPTAgent {
                     turnIntent,
                     from: nextAction,
                     to: browseAction,
-                    explicitPhoto: isExplicitPhotoRequest(messageText),
+                    explicitPhoto: photoDecision.wantsPhoto,
                 });
             }
             nextAction = browseAction;
@@ -481,13 +504,8 @@ export class SalesGPTAgent {
                 response = browseMediaCaptionFallback(this.config.language);
             }
         } else {
-            // Model said send_image without an explicit photo ask in THIS message → demote.
-            // Refusal always demotes even if the model set wants_photo.
-            const allowSendImage =
-                !isExplicitPhotoRefusal(messageText) &&
-                (customerRequest?.wantsPhoto === true ||
-                    isExplicitPhotoRequest(messageText));
-            if (nextAction === 'send_image' && !allowSendImage) {
+            // Model said send_image without photo decision → demote.
+            if (nextAction === 'send_image' && !photoDecision.attachImage) {
                 nextAction = 'present_product';
                 intent = 'product_query';
                 logger.debug('SalesGPT: ignored send_image without photo intent', {
@@ -498,7 +516,7 @@ export class SalesGPTAgent {
         }
 
         // Step 4.1b: Alternatives → stay in product presentation (never invent "only one product").
-        if (customerRequest?.wantsAlternatives && nextAction === 'collect_info') {
+        if (customerRequestForIntent?.wantsAlternatives && nextAction === 'collect_info') {
             nextAction = 'present_product';
             intent = 'product_query';
         }
@@ -561,7 +579,7 @@ export class SalesGPTAgent {
             intent = 'order';
         } else if (nextAction === 'present_product' || nextAction === 'send_image') {
             intent = 'product_query';
-        } else if (customerRequest?.wantsAlternatives) {
+        } else if (customerRequestForIntent?.wantsAlternatives) {
             intent = 'browse';
         }
 
@@ -611,7 +629,8 @@ export class SalesGPTAgent {
             toolUsed,
             toolOutput,
             aiCallsCount: this.aiCallsCount,
-            customerRequest: customerRequest ?? undefined
+            customerRequest: customerRequest ?? undefined,
+            turnIntent,
         };
     }
 
@@ -656,7 +675,9 @@ export class SalesGPTAgent {
     }
 
     /**
-     * Merge new info into collected info (never overwrite with empty)
+     * Merge new info into collected info (never overwrite with empty).
+     * Identity fields (name/phone/address) are gated by the same deterministic
+     * ingest used for template answers — LLM extraction alone cannot invent them.
      */
     private mergeCollectedInfo(newInfo: Partial<SalesGPTState['collectedInfo']>): void {
         const lastUser = [...this.state.conversationHistory]
@@ -665,7 +686,13 @@ export class SalesGPTAgent {
         const userText = lastUser
             ? lastUser.replace(/^المستخدم:\s*/u, '').replace(/\s*<END_OF_TURN>\s*$/u, '')
             : '';
+        const lastBotReply = this.getLastAssistantHistoryText();
         const dispute = isPastBotClaimDispute(userText);
+        const identityCollected = {
+            name: this.state.collectedInfo.name,
+            phone: this.state.collectedInfo.phone,
+            address: this.state.collectedInfo.address,
+        };
 
         for (const [key, value] of Object.entries(newInfo)) {
             if (isPlaceholderCollectedValue(value)) continue;
@@ -693,6 +720,19 @@ export class SalesGPTAgent {
                     continue;
                 }
             }
+            if (key === 'name' || key === 'phone' || key === 'address') {
+                if (
+                    !mayAcceptLlmIdentityField({
+                        field: key,
+                        proposed: value,
+                        userMessage: userText,
+                        lastBotReply,
+                        collected: identityCollected,
+                    })
+                ) {
+                    continue;
+                }
+            }
             (this.state.collectedInfo as any)[key] = sanitizeCollectedText(value) ?? value;
         }
     }
@@ -712,21 +752,27 @@ export class SalesGPTAgent {
      * Two distinct sections so the model never confuses "what we are
      * actively selling right now" with "what else exists in the store":
      *   1) 🎯 Active product(s) — full details (price/stock/colors/sizes/...)
-     *   2) 📚 Catalog overview — compact list (awareness only)
+     *   2) 📚 Catalog overview — named list only when alternatives are allowed
      *
-     * Catalog overview is multi-tenant safe (merchant-scoped data) and
-     * size-bounded, so it stays SaaS-friendly even with hundreds of products.
+     * Named overview is suppressed while an active product is in focus and the
+     * customer did not ask for alternatives — only a count hint remains.
      */
     private buildProductContext(
         products: Product[],
-        catalog?: CatalogAwareness
+        catalog?: CatalogAwareness,
+        messageText: string = ''
     ): string {
         const currencyCode = this.config.merchantConfig.storeCurrency || 'USD';
         const isArabic = this.config.language === 'arabic';
-        const currencyLabel = getCurrencyDisplayName(currencyCode, isArabic ? 'arabic' : 'english');
 
         const sections: string[] = [];
         const noMatchForSpecificQuery = catalog?.noMatchForSpecificQuery === true;
+        const wantsAlternatives = detectsWantsAlternativesIntent(messageText);
+        // Named overview stays available as catalog truth (price grounding).
+        // Unsolicited pitches are stripped post-reply — do not hide facts that
+        // let the model answer "شو سعر القميص" when focus was briefly wrong.
+        const showNamedOverview = true;
+        const mayPitchAlternatives = wantsAlternatives || noMatchForSpecificQuery;
 
         // ----- 0) Genuine specific-query miss — say so before catalog facts -----
         if (products.length === 0 && noMatchForSpecificQuery) {
@@ -801,8 +847,8 @@ export class SalesGPTAgent {
             sections.push(`${header}\n${active}`);
         }
 
-        // ----- 2) Catalog overview – awareness only -----
-        if (catalog && catalog.overview && catalog.overview.length > 0) {
+        // ----- 2) Catalog overview — named rows only when alternatives are in-scope -----
+        if (showNamedOverview && catalog && catalog.overview && catalog.overview.length > 0) {
             // Hide the active product from the overview to avoid duplication
             const activeIds = new Set(products.map(p => p.id));
             if (catalog.activeProductId) activeIds.add(catalog.activeProductId);
@@ -837,9 +883,13 @@ export class SalesGPTAgent {
                     ? (isArabic
                         ? '📚 نظرة عامة على الكتالوج (حقائق فقط — هذه الأصناف المتوفرة فعلياً):'
                         : '📚 Catalog overview (facts only — these are the items actually available):')
-                    : (isArabic
+                    : mayPitchAlternatives
+                    ? (isArabic
                         ? '📚 منتجات أخرى في كتالوج هذا التاجر (حقائق — استخدمها للإجابة عن البدائل بصدق):'
-                        : '📚 Other products in this merchant catalog (facts — use them to answer alternatives truthfully):');
+                        : '📚 Other products in this merchant catalog (facts — use them to answer alternatives truthfully):')
+                    : (isArabic
+                        ? '📚 منتجات أخرى في الكتالوج (حقائق فقط للرجوع — ممنوع اقتراحها ما لم يطلب العميل بدائل صراحة):'
+                        : '📚 Other catalog products (facts only — never pitch them unless the customer explicitly asks for alternatives):');
                 sections.push(`${header}\n${lines}${totalSuffix}`);
             }
         }
@@ -853,6 +903,13 @@ export class SalesGPTAgent {
                     isArabic
                         ? `📊 إجمالي منتجات المتجر: ${total}. هذا هو الكتالوج الحقيقي فقط — ممنوع إضافة أصناف غير مذكورة أعلاه.`
                         : `📊 Store product count: ${total}. This is the real catalog only — do not add items that are not listed above.`
+                );
+            } else if (!mayPitchAlternatives && total > activeCount) {
+                // Focused answer turn: facts exist, but do not volunteer other SKUs.
+                sections.push(
+                    isArabic
+                        ? `📊 إجمالي منتجات المتجر: ${total}. أجب عن المنتج النشط فقط — ممنوع ذكر أسماء أو أسعار منتجات أخرى ما لم يطلب العميل بدائل صراحة في هذه الرسالة.`
+                        : `📊 Store product count: ${total}. Answer about the active product only — do not name or price other products unless the customer explicitly asks for alternatives in this message.`
                 );
             } else if (isArabic) {
                 sections.push(
@@ -1019,7 +1076,7 @@ ${conversationHistoryText || 'هذه أول رسالة'}
 - إذا wants_add_another=true → العميل يريد إضافة منتج آخر للسلة (كمان/أضيف/برضه). next_action="present_product". النظام يقفّل السطر الحالي في السلة — لا تختلق قائمة سلة.
 - إذا wants_photo=true فقط → next_action="send_image".
 - ready_to_confirm=true فقط عندما يوافق العميل صراحة على تثبيت الطلب (نعم/أكد)، وليس عند لفظة مجاملة مثل «تمام» داخل سؤال آخر.
-- إذا العميل قدم اسماً/هاتفاً/عنواناً → اشكره ثم اسأل المعلومة التالية أو اعرض ملخصاً لـ await_confirmation (اشمل كل أسطر السلة إن وُجدت).
+- إذا العميل قدم اسماً/هاتفاً/عنواناً → اشكره فقط. النظام يسأل كل الحقول الناقصة أو يعرض ملخص التأكيد. لا تخترع قوالب جمع.
 - في extracted_info: استخدم JSON null فقط (وليس النص "null") لما لم يُذكر.
 - ممنوع await_confirmation أو كتابة «طلبك جاهز للتأكيد» قبل توفر اسم وهاتف وعنوان حقيقيين.
 
@@ -1067,7 +1124,7 @@ Current customer message: "${messageText}"
 - If wants_add_another=true → customer wants another product in the cart. next_action="present_product". The system locks the current draft into the cart — never invent cart JSON.
 - If wants_photo=true only → next_action="send_image".
 - ready_to_confirm=true only when the customer explicitly affirms placing the order — not polite fillers like "ok" inside another question.
-- If customer provided name/phone/address → acknowledge, then ask next missing field or show await_confirmation summary (include all cart lines when present).
+- If customer provided name/phone/address → acknowledge only. The system asks every remaining identity field or shows the confirmation summary. Do not invent collect templates.
 - In extracted_info: fill from history + current message; use JSON null (never the string "null") when absent.
 - Never await_confirmation or write "ready to confirm" until real name, phone, and address exist.
 

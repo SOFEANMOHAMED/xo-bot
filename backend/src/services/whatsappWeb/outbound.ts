@@ -1,4 +1,5 @@
 import { logger } from '../../utils/logger.js';
+import { loadOutboundImageMedia } from '../channels/outboundImageMedia.js';
 import { getMerchantRuntime, rememberSentMessageId } from './runtimeRegistry.js';
 import { toOutboundJid } from './jid.js';
 
@@ -38,11 +39,22 @@ export async function sendWhatsAppWebImage(
   const jid = toOutboundJid(userId);
   if (!sock || !jid || !imageUrl) return false;
 
+  const safeCaption = (caption || '').substring(0, 1024);
+
   try {
-    const sent = await sock.sendMessage(jid, {
-      image: { url: imageUrl },
-      caption: (caption || '').substring(0, 1024)
-    });
+    // Prefer local bytes for our product-image API — avoids Baileys failing on
+    // self-fetch through the public hostname (hairpin / WAF).
+    const localMedia = await loadOutboundImageMedia(imageUrl);
+    const sent = localMedia
+      ? await sock.sendMessage(jid, {
+          image: localMedia.buffer,
+          mimetype: localMedia.mimetype,
+          caption: safeCaption,
+        })
+      : await sock.sendMessage(jid, {
+          image: { url: imageUrl },
+          caption: safeCaption,
+        });
     rememberSentMessageId(merchantId, sent?.key?.id || undefined);
     return true;
   } catch (error) {

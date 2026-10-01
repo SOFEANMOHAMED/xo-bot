@@ -347,7 +347,7 @@ const ContentPublishingPage: React.FC<ContentPublishingPageProps> = ({
           نشر المحتوى على فيسبوك وإنستغرام
         </h2>
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-          اربط صفحة فيسبوك أو حساب إنستغرام للأعمال من «الربط والتكامل» أولاً.
+          اربط صفحة فيسبوك أو حساب إنستغرام للأعمال من «ربط الصفحات» أولاً.
           لحسابات إنستغرام الحالية أعد الربط لتفعيل صلاحية نشر المحتوى.
         </p>
         {onGoToIntegrations && (
@@ -357,7 +357,7 @@ const ContentPublishingPage: React.FC<ContentPublishingPageProps> = ({
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-brand hover:bg-brand-700 text-white text-sm font-medium"
           >
             <Link2 size={16} />
-            الذهاب للربط والتكامل
+            الذهاب لربط الصفحات
           </button>
         )}
       </div>

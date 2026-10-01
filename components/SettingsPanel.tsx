@@ -4,6 +4,7 @@ import { Save, Bot, DollarSign, Sparkles, Truck, CreditCard, AlertCircle, FileTe
 import { DEFAULT_SETTINGS } from '../constants'; // Import default to use as fallback
 import { useAuth } from '../contexts/AuthContext';
 import { createPortal } from 'react-dom';
+import FaqSettingsSection from './FaqSettingsSection';
 
 interface SettingsPanelProps {
   settings: MerchantSettings;
@@ -258,6 +259,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
              </div>
           </div>
 
+          <FaqSettingsSection />
+
           {/* Persona Settings */}
           <div className="bg-brand-50 dark:bg-brand-900/10 p-6 rounded-xl border border-brand-100 dark:border-brand-800">
              <div className="flex items-center gap-2 mb-4">
@@ -357,6 +360,76 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onUpdateSetting
                 rows={3}
                 placeholder="اتركه فارغاً لاستخدام النص الافتراضي. المتغيرات: {name} {product} {product_clause}"
                 className="w-full p-3 border border-emerald-200 dark:border-emerald-800 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none text-sm leading-relaxed disabled:opacity-50"
+              />
+            </div>
+          </div>
+
+          {/* Product interest reminder */}
+          <div className="bg-sky-50 dark:bg-sky-900/10 p-6 rounded-xl border border-sky-100 dark:border-sky-900/40">
+            <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+              <div className="flex items-center gap-2">
+                <Sparkles className="text-sky-600 dark:text-sky-400" size={20} />
+                <h3 className="text-lg font-bold text-gray-800 dark:text-white">تذكير الاهتمام بالمنتج</h3>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <span className="text-sm text-gray-600 dark:text-gray-300">تفعيل التذكير</span>
+                <input
+                  type="checkbox"
+                  checked={safeFormData.productInterestReminderEnabled !== false}
+                  onChange={(e) =>
+                    setFormData({
+                      ...safeFormData,
+                      productInterestReminderEnabled: e.target.checked,
+                    })
+                  }
+                  className="w-4 h-4 rounded text-brand focus:ring-brand"
+                />
+              </label>
+            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+              إذا سأل العميل صراحة عن منتج (سعر/تفاصيل) ثم صمت، يرسل البوت تذكيراً بفوائد المنتج من وصف الكتالوج — مرة لكل منتج — داخل نافذة الـ 24 ساعة.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                  مهلة الصمت قبل التذكير (بالدقائق)
+                </label>
+                <input
+                  type="number"
+                  min={5}
+                  max={720}
+                  value={safeFormData.productInterestReminderDelayMinutes ?? 60}
+                  onChange={(e) =>
+                    setFormData({
+                      ...safeFormData,
+                      productInterestReminderDelayMinutes: Math.min(
+                        720,
+                        Math.max(5, parseInt(e.target.value || '60', 10) || 60)
+                      ),
+                    })
+                  }
+                  disabled={safeFormData.productInterestReminderEnabled === false}
+                  className="w-full p-3 border border-sky-200 dark:border-sky-800 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-sky-500 outline-none text-sm disabled:opacity-50"
+                />
+                <p className="text-xs text-gray-400 mt-1">الافتراضي 60 دقيقة — الحد الأدنى 5 دقائق.</p>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                نص التذكير (اختياري)
+              </label>
+              <textarea
+                value={safeFormData.productInterestReminderMessage || ''}
+                onChange={(e) =>
+                  setFormData({
+                    ...safeFormData,
+                    productInterestReminderMessage: e.target.value,
+                  })
+                }
+                disabled={safeFormData.productInterestReminderEnabled === false}
+                rows={3}
+                placeholder="اتركه فارغاً للنص الافتراضي. المتغيرات: {name} {product} {benefits} {benefits_block} {price} {price_line}"
+                className="w-full p-3 border border-sky-200 dark:border-sky-800 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-sky-500 outline-none text-sm leading-relaxed disabled:opacity-50"
               />
             </div>
           </div>

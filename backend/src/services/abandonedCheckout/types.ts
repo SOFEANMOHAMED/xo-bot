@@ -17,6 +17,9 @@ export interface MerchantReminderSettings {
   abandoned_reminder_enabled: boolean;
   abandoned_reminder_delay_minutes: number;
   abandoned_reminder_message: string | null;
+  product_interest_reminder_enabled: boolean;
+  product_interest_reminder_delay_minutes: number;
+  product_interest_reminder_message: string | null;
   store_name: string | null;
 }
 
@@ -32,9 +35,18 @@ export interface EligibleAbandonedConversation {
   settings: MerchantReminderSettings;
 }
 
+export interface EligibleProductInterestConversation extends EligibleAbandonedConversation {
+  product_id: string;
+  asked_at: Date;
+}
+
 export interface ReminderCycleResult {
   scanned: number;
   sent: number;
   failed: number;
   skipped: number;
+  productInterestScanned?: number;
+  productInterestSent?: number;
+  productInterestFailed?: number;
+  productInterestSkipped?: number;
 }

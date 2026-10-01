@@ -4,7 +4,7 @@ Living plan for cart / focus / reply regressions. Identifiers in English.
 
 ---
 
-## Status (2026-09-22 / 5/6-SHORT)
+## Status (2026-09-24 / VARIANT_ENGINE V0)
 
 | Phase | Status | Notes |
 | --- | --- | --- |
@@ -13,7 +13,8 @@ Living plan for cart / focus / reply regressions. Identifiers in English.
 | **2B–2F brain rails** | Done | cancel/remove, pending, variant, focus, collect, 2E, 2F |
 | **5/6-SHORT polish** | **Done** | multi-run 130/130; S10 await; deploy `--gate`; merchant design pending approval |
 | **4-PREP analysis** | Done (docs) | interpreter contract |
-| **Phase 4 interpreter** | **Next** | Offline → shadow → flip; remaining soft class noise |
+| **Phase 4 interpreter** | **Done (A–C rows 1–4 + D–F partial)** | وحدة `interpreter/`؛ whitelist حي؛ قلب focus/photo/qty/product_info؛ مخفّض next_action + ground؛ مسارات لون/مقاس أغلفة على المحرك. أنواع 5–7 (select/cancel/browse) ظل حتى موافقة منفصلة |
+| **VARIANT_ENGINE V1–V5** | **Done (color + size wired)** | اللون والمقاس على المحرك؛ التالي V6 اختياري (`variant_axes` SQL) |
 
 **Deploy rule:** `scripts/deploy.sh` → typecheck + test-all + `LIVE_LLM=1 npm run test-live -- --gate` (~\$0.10 LLM/deploy).
 

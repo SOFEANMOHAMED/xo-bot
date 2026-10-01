@@ -40,7 +40,8 @@ export async function buildPublicMerchantUser(merchant: {
   const enforced = await enforceMerchantSubscriptionExpiry(merchant.id, {
     subscription_plan: merchant.subscription_plan ?? null,
     subscription_status: merchant.subscription_status ?? null,
-    subscription_ends_at: merchant.subscription_ends_at ?? null
+    subscription_ends_at: merchant.subscription_ends_at ?? null,
+    trial_ends_at: merchant.trial_ends_at ?? null,
   });
 
   const accountType =

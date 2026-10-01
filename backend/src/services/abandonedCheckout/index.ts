@@ -7,11 +7,22 @@ import { SCHEDULER_INTERVAL_MINUTES } from './constants.js';
 import { runAbandonedCheckoutCycle } from './processor.js';
 
 export { buildAbandonedReminderMessage } from './messageBuilder.js';
+export {
+  buildProductInterestReminderMessage,
+  extractBenefitsFromDescription,
+} from './messageBuilder.js';
 export { clearAbandonedCheckoutFromState } from './finder.js';
+export {
+  isExplicitProductInterestAsk,
+  recordExplicitProductInterest,
+  clearProductInterestReminderFromState,
+} from './productInterestAsk.js';
 export { runAbandonedCheckoutCycle } from './processor.js';
 export {
   ABANDONED_CHECKOUT_SOURCE,
+  PRODUCT_INTEREST_SOURCE,
   DEFAULT_REMINDER_DELAY_MINUTES,
+  DEFAULT_PRODUCT_INTEREST_DELAY_MINUTES,
   MAX_REMINDERS_PER_CHECKOUT,
   MESSAGING_WINDOW_HOURS,
 } from './constants.js';

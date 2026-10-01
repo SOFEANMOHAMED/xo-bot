@@ -44,6 +44,7 @@ import {
 import { runCommentAutomation } from '../services/socialCommentAutomation.js';
 import {
   fetchFacebookCommenterProfile,
+  reactToFacebookComment,
   sendFacebookCommentReply,
   sendFacebookPrivateReplyAfterComment,
 } from '../services/facebookCommentGraph.js';
@@ -51,6 +52,7 @@ import {
   applyMessagingAcquisition,
 } from '../services/socialAcquisition.js';
 import { withOAuthCodeDedup } from '../utils/oauthCodeDedup.js';
+import { verifyOAuthState } from '../utils/oauthState.js';
 import {
   resolveManagedFacebookPages,
   fetchGrantedFacebookPermissions,
@@ -155,51 +157,6 @@ const getFacebookAccessToken = async (merchantId: string, pageId: string): Promi
   } catch (error) {
     logger.error('Error getting Facebook access token', error as Error, { merchantId, pageId });
     return null;
-  }
-};
-
-// Send image via Facebook Graph API
-const sendFacebookImage = async (pageId: string, recipientId: string, imageUrl: string, caption: string, accessToken: string): Promise<boolean> => {
-  try {
-    const url =
-      `https://graph.facebook.com/v21.0/${encodeURIComponent(pageId)}/messages` +
-      `?access_token=${encodeURIComponent(accessToken)}`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        recipient: { id: recipientId },
-        message: {
-          attachment: {
-            type: 'image',
-            payload: {
-              url: imageUrl,
-              is_reusable: false
-            }
-          }
-        },
-        messaging_type: 'RESPONSE'
-      })
-    });
-
-    const data = await response.json() as { error?: { message?: string; code?: number } };
-    
-    if (!response.ok) {
-      logger.error('Facebook API error sending image', new Error(JSON.stringify(data)), { pageId, recipientId, imageUrl });
-      return false;
-    }
-
-    // If caption is provided and not empty, send it as a separate text message
-    if (caption && caption.trim()) {
-      await sendFacebookMessage(pageId, recipientId, caption, accessToken);
-    }
-
-    return true;
-  } catch (error) {
-    logger.error('Error sending Facebook image', error as Error, { pageId, recipientId, imageUrl });
-    return false;
   }
 };
 
@@ -326,7 +283,8 @@ const processFacebookComment = async (pageId: string, value: any) => {
     commenterName,
     account: row,
     sendPublicReply: sendFacebookCommentReply,
-    sendPrivateReply: sendFacebookPrivateReplyAfterComment
+    sendPrivateReply: sendFacebookPrivateReplyAfterComment,
+    sendReaction: reactToFacebookComment,
   });
   } catch (err) {
     logger.error('processFacebookComment uncaught error', err as Error, { pageId });
@@ -871,19 +829,27 @@ export const facebookCallback = async (
       let merchantId: string | undefined;
       let adminId: string | undefined;
       let adminBasePath: string | undefined;
-      try {
-        const stateData = JSON.parse(Buffer.from(String(state), 'base64').toString());
-        if (stateData.purpose === 'official_page') {
-          purpose = 'official_page';
-          adminId = stateData.adminId || undefined;
-          adminBasePath = stateData.adminBasePath || undefined;
-          if (!adminId) throw new Error('no adminId');
-        } else {
-          merchantId = stateData.merchantId;
-          if (!merchantId) throw new Error('no merchantId');
-        }
-      } catch {
+      const stateData = verifyOAuthState<{
+        purpose?: string;
+        merchantId?: string;
+        adminId?: string;
+        adminBasePath?: string;
+      }>(state);
+      if (!stateData) {
         return buildFacebookIntegrationRedirect({ facebook: 'error', reason: 'invalid_state' });
+      }
+      if (stateData.purpose === 'official_page') {
+        purpose = 'official_page';
+        adminId = stateData.adminId || undefined;
+        adminBasePath = stateData.adminBasePath || undefined;
+        if (!adminId) {
+          return buildFacebookIntegrationRedirect({ facebook: 'error', reason: 'invalid_state' });
+        }
+      } else {
+        merchantId = stateData.merchantId;
+        if (!merchantId) {
+          return buildFacebookIntegrationRedirect({ facebook: 'error', reason: 'invalid_state' });
+        }
       }
 
       const {
@@ -1311,6 +1277,13 @@ export const facebookWebhook = async (
                   [pageId]
                 );
                 pageHasLinkedInstagram = igPage.rows.length > 0;
+                if (!pageHasLinkedInstagram) {
+                  const { getPlatformFacebookPageByPageId } = await import(
+                    '../services/platformFacebookPage.js'
+                  );
+                  const platformPageHint = await getPlatformFacebookPageByPageId(String(pageId));
+                  pageHasLinkedInstagram = !!platformPageHint?.ig_user_id;
+                }
               }
 
               const isInstagramComment =
@@ -1325,6 +1298,7 @@ export const facebookWebhook = async (
                 pageHasLinkedInstagram
               });
              if (isInstagramComment) {
+                // processInstagramCommentFromPageFeed routes official page → platform automation
                 processInstagramCommentFromPageFeed(pageId, payload).catch(err =>
                   logger.error('Error processing Instagram comment from page feed', err as Error)
                 );

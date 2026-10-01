@@ -137,6 +137,9 @@ export const DEFAULT_SETTINGS: MerchantSettings = {
   abandonedReminderEnabled: true,
   abandonedReminderDelayMinutes: 45,
   abandonedReminderMessage: '',
+  productInterestReminderEnabled: true,
+  productInterestReminderDelayMinutes: 60,
+  productInterestReminderMessage: '',
 };
 
 export const SAAS_MARKETING_DATA = {
@@ -163,7 +166,7 @@ export const SAAS_SUPPORT_DATA = {
       "اضغط 'حفظ المنتج'."
     ],
     connect_channel: [
-      "انتقل إلى صفحة 'الربط والتكامل'.",
+      "انتقل إلى صفحة 'ربط الصفحات'.",
       "اختر القناة: واتساب أو فيسبوك أو إنستغرام أو تيليجرام.",
       "اضغط 'ربط' واتبع التعليمات لتفويض الحساب.",
       "بعد النجاح يمكنك تفعيل الرد الآلي واختبار البوت."

@@ -26,7 +26,8 @@ const CACHE_CONFIGS: Record<string, CacheConfig> = {
   merchantSettings: { ttl: 10 * 60 * 1000, maxSize: 500 },  // 10 minutes, 500 merchants (زيادة من 5)
   productKeywords: { ttl: 15 * 60 * 1000, maxSize: 500 },   // 15 minutes (زيادة من 5)
   topProducts: { ttl: 5 * 60 * 1000, maxSize: 500 },        // 5 minutes (زيادة من 2)
-  conversationState: { ttl: 60 * 1000, maxSize: 10000 }     // 1 minute, 10k conversations (زيادة من 30 ثانية)
+  conversationState: { ttl: 60 * 1000, maxSize: 10000 },    // 1 minute, 10k conversations (زيادة من 30 ثانية)
+  merchantFaqs: { ttl: 5 * 60 * 1000, maxSize: 500 }        // 5 minutes — active FAQs per merchant
 };
 
 // ==================== GENERIC CACHE CLASS ====================
@@ -145,6 +146,15 @@ export interface MerchantSettings {
 
 const merchantSettingsCache = new SmartCache<MerchantSettings>('merchantSettings', CACHE_CONFIGS.merchantSettings);
 const productKeywordsCache = new SmartCache<string[]>('productKeywords', CACHE_CONFIGS.productKeywords);
+const merchantFaqsCache = new SmartCache<MerchantFaqRow[]>('merchantFaqs', CACHE_CONFIGS.merchantFaqs);
+
+/** Active FAQ row used by the SalesGPT FAQ matcher (answer sent verbatim). */
+export interface MerchantFaqRow {
+  id: string;
+  question: string;
+  answer: string;
+  priority: number;
+}
 
 // ==================== CACHE FUNCTIONS ====================
 
@@ -258,7 +268,7 @@ export const getCachedProductKeywords = async (merchantId: string): Promise<stri
       }
     });
 
-    const uniqueKeywords = [...new Set(keywords)].filter(k => k && k.length > 1);
+    const uniqueKeywords = [...new Set(keywords)].filter(k => k && k.length > 0);
     
     // Cache the result
     productKeywordsCache.set(merchantId, uniqueKeywords);
@@ -280,11 +290,55 @@ export const invalidateProductKeywords = (merchantId: string): void => {
 };
 
 /**
+ * Get active merchant FAQs (cached). Used by FAQ semantic matcher.
+ * Returns only is_active rows ordered by priority DESC, created_at ASC.
+ */
+export const getCachedMerchantFaqs = async (merchantId: string): Promise<MerchantFaqRow[]> => {
+  const cached = merchantFaqsCache.get(merchantId);
+  if (cached) {
+    return cached;
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT id, question, answer, priority
+       FROM merchant_faqs
+       WHERE merchant_id = $1 AND is_active = true
+       ORDER BY priority DESC, created_at ASC`,
+      [merchantId]
+    );
+
+    const rows: MerchantFaqRow[] = result.rows.map((row) => ({
+      id: String(row.id),
+      question: String(row.question || ''),
+      answer: String(row.answer || ''),
+      priority: Number(row.priority) || 100,
+    }));
+
+    merchantFaqsCache.set(merchantId, rows);
+    return rows;
+  } catch (error) {
+    logger.error('Error fetching merchant FAQs', error as Error, { merchantId });
+    return [];
+  }
+};
+
+/**
+ * Invalidate merchant FAQs cache.
+ * Call this when FAQs are created/updated/deleted.
+ */
+export const invalidateMerchantFaqs = (merchantId: string): void => {
+  merchantFaqsCache.delete(merchantId);
+  logger.info('Merchant FAQs cache invalidated', { merchantId });
+};
+
+/**
  * Clear all caches
  */
 export const clearAllCaches = (): void => {
   merchantSettingsCache.clear();
   productKeywordsCache.clear();
+  merchantFaqsCache.clear();
   logger.info('All caches cleared');
 };
 
@@ -294,7 +348,8 @@ export const clearAllCaches = (): void => {
 export const getCacheStats = () => {
   return {
     merchantSettings: merchantSettingsCache.getStats(),
-    productKeywords: productKeywordsCache.getStats()
+    productKeywords: productKeywordsCache.getStats(),
+    merchantFaqs: merchantFaqsCache.getStats(),
   };
 };
 

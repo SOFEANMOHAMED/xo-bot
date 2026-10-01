@@ -8,23 +8,35 @@ import { logger } from '../../utils/logger.js';
 import {
   ABANDONED_CHECKOUT_PLATFORMS,
   CHECKOUT_STAGE_IDS,
+  DEFAULT_PRODUCT_INTEREST_DELAY_MINUTES,
   DEFAULT_REMINDER_DELAY_MINUTES,
   MAX_REMINDERS_PER_CHECKOUT,
   MAX_REMINDERS_PER_CYCLE,
   MESSAGING_WINDOW_HOURS,
 } from './constants.js';
-import type { EligibleAbandonedConversation, MerchantReminderSettings } from './types.js';
+import type {
+  EligibleAbandonedConversation,
+  EligibleProductInterestConversation,
+  MerchantReminderSettings,
+} from './types.js';
 import type { ConversationState } from '../../core/types.js';
 import type { AbandonedCheckoutPlatform } from './constants.js';
 import { isLiveCustomerMessageSql } from '../inbox/historyImportFlags.js';
 
 function mapSettings(row: any): MerchantReminderSettings {
   const delay = Number(row.abandoned_reminder_delay_minutes);
+  const interestDelay = Number(row.product_interest_reminder_delay_minutes);
   return {
     abandoned_reminder_enabled: row.abandoned_reminder_enabled !== false,
     abandoned_reminder_delay_minutes:
       Number.isFinite(delay) && delay >= 5 ? Math.min(delay, 12 * 60) : DEFAULT_REMINDER_DELAY_MINUTES,
     abandoned_reminder_message: row.abandoned_reminder_message || null,
+    product_interest_reminder_enabled: row.product_interest_reminder_enabled !== false,
+    product_interest_reminder_delay_minutes:
+      Number.isFinite(interestDelay) && interestDelay >= 5
+        ? Math.min(interestDelay, 12 * 60)
+        : DEFAULT_PRODUCT_INTEREST_DELAY_MINUTES,
+    product_interest_reminder_message: row.product_interest_reminder_message || null,
     store_name: row.store_name || null,
   };
 }
@@ -171,6 +183,9 @@ export async function findEligibleAbandonedConversations(): Promise<EligibleAban
          ms.abandoned_reminder_enabled,
          ms.abandoned_reminder_delay_minutes,
          ms.abandoned_reminder_message,
+         ms.product_interest_reminder_enabled,
+         ms.product_interest_reminder_delay_minutes,
+         ms.product_interest_reminder_message,
          ms.store_name
        FROM conversations c
        INNER JOIN merchant_settings ms ON ms.merchant_id = c.merchant_id
@@ -247,6 +262,216 @@ export async function findEligibleAbandonedConversations(): Promise<EligibleAban
     // Migration not applied yet — skip silently with a clear log
     if (error?.code === '42703') {
       logger.warn('Abandoned checkout: merchant_settings columns missing — run migration', {
+        message: error.message,
+      });
+      return [];
+    }
+    throw error;
+  }
+}
+
+/**
+ * Pick the most recently asked product that has not been reminded yet.
+ */
+export function pickPendingProductInterest(
+  state: ConversationState
+): { productId: string; askedAt: Date } | null {
+  const interest = state.product_interest_reminder;
+  const asked = interest?.asked || {};
+  const sent = interest?.sent || {};
+  const entries = Object.entries(asked)
+    .filter(([productId, at]) => productId && at && !sent[productId])
+    .map(([productId, at]) => ({ productId, askedAt: new Date(at) }))
+    .filter((e) => !Number.isNaN(e.askedAt.getTime()))
+    .sort((a, b) => b.askedAt.getTime() - a.askedAt.getTime());
+  return entries[0] || null;
+}
+
+export async function claimProductInterestReminder(
+  conversationId: string,
+  merchantId: string,
+  productId: string
+): Promise<boolean> {
+  const claimedAt = new Date().toISOString();
+  const result = await pool.query(
+    `UPDATE conversations
+     SET conversation_state = jsonb_set(
+           COALESCE(conversation_state, '{}'::jsonb),
+           '{product_interest_reminder,claimed}',
+           COALESCE(conversation_state->'product_interest_reminder'->'claimed', '{}'::jsonb) ||
+             jsonb_build_object($3::text, $4::text),
+           true
+         ),
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $1
+       AND merchant_id = $2
+       AND COALESCE(bot_disabled, false) = false
+       AND COALESCE(status, 'bot') <> 'human'
+       AND conversation_state->'product_interest_reminder'->'asked' ? $3
+       AND NOT (COALESCE(conversation_state->'product_interest_reminder'->'sent', '{}'::jsonb) ? $3)
+       AND (
+         conversation_state->'product_interest_reminder'->'claimed'->>$3 IS NULL
+         OR (conversation_state->'product_interest_reminder'->'claimed'->>$3)::timestamptz
+              < NOW() - INTERVAL '10 minutes'
+       )
+     RETURNING id`,
+    [conversationId, merchantId, productId, claimedAt]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function markProductInterestReminderSent(
+  conversationId: string,
+  merchantId: string,
+  productId: string
+): Promise<void> {
+  const sentAt = new Date().toISOString();
+  await pool.query(
+    `UPDATE conversations
+     SET conversation_state = jsonb_set(
+           jsonb_set(
+             COALESCE(conversation_state, '{}'::jsonb),
+             '{product_interest_reminder,sent}',
+             COALESCE(conversation_state->'product_interest_reminder'->'sent', '{}'::jsonb) ||
+               jsonb_build_object($3::text, $4::text),
+             true
+           ),
+           '{product_interest_reminder,last_error}',
+           'null'::jsonb,
+           true
+         ),
+         last_message_at = CURRENT_TIMESTAMP,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $1 AND merchant_id = $2`,
+    [conversationId, merchantId, productId, sentAt]
+  );
+}
+
+export async function releaseProductInterestReminderClaim(
+  conversationId: string,
+  merchantId: string,
+  productId: string,
+  errorMessage?: string
+): Promise<void> {
+  await pool.query(
+    `UPDATE conversations
+     SET conversation_state = (
+           COALESCE(conversation_state, '{}'::jsonb)
+           || jsonb_build_object(
+                'product_interest_reminder',
+                (
+                  COALESCE(conversation_state->'product_interest_reminder', '{}'::jsonb)
+                  || jsonb_build_object(
+                       'claimed',
+                       (COALESCE(conversation_state->'product_interest_reminder'->'claimed', '{}'::jsonb) - $3::text)
+                     )
+                ) || CASE
+                  WHEN $4::text IS NULL THEN '{}'::jsonb
+                  ELSE jsonb_build_object('last_error', $4::text)
+                END
+              )
+         ),
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $1 AND merchant_id = $2`,
+    [conversationId, merchantId, productId, errorMessage || null]
+  );
+}
+
+/**
+ * Conversations with an explicit product ask then silence — not checkout-eligible.
+ */
+export async function findEligibleProductInterestConversations(): Promise<
+  EligibleProductInterestConversation[]
+> {
+  const stageIds = CHECKOUT_STAGE_IDS as unknown as string[];
+  const platforms = ABANDONED_CHECKOUT_PLATFORMS as unknown as string[];
+
+  try {
+    const result = await pool.query(
+      `SELECT
+         c.id,
+         c.merchant_id,
+         c.platform,
+         c.user_id,
+         c.user_name,
+         c.conversation_state,
+         c.session_metadata,
+         last_user.created_at AS last_user_message_at,
+         ms.abandoned_reminder_enabled,
+         ms.abandoned_reminder_delay_minutes,
+         ms.abandoned_reminder_message,
+         ms.product_interest_reminder_enabled,
+         ms.product_interest_reminder_delay_minutes,
+         ms.product_interest_reminder_message,
+         ms.store_name
+       FROM conversations c
+       INNER JOIN merchant_settings ms ON ms.merchant_id = c.merchant_id
+       INNER JOIN LATERAL (
+         SELECT m.created_at
+         FROM messages m
+         WHERE m.conversation_id = c.id
+           AND ${isLiveCustomerMessageSql('m')}
+         ORDER BY m.created_at DESC
+         LIMIT 1
+       ) last_user ON TRUE
+       WHERE COALESCE(ms.product_interest_reminder_enabled, TRUE) = TRUE
+         AND COALESCE(c.bot_disabled, FALSE) = FALSE
+         AND COALESCE(c.status, 'bot') <> 'human'
+         AND c.platform = ANY($1::text[])
+         AND c.user_id IS NOT NULL
+         AND NULLIF(BTRIM(c.user_id), '') IS NOT NULL
+         AND jsonb_typeof(c.conversation_state->'product_interest_reminder'->'asked') = 'object'
+         AND c.conversation_state->'product_interest_reminder'->'asked' <> '{}'::jsonb
+         -- Checkout reminder wins: skip mid-checkout with name+phone
+         AND NOT (
+           NULLIF(BTRIM(c.conversation_state->'extracted_entities'->>'name'), '') IS NOT NULL
+           AND NULLIF(BTRIM(c.conversation_state->'extracted_entities'->>'phone'), '') IS NOT NULL
+           AND (
+             c.conversation_state->>'salesgpt_stage_id' = ANY($2::text[])
+             OR jsonb_array_length(COALESCE(c.conversation_state->'cart'->'items', '[]'::jsonb)) > 0
+           )
+         )
+         AND last_user.created_at <= NOW() - make_interval(
+               mins => GREATEST(
+                 COALESCE(ms.product_interest_reminder_delay_minutes, $3)::int,
+                 5
+               )
+             )
+         AND last_user.created_at >= NOW() - make_interval(hours => $4)
+       ORDER BY last_user.created_at ASC
+       LIMIT $5`,
+      [
+        platforms,
+        stageIds,
+        DEFAULT_PRODUCT_INTEREST_DELAY_MINUTES,
+        MESSAGING_WINDOW_HOURS,
+        MAX_REMINDERS_PER_CYCLE,
+      ]
+    );
+
+    const out: EligibleProductInterestConversation[] = [];
+    for (const row of result.rows) {
+      const state = (row.conversation_state || { message_count: 0 }) as ConversationState;
+      const pending = pickPendingProductInterest(state);
+      if (!pending) continue;
+      out.push({
+        id: row.id,
+        merchant_id: row.merchant_id,
+        platform: row.platform as AbandonedCheckoutPlatform,
+        user_id: row.user_id,
+        user_name: row.user_name,
+        conversation_state: state,
+        session_metadata: row.session_metadata || null,
+        last_user_message_at: new Date(row.last_user_message_at),
+        settings: mapSettings(row),
+        product_id: pending.productId,
+        asked_at: pending.askedAt,
+      });
+    }
+    return out;
+  } catch (error: any) {
+    if (error?.code === '42703') {
+      logger.warn('Product interest reminder: columns missing — run migration', {
         message: error.message,
       });
       return [];

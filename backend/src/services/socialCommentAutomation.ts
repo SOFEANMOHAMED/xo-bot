@@ -2,13 +2,17 @@
  * Comment automation (per selected post only):
  * - Public reply: keyword rule text or post public_reply_text (template/custom)
  * - Private reply: template/custom only — never AI-generated
+ * - Optional Page Like on the comment (Facebook only)
  * - Still seeds conversation with linked product for later AI turns
  */
 
 import pool from '../database/connection.js';
 import { logger } from '../utils/logger.js';
 import { findMatchingKeywordRule } from './socialKeywordMatcher.js';
-import { ensureSocialStorySchema } from './socialPostsSync.js';
+import {
+  ensureSocialCommentReactionSchema,
+  ensureSocialStorySchema
+} from './socialPostsSync.js';
 import {
   applyAcquisitionToConversation,
   resolveProductForExternalContent,
@@ -25,6 +29,10 @@ import {
   resolvePublicCommentMentionIdentity,
   withPublicCommentMention
 } from './socialCommentMention.js';
+import {
+  applyCommentReaction,
+  type ReactToCommentFn
+} from './commentReactions.js';
 import type { ConversationState } from '../core/types.js';
 
 export type CommentAutomationAccount = {
@@ -56,15 +64,18 @@ export type CommentAutomationInput = {
     text: string,
     accessToken: string
   ) => Promise<boolean>;
+  /** Optional — Facebook Page likes. Omitted for Instagram. */
+  sendReaction?: ReactToCommentFn;
 };
 
-type PostReplyRow = {
+type PostAutomationRow = {
   id: string;
   external_post_id: string;
   comment_reply_enabled: boolean;
   public_reply_text: string | null;
   send_dm_on_comment: boolean;
   private_reply_text: string | null;
+  react_on_comment_enabled: boolean;
 };
 
 async function alreadyHandled(
@@ -119,24 +130,29 @@ async function recordAction(params: {
   );
 }
 
-async function loadEnabledPost(params: {
+/** Load a post opted into reply and/or comment like. */
+async function loadAutomationPost(params: {
   merchantId: string;
   platform: 'facebook' | 'instagram';
   externalPostId: string;
-}): Promise<PostReplyRow | null> {
+}): Promise<PostAutomationRow | null> {
   const r = await pool.query(
     `SELECT id, external_post_id, comment_reply_enabled, public_reply_text,
-            send_dm_on_comment, private_reply_text
+            send_dm_on_comment, private_reply_text,
+            COALESCE(react_on_comment_enabled, false) AS react_on_comment_enabled
      FROM social_posts
      WHERE merchant_id = $1
        AND platform = $2
        AND external_post_id = $3
-       AND comment_reply_enabled = true
+       AND (
+         comment_reply_enabled = true
+         OR COALESCE(react_on_comment_enabled, false) = true
+       )
        AND COALESCE(content_kind, 'post') <> 'story'
      LIMIT 1`,
     [params.merchantId, params.platform, params.externalPostId]
   );
-  return (r.rows[0] as PostReplyRow) || null;
+  return (r.rows[0] as PostAutomationRow) || null;
 }
 
 export async function runCommentAutomation(input: CommentAutomationInput): Promise<void> {
@@ -156,6 +172,7 @@ export async function runCommentAutomation(input: CommentAutomationInput): Promi
   const merchantId = account.merchant_id;
 
   await ensureSocialStorySchema();
+  await ensureSocialCommentReactionSchema();
 
   if (await alreadyHandled(merchantId, platform, commentId)) {
     logger.debug('Comment already handled', { merchantId, commentId, platform });
@@ -171,14 +188,14 @@ export async function runCommentAutomation(input: CommentAutomationInput): Promi
     return;
   }
 
-  const post = await loadEnabledPost({
+  const post = await loadAutomationPost({
     merchantId,
     platform,
     externalPostId: String(externalPostId)
   });
 
   if (!post) {
-    logger.debug('Comment skipped: post not selected for auto-reply', {
+    logger.debug('Comment skipped: post not selected for automation', {
       merchantId,
       externalPostId,
       platform
@@ -200,58 +217,59 @@ export async function runCommentAutomation(input: CommentAutomationInput): Promi
     commenterName ||
     'صديقنا';
 
-  const match = await findMatchingKeywordRule({
-    merchantId,
-    platform,
-    accountRef,
-    externalPostId: post.external_post_id,
-    commentText,
-    postScopeOnly: true
-  });
-
   let publicText: string | null = null;
   let privateText: string | null = null;
   let sendPrivate = false;
   let matchedRuleId: string | null = null;
   let matchedKeyword: string | null = null;
 
-  if (match) {
-    matchedRuleId = match.rule.id;
-    matchedKeyword = match.matchedKeyword;
-    if (match.rule.public_reply_enabled) {
+  if (post.comment_reply_enabled) {
+    const match = await findMatchingKeywordRule({
+      merchantId,
+      platform,
+      accountRef,
+      externalPostId: post.external_post_id,
+      commentText,
+      postScopeOnly: true
+    });
+
+    if (match) {
+      matchedRuleId = match.rule.id;
+      matchedKeyword = match.matchedKeyword;
+      if (match.rule.public_reply_enabled) {
+        publicText = clampSocialText(
+          applyCommentTemplate(match.rule.public_reply_text, post.public_reply_text || DEFAULT_COMMENT_REPLY, {
+            comment: commentText,
+            name: displayName
+          }).replace(/\{\{keyword\}\}/gi, match.matchedKeyword)
+        );
+      }
+      sendPrivate = match.rule.private_reply_enabled === true;
+      if (sendPrivate) {
+        privateText = clampSocialText(
+          applyCommentTemplate(
+            match.rule.private_reply_text,
+            post.private_reply_text || DEFAULT_DM_AFTER_COMMENT,
+            { comment: commentText, name: displayName }
+          ).replace(/\{\{keyword\}\}/gi, match.matchedKeyword)
+        );
+      }
+    } else {
       publicText = clampSocialText(
-        applyCommentTemplate(match.rule.public_reply_text, post.public_reply_text || DEFAULT_COMMENT_REPLY, {
-          comment: commentText,
-          name: displayName
-        }).replace(/\{\{keyword\}\}/gi, match.matchedKeyword)
-      );
-    }
-    sendPrivate = match.rule.private_reply_enabled === true;
-    if (sendPrivate) {
-      privateText = clampSocialText(
-        applyCommentTemplate(
-          match.rule.private_reply_text,
-          post.private_reply_text || DEFAULT_DM_AFTER_COMMENT,
-          { comment: commentText, name: displayName }
-        ).replace(/\{\{keyword\}\}/gi, match.matchedKeyword)
-      );
-    }
-  } else {
-    // No keyword match → post-level public / private templates
-    publicText = clampSocialText(
-      applyCommentTemplate(post.public_reply_text, DEFAULT_COMMENT_REPLY, {
-        comment: commentText,
-        name: displayName
-      })
-    );
-    sendPrivate = post.send_dm_on_comment === true;
-    if (sendPrivate) {
-      privateText = clampSocialText(
-        applyCommentTemplate(post.private_reply_text, DEFAULT_DM_AFTER_COMMENT, {
+        applyCommentTemplate(post.public_reply_text, DEFAULT_COMMENT_REPLY, {
           comment: commentText,
           name: displayName
         })
       );
+      sendPrivate = post.send_dm_on_comment === true;
+      if (sendPrivate) {
+        privateText = clampSocialText(
+          applyCommentTemplate(post.private_reply_text, DEFAULT_DM_AFTER_COMMENT, {
+            comment: commentText,
+            name: displayName
+          })
+        );
+      }
     }
   }
 
@@ -265,6 +283,14 @@ export async function runCommentAutomation(input: CommentAutomationInput): Promi
       account.access_token
     );
   }
+
+  const reaction = await applyCommentReaction({
+    enabled: post.react_on_comment_enabled === true,
+    platform,
+    commentId,
+    accessToken: account.access_token,
+    sendReaction: input.sendReaction
+  });
 
   let conversationId: string | null = null;
   let productId: string | null = null;
@@ -312,7 +338,6 @@ export async function runCommentAutomation(input: CommentAutomationInput): Promi
       conversationId = created.rows[0].id;
     }
 
-    // Seed product context for later AI turns — do not generate the DM with AI
     state = await applyAcquisitionToConversation({
       conversationId: conversationId!,
       merchantId,
@@ -366,7 +391,18 @@ export async function runCommentAutomation(input: CommentAutomationInput): Promi
     privateReplied,
     conversationId,
     productId,
-    metadata: { per_post: true, template_dm: true, social_post_id: post.id }
+    metadata: {
+      per_post: true,
+      template_dm: true,
+      social_post_id: post.id,
+      reaction: {
+        enabled: post.react_on_comment_enabled === true,
+        attempted: reaction.attempted,
+        success: reaction.success,
+        type: reaction.reactionType,
+        skipped: reaction.skippedReason || null
+      }
+    }
   });
 
   logger.info('Per-post comment automation finished', {
@@ -375,6 +411,8 @@ export async function runCommentAutomation(input: CommentAutomationInput): Promi
     externalPostId: post.external_post_id,
     publicReplied,
     privateReplied,
+    reacted: reaction.success,
+    reactionType: reaction.reactionType,
     matchedKeyword,
     productId
   });

@@ -67,31 +67,26 @@ export async function getMerchantPlanLimits(merchantId: string): Promise<PlanLim
     let subscriptionStatus = merchant.subscription_status || 'active';
     const trialEndsAt = merchant.trial_ends_at;
 
-    // Keep bot/webhook paths in sync with dashboard: expire paid period when due
-    if (
-      subscriptionStatus === 'active' &&
-      subscriptionPlan !== 'trial' &&
-      merchant.subscription_ends_at
-    ) {
+    // Keep bot/webhook paths in sync: expire paid period or ended trial when due
+    if (subscriptionStatus === 'active') {
       const enforced = await enforceMerchantSubscriptionExpiry(merchantId, {
         subscription_plan: merchant.subscription_plan,
         subscription_status: merchant.subscription_status,
-        subscription_ends_at: merchant.subscription_ends_at
+        subscription_ends_at: merchant.subscription_ends_at,
+        trial_ends_at: merchant.trial_ends_at,
       });
       subscriptionStatus = enforced.subscriptionStatus;
     }
 
-    if (subscriptionPlan === 'trial' && trialEndsAt) {
-      const now = new Date();
-      const trialEndDate = new Date(trialEndsAt);
-
-      if (now > trialEndDate && subscriptionStatus === 'active') {
-        return { ...ZERO_PLAN_LIMITS };
-      }
-    }
-
     if (subscriptionStatus === 'suspended' || subscriptionStatus === 'expired') {
       return { ...ZERO_PLAN_LIMITS };
+    }
+
+    if (subscriptionPlan === 'trial' && trialEndsAt) {
+      const trialEndDate = new Date(trialEndsAt);
+      if (!Number.isNaN(trialEndDate.getTime()) && Date.now() > trialEndDate.getTime()) {
+        return { ...ZERO_PLAN_LIMITS };
+      }
     }
 
     return await getPlanLimits(subscriptionPlan);

@@ -229,6 +229,7 @@ export async function activateAgencyAccount(input: {
            subscription_plan = 'agency',
            subscription_status = 'active',
            trial_ends_at = NULL,
+           subscription_starts_at = NULL,
            subscription_ends_at = NULL,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $1`,
@@ -926,6 +927,10 @@ export async function reviewSeatPayment(input: {
       `UPDATE merchants
        SET subscription_plan = $1,
            subscription_status = 'active',
+           subscription_starts_at = COALESCE(
+             (SELECT starts_at FROM agency_seats WHERE id = $2),
+             CURRENT_TIMESTAMP
+           ),
            subscription_ends_at = (
              SELECT ends_at FROM agency_seats WHERE id = $2
            ),

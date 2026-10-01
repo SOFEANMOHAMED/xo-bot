@@ -73,14 +73,21 @@ export const getCustomers = async (
     };
     const actualSortColumn = sortColumnMap[sortColumn as string] || 'MAX(o.created_at)';
 
+    // Match orders by email OR phone (bot orders often lack a real email).
+    // Alias aggregates so they do not collide with customers.total_orders / total_spent from c.*.
     let query = `
       SELECT 
         c.*,
-        COUNT(DISTINCT o.id)::int as total_orders,
-        COALESCE(SUM(o.total), 0)::decimal as total_spent,
-        MAX(o.created_at) as last_order_date
+        COUNT(DISTINCT o.id)::int as order_count,
+        COALESCE(SUM(o.total), 0)::decimal as order_spent_total,
+        MAX(o.created_at) as order_last_at
       FROM customers c
-      LEFT JOIN orders o ON o.customer_email = c.email AND o.merchant_id = c.merchant_id
+      LEFT JOIN orders o ON o.merchant_id = c.merchant_id
+        AND (
+          (c.email IS NOT NULL AND c.email <> '' AND o.customer_email = c.email)
+          OR
+          (c.phone IS NOT NULL AND c.phone <> '' AND o.customer_phone = c.phone)
+        )
       WHERE c.merchant_id = $1
     `;
     const queryParams: any[] = [merchantId];
@@ -164,9 +171,9 @@ export const getCustomers = async (
           country: row.country,
           customerType: row.customer_type,
           status: row.status,
-          totalOrders: parseInt(String(row.total_orders || '0')) || 0,
-          totalSpent: parseFloat(String(row.total_spent || '0')) || 0,
-          lastOrderDate: row.last_order_date || null,
+          totalOrders: parseInt(String(row.order_count || '0')) || 0,
+          totalSpent: parseFloat(String(row.order_spent_total || '0')) || 0,
+          lastOrderDate: row.order_last_at || null,
           lastInteractionDate: row.last_interaction_date,
           notes: row.notes,
           tags: row.tags || [],

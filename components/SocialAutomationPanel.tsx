@@ -16,6 +16,7 @@ import {
   COMMENT_PUBLIC_REPLY_PRESETS,
   COMMENT_DM_AFTER_PRESETS
 } from '../constants/commentReplyPresets';
+import EmojiPicker from './EmojiPicker';
 
 type Platform = 'facebook' | 'instagram';
 
@@ -31,13 +32,22 @@ const emptyPostSettings = {
   commentReplyEnabled: false,
   publicReplyText: '',
   sendDmOnComment: false,
-  privateReplyText: ''
+  privateReplyText: '',
+  reactOnCommentEnabled: false
 };
 
 const postLabel = (p: any) => {
   const caption = String(p?.caption || '').trim();
   if (caption) return caption;
   return p?.external_post_id ? `منشور ${p.external_post_id}` : 'منشور بدون نص';
+};
+
+const postAutomationStatus = (p: any) => {
+  const parts = [
+    p?.comment_reply_enabled ? 'رد' : null,
+    p?.react_on_comment_enabled ? 'لايك' : null
+  ].filter(Boolean);
+  return parts.length ? parts.join(' + ') : 'غير مفعّل';
 };
 
 const PostThumbnail: React.FC<{ url?: string | null; size?: 'sm' | 'md' }> = ({
@@ -128,7 +138,8 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
               commentReplyEnabled: !!selected.comment_reply_enabled,
               publicReplyText: selected.public_reply_text || '',
               sendDmOnComment: !!selected.send_dm_on_comment,
-              privateReplyText: selected.private_reply_text || ''
+              privateReplyText: selected.private_reply_text || '',
+              reactOnCommentEnabled: !!selected.react_on_comment_enabled
             });
           }
         }
@@ -157,7 +168,7 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
     [platform]
   );
 
-  // Reload when platform changes only — clear selection for the new platform
+  // Reset selection only when platform changes — not when loadData identity changes
   useEffect(() => {
     setSelectedPostId('');
     setPostSettings(emptyPostSettings);
@@ -165,7 +176,10 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
     setRules([]);
     setPostPickerOpen(false);
     setPostSearch('');
-    loadData();
+  }, [platform]);
+
+  useEffect(() => {
+    void loadData();
   }, [platform, loadData]);
 
   useEffect(() => {
@@ -250,7 +264,8 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
       commentReplyEnabled: !!p.comment_reply_enabled,
       publicReplyText: p.public_reply_text || '',
       sendDmOnComment: !!p.send_dm_on_comment,
-      privateReplyText: p.private_reply_text || ''
+      privateReplyText: p.private_reply_text || '',
+      reactOnCommentEnabled: !!p.react_on_comment_enabled
     });
     resetRuleForm();
     loadRulesForPost(p.id);
@@ -281,16 +296,31 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
     }
     setSaving(true);
     try {
-      await apiService.updateSocialPostCommentSettings({
+      const saved = await apiService.updateSocialPostCommentSettings({
         socialPostId: selectedPostId,
         commentReplyEnabled: postSettings.commentReplyEnabled,
         publicReplyText: postSettings.publicReplyText,
         sendDmOnComment: postSettings.sendDmOnComment,
-        privateReplyText: postSettings.privateReplyText
+        privateReplyText: postSettings.privateReplyText,
+        reactOnCommentEnabled: postSettings.reactOnCommentEnabled
       });
       await apiService.linkSocialPostProduct(selectedPostId, linkProductId || null);
       notify('تم حفظ إعدادات المنشور', 'success');
       await loadData({ preserveSelection: true });
+      // Apply RETURNING row after reload so a stale list cannot clear the like toggle
+      const post = (saved as { post?: any })?.post;
+      if (post?.id) {
+        setPostSettings({
+          commentReplyEnabled: !!post.comment_reply_enabled,
+          publicReplyText: post.public_reply_text || '',
+          sendDmOnComment: !!post.send_dm_on_comment,
+          privateReplyText: post.private_reply_text || '',
+          reactOnCommentEnabled: !!post.react_on_comment_enabled
+        });
+        setPosts((prev) =>
+          prev.map((p) => (p.id === post.id ? { ...p, ...post } : p))
+        );
+      }
     } catch (e: any) {
       notify(e?.message || 'فشل الحفظ', 'error');
     } finally {
@@ -462,12 +492,13 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
                       <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                         <span
                           className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                            selectedPost.comment_reply_enabled
+                            selectedPost.comment_reply_enabled ||
+                            selectedPost.react_on_comment_enabled
                               ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
                               : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
                           }`}
                         >
-                          {selectedPost.comment_reply_enabled ? 'مفعّل للرد' : 'غير مفعّل'}
+                          {postAutomationStatus(selectedPost)}
                         </span>
                         {selectedPost.linked_product_name && (
                           <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
@@ -568,7 +599,7 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
                                   {postLabel(p)}
                                 </p>
                                 <p className="text-[10px] text-gray-400 mt-1">
-                                  {p.comment_reply_enabled ? 'مفعّل للرد' : 'غير مفعّل'}
+                                  {postAutomationStatus(p)}
                                   {p.linked_product_name ? ` · ${p.linked_product_name}` : ''}
                                 </p>
                               </div>
@@ -622,7 +653,7 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
                         {p.caption || p.external_post_id}
                       </p>
                       <p className="text-[10px] text-gray-400 mt-0.5">
-                        {p.comment_reply_enabled ? 'مفعّل للرد' : 'غير مفعّل'}
+                        {postAutomationStatus(p)}
                         {p.linked_product_name ? ` · ${p.linked_product_name}` : ''}
                       </p>
                     </div>
@@ -656,6 +687,34 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
                   />
                 </label>
 
+                {platform === 'facebook' ? (
+                  <label className="flex items-center justify-between gap-3 p-3 border border-gray-100 dark:border-gray-700 rounded-xl">
+                    <div>
+                      <span className="text-sm font-bold text-gray-800 dark:text-gray-200 block">
+                        لايك على التعليق
+                      </span>
+                      <span className="text-[10px] text-gray-400">
+                        الصفحة تعمل إعجاب (👍) على التعليق تلقائياً
+                      </span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={postSettings.reactOnCommentEnabled}
+                      onChange={(e) =>
+                        setPostSettings((s) => ({
+                          ...s,
+                          reactOnCommentEnabled: e.target.checked
+                        }))
+                      }
+                      className="w-4 h-4 flex-shrink-0"
+                    />
+                  </label>
+                ) : (
+                  <p className="text-[11px] text-gray-400 px-1">
+                    لايك الصفحة على التعليقات متاح على فيسبوك فقط.
+                  </p>
+                )}
+
                 <div>
                   <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
                     نص الرد العام (يظهر تحت التعليق)
@@ -678,15 +737,28 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
                       </option>
                     ))}
                   </select>
-                  <textarea
-                    value={postSettings.publicReplyText}
-                    onChange={(e) =>
-                      setPostSettings((s) => ({ ...s, publicReplyText: e.target.value }))
-                    }
-                    rows={3}
-                    className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 p-3"
-                    placeholder="اكتب الرد أو اختر قالباً…"
-                  />
+                  <div className="relative">
+                    <textarea
+                      value={postSettings.publicReplyText}
+                      onChange={(e) =>
+                        setPostSettings((s) => ({ ...s, publicReplyText: e.target.value }))
+                      }
+                      rows={3}
+                      className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 p-3 pl-10"
+                      placeholder="اكتب الرد أو اختر قالباً…"
+                    />
+                    <div className="absolute bottom-1 left-1">
+                      <EmojiPicker
+                        align="left"
+                        onEmojiSelect={(emoji) =>
+                          setPostSettings((s) => ({
+                            ...s,
+                            publicReplyText: s.publicReplyText + emoji,
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 <label className="flex items-center justify-between p-3 border border-gray-100 dark:border-gray-700 rounded-xl">
@@ -728,15 +800,28 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
                       </option>
                     ))}
                   </select>
-                  <textarea
-                    value={postSettings.privateReplyText}
-                    onChange={(e) =>
-                      setPostSettings((s) => ({ ...s, privateReplyText: e.target.value }))
-                    }
-                    rows={3}
-                    className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 p-3"
-                    placeholder="رسالة الترحيب في الخاص…"
-                  />
+                  <div className="relative">
+                    <textarea
+                      value={postSettings.privateReplyText}
+                      onChange={(e) =>
+                        setPostSettings((s) => ({ ...s, privateReplyText: e.target.value }))
+                      }
+                      rows={3}
+                      className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 p-3 pl-10"
+                      placeholder="رسالة الترحيب في الخاص…"
+                    />
+                    <div className="absolute bottom-1 left-1">
+                      <EmojiPicker
+                        align="left"
+                        onEmojiSelect={(emoji) =>
+                          setPostSettings((s) => ({
+                            ...s,
+                            privateReplyText: s.privateReplyText + emoji,
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 <div className="flex gap-2 items-end">
@@ -776,13 +861,26 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
                     placeholder="كلمات مفصولة بفاصلة (سعر، طلب، متوفر)"
                     className="w-full rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
                   />
-                  <textarea
-                    value={ruleForm.publicReplyText}
-                    onChange={(e) => setRuleForm((f) => ({ ...f, publicReplyText: e.target.value }))}
-                    placeholder="رد عام عند تطابق الكلمة (اختياري — وإلا يُستخدم رد المنشور)"
-                    rows={2}
-                    className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 p-3"
-                  />
+                  <div className="relative">
+                    <textarea
+                      value={ruleForm.publicReplyText}
+                      onChange={(e) => setRuleForm((f) => ({ ...f, publicReplyText: e.target.value }))}
+                      placeholder="رد عام عند تطابق الكلمة (اختياري — وإلا يُستخدم رد المنشور)"
+                      rows={2}
+                      className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 p-3 pl-10"
+                    />
+                    <div className="absolute bottom-1 left-1">
+                      <EmojiPicker
+                        align="left"
+                        onEmojiSelect={(emoji) =>
+                          setRuleForm((f) => ({
+                            ...f,
+                            publicReplyText: f.publicReplyText + emoji,
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
                   <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
                     <input
                       type="checkbox"
@@ -793,13 +891,26 @@ const SocialAutomationPanel: React.FC<SocialAutomationPanelProps> = ({
                     />
                     إرسال رسالة خاصة عند تطابق هذه القاعدة
                   </label>
-                  <textarea
-                    value={ruleForm.privateReplyText}
-                    onChange={(e) => setRuleForm((f) => ({ ...f, privateReplyText: e.target.value }))}
-                    placeholder="نص الرسالة الخاصة لهذه القاعدة (اختياري)"
-                    rows={2}
-                    className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 p-3"
-                  />
+                  <div className="relative">
+                    <textarea
+                      value={ruleForm.privateReplyText}
+                      onChange={(e) => setRuleForm((f) => ({ ...f, privateReplyText: e.target.value }))}
+                      placeholder="نص الرسالة الخاصة لهذه القاعدة (اختياري)"
+                      rows={2}
+                      className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 p-3 pl-10"
+                    />
+                    <div className="absolute bottom-1 left-1">
+                      <EmojiPicker
+                        align="left"
+                        onEmojiSelect={(emoji) =>
+                          setRuleForm((f) => ({
+                            ...f,
+                            privateReplyText: f.privateReplyText + emoji,
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
                   <div className="flex gap-2">
                     <button
                       type="button"

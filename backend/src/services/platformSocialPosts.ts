@@ -36,6 +36,8 @@ export async function ensurePlatformCommentTables(): Promise<void> {
       public_reply_text TEXT,
       send_dm_on_comment BOOLEAN NOT NULL DEFAULT false,
       private_reply_text TEXT,
+      react_on_comment_enabled BOOLEAN NOT NULL DEFAULT false,
+      comment_reaction_type VARCHAR(20) NOT NULL DEFAULT 'LIKE',
       metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -109,6 +111,15 @@ export async function ensurePlatformCommentTables(): Promise<void> {
       ON platform_comment_actions(page_id)
   `);
 
+  await pool.query(`
+    ALTER TABLE platform_social_posts
+      ADD COLUMN IF NOT EXISTS react_on_comment_enabled BOOLEAN NOT NULL DEFAULT false
+  `);
+  await pool.query(`
+    ALTER TABLE platform_social_posts
+      ADD COLUMN IF NOT EXISTS comment_reaction_type VARCHAR(20) NOT NULL DEFAULT 'LIKE'
+  `);
+
   commentTablesEnsured = true;
 }
 
@@ -168,8 +179,12 @@ async function fetchGraphPages(url: string): Promise<{ data: any[]; next?: strin
   return { data: json.data || [], next: json.paging?.next };
 }
 
+export type OfficialSocialPlatform = 'facebook' | 'instagram';
+
 export async function syncOfficialFacebookPagePosts(limit = 40): Promise<{
   synced: number;
+  platform: 'facebook';
+  accountRef: string;
   pageId: string;
   pageName: string | null;
 }> {
@@ -214,10 +229,118 @@ export async function syncOfficialFacebookPagePosts(limit = 40): Promise<{
     synced,
   });
 
-  return { synced, pageId: page.page_id, pageName: page.page_name };
+  return {
+    synced,
+    platform: 'facebook',
+    accountRef: page.page_id,
+    pageId: page.page_id,
+    pageName: page.page_name,
+  };
+}
+
+export async function syncOfficialInstagramMedia(limit = 40): Promise<{
+  synced: number;
+  platform: 'instagram';
+  accountRef: string;
+  pageId: string;
+  pageName: string | null;
+  igUsername: string | null;
+}> {
+  await ensurePlatformCommentTables();
+  const page = await getLinkedPlatformFacebookPage();
+  if (!page) {
+    throw new Error('لا توجد صفحة XO Bot مربوطة');
+  }
+  if (!page.ig_user_id) {
+    throw new Error(
+      'لا يوجد حساب إنستغرام مربوط بصفحة XO Bot الرسمية — اربط الصفحة من الإعدادات العامة'
+    );
+  }
+
+  let synced = 0;
+  let url =
+    `https://graph.facebook.com/${GRAPH_VERSION}/${encodeURIComponent(page.ig_user_id)}/media` +
+    `?fields=id,caption,media_type,media_url,thumbnail_url,permalink,timestamp` +
+    `&limit=${Math.min(limit, 50)}&access_token=${encodeURIComponent(page.access_token)}`;
+
+  while (url && synced < limit) {
+    const batch = await fetchGraphPages(url);
+    for (const item of batch.data) {
+      if (!item?.id) continue;
+      await upsertPlatformPost({
+        pageId: page.page_id,
+        platform: 'instagram',
+        accountRef: page.ig_user_id,
+        externalPostId: String(item.id),
+        caption: item.caption || null,
+        permalink: item.permalink || null,
+        mediaType: item.media_type || null,
+        thumbnailUrl: item.thumbnail_url || item.media_url || null,
+        postedAt: item.timestamp || null,
+        metadata: { raw_id: item.id },
+      });
+      synced += 1;
+      if (synced >= limit) break;
+    }
+    url = synced < limit && batch.next ? batch.next : '';
+  }
+
+  logger.info('Official page Instagram media synced', {
+    pageId: page.page_id,
+    igUserId: page.ig_user_id,
+    synced,
+  });
+
+  return {
+    synced,
+    platform: 'instagram',
+    accountRef: page.ig_user_id,
+    pageId: page.page_id,
+    pageName: page.page_name,
+    igUsername: page.ig_username,
+  };
+}
+
+export async function syncOfficialPagePosts(
+  platform?: OfficialSocialPlatform
+): Promise<
+  Array<{
+    synced: number;
+    platform: OfficialSocialPlatform;
+    accountRef: string;
+    pageId: string;
+    pageName: string | null;
+    igUsername?: string | null;
+  }>
+> {
+  const results: Array<{
+    synced: number;
+    platform: OfficialSocialPlatform;
+    accountRef: string;
+    pageId: string;
+    pageName: string | null;
+    igUsername?: string | null;
+  }> = [];
+
+  if (!platform || platform === 'facebook') {
+    results.push(await syncOfficialFacebookPagePosts());
+  }
+  if (!platform || platform === 'instagram') {
+    const page = await getLinkedPlatformFacebookPage();
+    if (page?.ig_user_id) {
+      results.push(await syncOfficialInstagramMedia());
+    } else if (platform === 'instagram') {
+      throw new Error(
+        'لا يوجد حساب إنستغرام مربوط بصفحة XO Bot الرسمية — اربط الصفحة من الإعدادات العامة'
+      );
+    }
+  }
+
+  return results;
 }
 
 export async function listOfficialPageSocialPosts(opts: {
+  platform?: OfficialSocialPlatform;
   limit?: number;
   offset?: number;
 } = {}) {
@@ -227,17 +350,20 @@ export async function listOfficialPageSocialPosts(opts: {
 
   const limit = Math.min(opts.limit ?? 50, 100);
   const offset = opts.offset ?? 0;
+  const platform = opts.platform || 'facebook';
 
   const result = await pool.query(
     `SELECT id, page_id, platform, account_ref, external_post_id, caption, permalink,
             media_type, thumbnail_url, posted_at, synced_at,
             comment_reply_enabled, public_reply_text, send_dm_on_comment, private_reply_text,
+            COALESCE(react_on_comment_enabled, false) AS react_on_comment_enabled,
+            COALESCE(comment_reaction_type, 'LIKE') AS comment_reaction_type,
             created_at, updated_at
      FROM platform_social_posts
-     WHERE page_id = $1 AND platform = 'facebook'
+     WHERE page_id = $1 AND platform = $2
      ORDER BY posted_at DESC NULLS LAST, synced_at DESC
-     LIMIT $2 OFFSET $3`,
-    [page.page_id, limit, offset]
+     LIMIT $3 OFFSET $4`,
+    [page.page_id, platform, limit, offset]
   );
   return result.rows;
 }

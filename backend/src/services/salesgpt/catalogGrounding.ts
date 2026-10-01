@@ -245,6 +245,8 @@ export type CatalogReplyGroundingInput = {
     price?: number | null;
   }>;
   customerMessage?: string;
+  /** Colors already collected in conversation (must be catalog-valid when passed). */
+  conversationColors?: Array<string | null | undefined>;
   catalogOverview?: ProductOverviewRow[];
   storeCurrencyLabels?: string[];
   cartLines?: Array<{ quantity: number; unitPrice: number }>;
@@ -256,6 +258,47 @@ export type CatalogReplyGroundingResult = {
   reasons: string[];
 };
 
+function buildAllowedColorSource(input: CatalogReplyGroundingInput): string {
+  return [
+    ...input.products.flatMap((product) => product.colors || []),
+    input.customerMessage || '',
+    ...(input.conversationColors || []).filter(
+      (color): color is string => Boolean(color && String(color).trim())
+    ),
+  ].join(' ');
+}
+
+/**
+ * Strip color words that are not grounded in catalog / customer / conversation.
+ * Preserves the rest of the reply (price, currency, tone) instead of full replace.
+ */
+export function sanitizeUngroundedColorClaims(
+  responseText: string,
+  input: Omit<CatalogReplyGroundingInput, 'responseText'>
+): { text: string; stripped: string[] } {
+  const allowed = buildAllowedColorSource({ ...input, responseText });
+  const stripped: string[] = [];
+  let text = responseText || '';
+
+  for (const color of COLOR_TERMS) {
+    if (!sourceContainsFact(text, color)) continue;
+    if (sourceContainsFact(allowed, color)) continue;
+    stripped.push(color);
+    const escaped = color.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Optional Arabic definite article; keep surrounding punctuation tidy.
+    const re = new RegExp(`(^|[\\s،,])ال?${escaped}(?=[\\s،,.!?؟]|$)`, 'gi');
+    text = text.replace(re, '$1');
+  }
+
+  text = text
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\s+([.،,!?؟])/g, '$1')
+    .replace(/\s+\n/g, '\n')
+    .trim();
+
+  return { text, stripped };
+}
+
 /**
  * Deterministic checks for harmful catalog claims (color/stock).
  * Used to rewrite replies that deny a real color or offer brand names as colors.
@@ -264,13 +307,9 @@ export function validateCatalogReplyGrounding(
   input: CatalogReplyGroundingInput
 ): CatalogReplyGroundingResult {
   const response = input.responseText || '';
-  const customerMessage = input.customerMessage || '';
   const reasons = new Set<string>();
 
-  const allowedColorSource = [
-    ...input.products.flatMap((product) => product.colors || []),
-    customerMessage,
-  ].join(' ');
+  const allowedColorSource = buildAllowedColorSource(input);
   for (const color of COLOR_TERMS) {
     if (
       sourceContainsFact(response, color) &&

@@ -238,13 +238,17 @@ export function matchColorOption(
  * Format color options for bot / prompts.
  * Each array entry is shown as one option (compounds stay together).
  */
+/**
+ * Numbered options, one per line.
+ * WHY vertical (not «1) a — 2) b»): mixed LTR digits + Arabic RTL bidi
+ * reorders inline lists into unreadable «s — 2) m — 3) l (1».
+ */
 export function formatColorOptionsForDisplay(
   colors: string[] | null | undefined,
-  language: 'arabic' | 'english' = 'arabic'
+  _language: 'arabic' | 'english' = 'arabic'
 ): string {
   if (!colors?.length) return '';
-  const sep = language === 'arabic' ? ' — ' : ' — ';
-  return colors.map((c, i) => `${i + 1}) ${c}`).join(sep);
+  return colors.map((c, i) => `${i + 1}) ${c}`).join('\n');
 }
 
 /**

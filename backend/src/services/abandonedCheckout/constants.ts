@@ -1,6 +1,7 @@
-/** Abandoned checkout recovery — shared constants */
+/** Conversation reminders — shared constants (checkout + product interest) */
 
 export const ABANDONED_CHECKOUT_SOURCE = 'abandoned_reminder' as const;
+export const PRODUCT_INTEREST_SOURCE = 'product_interest_reminder' as const;
 
 /** Platforms that support proactive bot follow-up */
 export const ABANDONED_CHECKOUT_PLATFORMS = [
@@ -15,14 +16,20 @@ export type AbandonedCheckoutPlatform = (typeof ABANDONED_CHECKOUT_PLATFORMS)[nu
 /** SalesGPT stages considered mid-checkout / close */
 export const CHECKOUT_STAGE_IDS = ['6', '7', '8'] as const;
 
-/** Default silence before first reminder (minutes) */
+/** Default silence before first checkout reminder (minutes) */
 export const DEFAULT_REMINDER_DELAY_MINUTES = 45;
+
+/** Default silence before product-interest reminder (minutes) */
+export const DEFAULT_PRODUCT_INTEREST_DELAY_MINUTES = 60;
 
 /** Keep a 1h safety margin inside Meta's 24h messaging window */
 export const MESSAGING_WINDOW_HOURS = 23;
 
 /** MVP: one gentle nudge per checkout attempt */
 export const MAX_REMINDERS_PER_CHECKOUT = 1;
+
+/** One reminder per product (per conversation) */
+export const MAX_REMINDERS_PER_PRODUCT = 1;
 
 /** Job poll interval */
 export const SCHEDULER_INTERVAL_MINUTES = 5;
@@ -33,3 +40,9 @@ export const MAX_REMINDERS_PER_CYCLE = 50;
 export const DEFAULT_REMINDER_TEMPLATE_AR =
   'أهلاً {name}، لاحظت أن طلبك{product_clause} لم يُؤكَّد بعد.\n' +
   'هل ما زلت راغباً في إتمامه؟ اكتب «نعم» للتأكيد، أو أخبرني إن احتجت أي تعديل.';
+
+export const DEFAULT_PRODUCT_INTEREST_TEMPLATE_AR =
+  'أهلاً {name}، رجعت لك بخصوص «{product}».\n' +
+  '{benefits_block}' +
+  '{price_line}' +
+  'هل ما زلت مهتم؟ أقدر أساعدك بأي تفصيلة أو نكمّل الطلب متى ما حابب.';

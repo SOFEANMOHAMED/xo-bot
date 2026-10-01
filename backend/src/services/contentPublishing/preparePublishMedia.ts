@@ -31,9 +31,26 @@ export function encodePublicMediaUrl(rawUrl: string): string {
 }
 
 function resolveLocalUploadPath(rawUrl: string): string | null {
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return null;
+
+  // Relative upload paths from DB / bot helpers
+  if (trimmed.startsWith('/uploads/') || trimmed.startsWith('uploads/')) {
+    const relative = trimmed.startsWith('/') ? trimmed.slice(1) : trimmed;
+    const underUploads = relative.startsWith('uploads/');
+    if (!underUploads) return null;
+    const root = path.resolve(UPLOAD_DIR);
+    const resolved = path.resolve(process.cwd(), relative);
+    if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+      return null;
+    }
+    if (!fs.existsSync(resolved)) return null;
+    return resolved;
+  }
+
   let parsed: URL;
   try {
-    parsed = new URL(rawUrl);
+    parsed = new URL(trimmed);
   } catch {
     return null;
   }

@@ -18,7 +18,11 @@ function looksLikeColorTemplate(text: string): boolean {
 }
 
 function looksLikeIdentityTemplate(text: string): boolean {
-  return /تمام، شو (اسمك الكامل|رقم هاتفك|عنوان التوصيل)\؟/.test(text);
+  return (
+    /تمام، شو (اسمك الكامل|رقم هاتفك|عنوان التوصيل)\؟/.test(text) ||
+    /لإكمال الطلب أحتاج/.test(text) ||
+    /to complete the order I (need|still need)/i.test(text)
+  );
 }
 
 function looksLikeConfirmSummary(text: string): boolean {

@@ -5,6 +5,7 @@ import {
   COMMENT_PUBLIC_REPLY_PRESETS,
   COMMENT_DM_AFTER_PRESETS
 } from '../constants/commentReplyPresets';
+import EmojiPicker from './EmojiPicker';
 
 interface CommentManagementSectionProps {
   facebookConnected: boolean;
@@ -283,14 +284,27 @@ const CommentManagementSection: React.FC<CommentManagementSectionProps> = ({
                     </option>
                   ))}
                 </select>
-                <textarea
-                  value={fb.commentReplyTemplate}
-                  onChange={(e) => setFb((s) => ({ ...s, commentReplyTemplate: e.target.value }))}
-                  rows={3}
-                  maxLength={2000}
-                  className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 p-3"
-                  placeholder="اكتب ردك أو اختر قالباً أعلاه…"
-                />
+                <div className="relative">
+                  <textarea
+                    value={fb.commentReplyTemplate}
+                    onChange={(e) => setFb((s) => ({ ...s, commentReplyTemplate: e.target.value }))}
+                    rows={3}
+                    maxLength={2000}
+                    className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 p-3 pl-10"
+                    placeholder="اكتب ردك أو اختر قالباً أعلاه…"
+                  />
+                  <div className="absolute bottom-1 left-1">
+                    <EmojiPicker
+                      align="left"
+                      onEmojiSelect={(emoji) =>
+                        setFb((s) => ({
+                          ...s,
+                          commentReplyTemplate: s.commentReplyTemplate + emoji,
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -314,14 +328,27 @@ const CommentManagementSection: React.FC<CommentManagementSectionProps> = ({
                     </option>
                   ))}
                 </select>
-                <textarea
-                  value={fb.commentDmTemplate}
-                  onChange={(e) => setFb((s) => ({ ...s, commentDmTemplate: e.target.value }))}
-                  rows={3}
-                  maxLength={2000}
-                  className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 p-3"
-                  placeholder="رسالة الترحيب في الخاص…"
-                />
+                <div className="relative">
+                  <textarea
+                    value={fb.commentDmTemplate}
+                    onChange={(e) => setFb((s) => ({ ...s, commentDmTemplate: e.target.value }))}
+                    rows={3}
+                    maxLength={2000}
+                    className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 p-3 pl-10"
+                    placeholder="رسالة الترحيب في الخاص…"
+                  />
+                  <div className="absolute bottom-1 left-1">
+                    <EmojiPicker
+                      align="left"
+                      onEmojiSelect={(emoji) =>
+                        setFb((s) => ({
+                          ...s,
+                          commentDmTemplate: s.commentDmTemplate + emoji,
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
               </div>
               <button
                 type="button"
@@ -391,14 +418,27 @@ const CommentManagementSection: React.FC<CommentManagementSectionProps> = ({
                     </option>
                   ))}
                 </select>
-                <textarea
-                  value={ig.commentReplyTemplate}
-                  onChange={(e) => setIg((s) => ({ ...s, commentReplyTemplate: e.target.value }))}
-                  rows={3}
-                  maxLength={2000}
-                  className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 p-3"
-                  placeholder="اكتب ردك أو اختر قالباً…"
-                />
+                <div className="relative">
+                  <textarea
+                    value={ig.commentReplyTemplate}
+                    onChange={(e) => setIg((s) => ({ ...s, commentReplyTemplate: e.target.value }))}
+                    rows={3}
+                    maxLength={2000}
+                    className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 p-3 pl-10"
+                    placeholder="اكتب ردك أو اختر قالباً…"
+                  />
+                  <div className="absolute bottom-1 left-1">
+                    <EmojiPicker
+                      align="left"
+                      onEmojiSelect={(emoji) =>
+                        setIg((s) => ({
+                          ...s,
+                          commentReplyTemplate: s.commentReplyTemplate + emoji,
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -422,14 +462,27 @@ const CommentManagementSection: React.FC<CommentManagementSectionProps> = ({
                     </option>
                   ))}
                 </select>
-                <textarea
-                  value={ig.commentDmTemplate}
-                  onChange={(e) => setIg((s) => ({ ...s, commentDmTemplate: e.target.value }))}
-                  rows={3}
-                  maxLength={2000}
-                  className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 p-3"
-                  placeholder="رسالة الترحيب في الخاص…"
-                />
+                <div className="relative">
+                  <textarea
+                    value={ig.commentDmTemplate}
+                    onChange={(e) => setIg((s) => ({ ...s, commentDmTemplate: e.target.value }))}
+                    rows={3}
+                    maxLength={2000}
+                    className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 p-3 pl-10"
+                    placeholder="رسالة الترحيب في الخاص…"
+                  />
+                  <div className="absolute bottom-1 left-1">
+                    <EmojiPicker
+                      align="left"
+                      onEmojiSelect={(emoji) =>
+                        setIg((s) => ({
+                          ...s,
+                          commentDmTemplate: s.commentDmTemplate + emoji,
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
               </div>
               <button
                 type="button"

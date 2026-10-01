@@ -10,6 +10,7 @@ import {
   sendFacebookTyping,
   sendFacebookImage,
 } from '../channels/facebook.adapter.js';
+import { prepareMetaOutboundImageUrl } from '../channels/prepareMetaOutboundImage.js';
 import { sendTelegramMessage, sendTelegramPhoto } from '../channels/telegram.adapter.js';
 import { toPublicMediaUrl } from './messageMedia.js';
 import {
@@ -60,6 +61,7 @@ async function sendInstagramDm(
     `?access_token=${encodeURIComponent(accessToken)}`;
 
   if (message.imageUrl) {
+    const metaImageUrl = await prepareMetaOutboundImageUrl(message.imageUrl);
     const resp = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -68,7 +70,7 @@ async function sendInstagramDm(
         message: {
           attachment: {
             type: 'image',
-            payload: { url: message.imageUrl, is_reusable: false },
+            payload: { url: metaImageUrl, is_reusable: false },
           },
         },
         messaging_type: 'RESPONSE',
@@ -113,9 +115,10 @@ async function sendWhatsAppPayload(params: {
   };
 
   if (params.imageUrl) {
+    const metaImageUrl = await prepareMetaOutboundImageUrl(params.imageUrl);
     body.type = 'image';
     body.image = {
-      link: params.imageUrl,
+      link: metaImageUrl,
       ...(params.text?.trim() ? { caption: params.text.trim().slice(0, 1024) } : {}),
     };
   } else {

@@ -34,6 +34,8 @@ export const PATHS = {
   RESET_PASSWORD: '/reset-password',
   COMPLETE_PROFILE: '/complete-profile',
   ABOUT: '/about',
+  /** Unique marketing tracking links: /go/:code */
+  GO: '/go',
   WHATSAPP_BOT: '/whatsapp-bot',
   BECOME_AGENCY: '/become-agency',
   /** Legacy OAuth callback alias → redirects to APP_INTEGRATIONS */
@@ -155,6 +157,7 @@ export const RESERVED_ROOT_SEGMENTS = new Set([
   'api',
   'webhooks',
   'about',
+  'go',
   'whatsapp-bot',
   'become-agency',
   'storify',

@@ -15,6 +15,10 @@ import {
 import { escalateConversationToHuman } from '../services/escalation.js';
 import { stripInternalControlMarkers } from '../response/sanitize-reply.js';
 import {
+  extractOrderData,
+  persistOrderIfPresent,
+} from '../services/channels/index.js';
+import {
   getOrCreateConversationHelper,
   appendMessage,
   patchConversationState
@@ -242,7 +246,30 @@ export const generateChatResponse = async (
           });
         }
 
-        responseText = stripInternalControlMarkers(responseText);
+        // Same order path as Telegram / Facebook / WhatsApp — no client-side create.
+        const { orderData, cleanText: responseWithoutOrderData } = extractOrderData(responseText);
+        let orderCreated = false;
+        if (orderData) {
+          orderCreated = await persistOrderIfPresent({
+            pool,
+            merchantId: p.merchantId,
+            conversationId: p.conversationId,
+            orderData,
+            settings: { store_currency: p.storeCurrency || 'USD' },
+            labels: {
+              defaultBaseNotes: 'Order created via bot playground',
+              customerTags: ['bot-order', 'playground'],
+              interactionTitle: 'Order Created via Bot Playground',
+              interactionDescription: (orderId: string) =>
+                `Order #${orderId} created via bot playground`,
+              interactionPlatform: 'playground',
+              logPrefix: 'playgroundChat',
+            },
+            updatedState,
+          });
+        }
+
+        responseText = stripInternalControlMarkers(responseWithoutOrderData || responseText);
 
         await appendMessage(
           p.conversationId,
@@ -274,7 +301,8 @@ export const generateChatResponse = async (
             next_action: result.next_action,
             source: 'playground',
             engine: 'channel-bot',
-            mergedParts: batch.parts.length
+            mergedParts: batch.parts.length,
+            orderCreated,
           },
           result.meta.intent,
           { recommended_products: productIds }
@@ -293,12 +321,14 @@ export const generateChatResponse = async (
           pipelineUsed: result.meta.pipelineUsed,
           intent: result.meta.intent,
           stage: conversationStageForDb(updatedState),
-          mergedParts: batch.parts.length
+          mergedParts: batch.parts.length,
+          orderCreated,
         });
 
         return {
           responseText,
-          conversationId: p.conversationId
+          conversationId: p.conversationId,
+          orderCreated,
         };
       }
     });
@@ -308,7 +338,8 @@ export const generateChatResponse = async (
       data: {
         response: ingress.result.responseText,
         conversationId: ingress.result.conversationId,
-        mergedParts: ingress.batchSize
+        mergedParts: ingress.batchSize,
+        orderCreated: Boolean(ingress.result.orderCreated),
       }
     });
   } catch (error: any) {

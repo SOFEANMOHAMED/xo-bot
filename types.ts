@@ -16,6 +16,8 @@ export interface Product {
   imageColors?: (string | null)[];
   source?: 'manual' | 'shopify' | 'storify' | 'excel';
   externalId?: string; // Shopify ID
+  /** Used to bust thumbnail cache after image edits */
+  updatedAt?: string | Date;
 }
 
 export interface Service {
@@ -93,6 +95,17 @@ export interface StorePolicies {
   enableAIInjection: boolean;
 }
 
+/** Merchant-managed FAQ: canned answer sent verbatim on semantic match. */
+export interface MerchantFaq {
+  id: string;
+  question: string;
+  answer: string;
+  priority: number;
+  isActive: boolean;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
+}
+
 export interface SalesScripts {
   welcomeScript?: string;
   objectionHandlingScript?: string;
@@ -124,6 +137,12 @@ export interface MerchantSettings {
   abandonedReminderDelayMinutes?: number;
   /** Optional template: {name}, {product}, {product_clause} */
   abandonedReminderMessage?: string;
+  /** Remind after an explicit product question + silence (benefits from catalog) */
+  productInterestReminderEnabled?: boolean;
+  /** Customer silence (minutes) before product-interest reminder — default 60 */
+  productInterestReminderDelayMinutes?: number;
+  /** Optional template: {name}, {product}, {benefits}, {benefits_block}, {price}, {price_line} */
+  productInterestReminderMessage?: string;
   /** Plan feature flags (from GET /settings) */
   planCapabilities?: PlanCapabilities;
 }
@@ -272,6 +291,10 @@ export interface AdminUser {
   status: 'active' | 'suspended' | 'expired';
   isTrial: boolean;
   trialEndsAt?: Date;
+  /** Paid package period start (null while on trial). */
+  subscriptionStartsAt?: Date;
+  /** Paid package period end. */
+  subscriptionEndsAt?: Date;
   llmUsage?: AdminUserLlmUsage;
 }
 

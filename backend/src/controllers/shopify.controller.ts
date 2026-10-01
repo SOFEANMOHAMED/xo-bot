@@ -9,6 +9,7 @@ import { invalidateProductKeywords } from '../services/cacheService.js';
 import { clearProductKeywordsCache } from '../services/tools/catalogTool.js';
 import { notifyMerchantNewOrderAsync } from '../services/notifyMerchantNewOrder.js';
 import { scheduleProductImageReindex } from '../catalog/visual-embeddings.js';
+import { verifyOAuthState } from '../utils/oauthState.js';
 
 // =============================================
 // TYPES & INTERFACES
@@ -966,11 +967,11 @@ export const shopifyCallback = async (
     }
 
     let stateData: { merchantId?: string; shopDomain?: string };
-    try {
-      stateData = JSON.parse(Buffer.from(state, 'base64').toString());
-    } catch (error) {
-      return next(createError('Invalid state parameter format', 400));
+    const verified = verifyOAuthState<{ merchantId?: string; shopDomain?: string }>(state);
+    if (!verified) {
+      return next(createError('Invalid or expired state parameter', 400));
     }
+    stateData = verified;
 
     const merchantId = stateData.merchantId;
     if (!merchantId) {

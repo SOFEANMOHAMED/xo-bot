@@ -41,7 +41,7 @@ const OrderManager: React.FC<OrderManagerProps> = ({ orders, storeCurrency, onUp
       const matchesSearch = debouncedSearchQuery === '' || 
         order.customerName.toLowerCase().includes(debouncedSearchQuery.toLowerCase()) ||
         order.externalId?.toLowerCase().includes(debouncedSearchQuery.toLowerCase()) ||
-        order.customerEmail.toLowerCase().includes(debouncedSearchQuery.toLowerCase());
+        (order.customerPhone || '').toLowerCase().includes(debouncedSearchQuery.toLowerCase());
       
       // Advanced filters
       const matchesDateFrom = !dateFrom || new Date(order.createdAt) >= new Date(dateFrom);
@@ -210,7 +210,7 @@ const OrderManager: React.FC<OrderManagerProps> = ({ orders, storeCurrency, onUp
           <div className="flex-1">
             <input
               type="text"
-              placeholder="ابحث عن طلب (اسم العميل، رقم الطلب، البريد الإلكتروني)..."
+              placeholder="ابحث عن طلب (اسم العميل، رقم الطلب، الهاتف)..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full px-4 py-2 border border-gray-200 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand bg-white dark:bg-gray-700 text-gray-800 dark:text-white"
@@ -325,9 +325,11 @@ const OrderManager: React.FC<OrderManagerProps> = ({ orders, storeCurrency, onUp
                           <div className="text-sm font-medium text-gray-900 dark:text-white">
                             {order.customerName}
                           </div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400">
-                            {order.customerEmail}
-                          </div>
+                          {order.customerPhone ? (
+                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                              {order.customerPhone}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     </td>
@@ -464,10 +466,6 @@ const OrderManager: React.FC<OrderManagerProps> = ({ orders, storeCurrency, onUp
                     <span className="text-xs text-gray-500 dark:text-gray-400">الاسم:</span>
                     <p className="text-sm font-medium text-gray-900 dark:text-white">{selectedOrder.customerName}</p>
                   </div>
-                  <div>
-                    <span className="text-xs text-gray-500 dark:text-gray-400">البريد الإلكتروني:</span>
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">{selectedOrder.customerEmail || 'غير متوفر'}</p>
-                  </div>
                   {selectedOrder.customerPhone && (
                     <div>
                       <span className="text-xs text-gray-500 dark:text-gray-400">الهاتف:</span>
@@ -503,6 +501,9 @@ const OrderManager: React.FC<OrderManagerProps> = ({ orders, storeCurrency, onUp
                           المنتج
                         </th>
                         <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">
+                          المتغيرات
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">
                           الكمية
                         </th>
                         <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">
@@ -520,13 +521,17 @@ const OrderManager: React.FC<OrderManagerProps> = ({ orders, storeCurrency, onUp
                         <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                           <td className="px-4 py-3">
                             <p className="text-sm font-medium text-gray-900 dark:text-white">{item.productName}</p>
-                            {variant ? (
-                              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                {variant}
-                              </p>
-                            ) : null}
                             {item.productId && (
                               <p className="text-xs text-gray-500 dark:text-gray-400 font-mono mt-1">ID: {item.productId.substring(0, 8)}...</p>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            {variant ? (
+                              <span className="text-sm text-gray-900 dark:text-white">
+                                {variant}
+                              </span>
+                            ) : (
+                              <span className="text-sm text-gray-400 dark:text-gray-500">—</span>
                             )}
                           </td>
                           <td className="px-4 py-3">
@@ -550,7 +555,7 @@ const OrderManager: React.FC<OrderManagerProps> = ({ orders, storeCurrency, onUp
                     </tbody>
                     <tfoot className="bg-gray-50 dark:bg-gray-900/50">
                       <tr>
-                        <td colSpan={3} className="px-4 py-3 text-right text-sm font-semibold text-gray-700 dark:text-gray-300">
+                        <td colSpan={4} className="px-4 py-3 text-right text-sm font-semibold text-gray-700 dark:text-gray-300">
                           الإجمالي:
                         </td>
                         <td className="px-4 py-3 text-right">

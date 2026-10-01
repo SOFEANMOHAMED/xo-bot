@@ -70,6 +70,8 @@ export interface Entities {
   budget?: string;
   size?: string;
   color?: string;
+  /** Confirmed variant values by axis id (color/size mirrored on color/size). */
+  variants?: Record<string, string>;
   quantity?: number;
   wants_image?: boolean;
   wants_catalog?: boolean;
@@ -127,6 +129,20 @@ export interface AbandonedCheckoutState {
   last_error?: string;
 }
 
+/**
+ * Per-product interest reminder after an explicit product question + silence.
+ * Keys are product UUIDs; each product is reminded at most once.
+ */
+export interface ProductInterestReminderState {
+  /** productId → ISO timestamp of last explicit ask */
+  asked?: Record<string, string>;
+  /** productId → ISO timestamp when reminder was sent */
+  sent?: Record<string, string>;
+  /** productId → claim lock ISO */
+  claimed?: Record<string, string>;
+  last_error?: string;
+}
+
 /** Optional binding so outbound jobs use the correct page/account for multi-page merchants */
 export interface ChannelBinding {
   account_id?: string;
@@ -148,6 +164,8 @@ export interface CartItem {
   currency: string;
   color?: string;
   size?: string;
+  /** Complete axis map; color/size fields stay mirrored until V6. */
+  variants?: Record<string, string>;
   addedAt: string;
 }
 
@@ -181,10 +199,11 @@ export interface ConversationState {
    * Draft product lives in extracted_entities until locked into cart.items.
    */
   cart?: ConversationCart;
-  /** Pending color/size ask from a deterministic template (cleared after the next answer). */
-  pending_bot_question?: 'color' | 'size' | null;
+  /** Pending variant axis id from a deterministic ask template (color/size or later axes). */
+  pending_bot_question?: string | null;
   pending_bot_question_product_id?: string | null;
   abandoned_checkout?: AbandonedCheckoutState;
+  product_interest_reminder?: ProductInterestReminderState;
   channel_binding?: ChannelBinding;
 }
 
@@ -248,6 +267,15 @@ export interface Product {
   category?: string | null;
   sizes?: string[] | null;
   colors?: string[] | null;
+  /**
+   * Extra variant axes (not color/size). Columns win if JSONB repeats those ids.
+   * Shape: [{ id, labels: { ar, en }, values: string[] }]
+   */
+  variant_axes?: Array<{
+    id: string;
+    labels?: { ar?: string; en?: string };
+    values?: string[] | null;
+  }> | null;
   imageUrl?: string | null;
   /** Gallery URLs; first is primary (synced with imageUrl for catalog/bots) */
   images?: string[] | null;

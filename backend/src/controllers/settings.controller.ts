@@ -9,6 +9,7 @@ import {
   getCacheStats 
 } from '../services/cacheService.js';
 import { clearProductKeywordsCache } from '../services/tools/catalogTool.js';
+import { clearProductCache } from '../catalog/product-search.js';
 import { maskSecret, isMaskedSecret } from '../utils/logPrivacy.js';
 import { getMerchantPlanLimits, merchantHasSalesBot } from '../utils/planLimits.js';
 import { toPlanCapabilities } from '../utils/planDefinitions.js';
@@ -38,6 +39,9 @@ const settingsSchema = z.object({
   abandonedReminderEnabled: z.boolean().optional(),
   abandonedReminderDelayMinutes: z.number().int().min(5).max(720).optional(),
   abandonedReminderMessage: z.string().max(2000).optional().nullable(),
+  productInterestReminderEnabled: z.boolean().optional(),
+  productInterestReminderDelayMinutes: z.number().int().min(5).max(720).optional(),
+  productInterestReminderMessage: z.string().max(2000).optional().nullable(),
   salesScripts: z.object({
     welcomeScript: z.string().optional(),
     objectionHandlingScript: z.string().optional(),
@@ -63,6 +67,7 @@ const SELECT_SETTINGS_COLS_FULL = `store_name, telegram_bot_token, welcome_messa
   enable_cross_selling, enable_upselling, enable_urgency_messages,
   enable_social_proof, default_discount_percentage, sales_scripts,
   abandoned_reminder_enabled, abandoned_reminder_delay_minutes, abandoned_reminder_message,
+  product_interest_reminder_enabled, product_interest_reminder_delay_minutes, product_interest_reminder_message,
   created_at, updated_at`;
 const SELECT_SETTINGS_COLS_FULL_WITH_AI = `store_name, telegram_bot_token, welcome_message, system_prompt,
   auto_reply_comments, auto_reply_messenger, store_currency,
@@ -71,6 +76,7 @@ const SELECT_SETTINGS_COLS_FULL_WITH_AI = `store_name, telegram_bot_token, welco
   enable_cross_selling, enable_upselling, enable_urgency_messages,
   enable_social_proof, default_discount_percentage, sales_scripts,
   abandoned_reminder_enabled, abandoned_reminder_delay_minutes, abandoned_reminder_message,
+  product_interest_reminder_enabled, product_interest_reminder_delay_minutes, product_interest_reminder_message,
   created_at, updated_at`;
 
 async function fetchSettingsRow(merchantId: string, includeSalesCols: boolean): Promise<any> {
@@ -83,13 +89,17 @@ async function fetchSettingsRow(merchantId: string, includeSalesCols: boolean): 
     return r.rows[0] || null;
   } catch (err: any) {
     const msg = err?.message ? String(err.message) : '';
-    if (err?.code === '42703' || msg.includes('ai_mode') || msg.includes('abandoned_reminder')) {
-      // Prefer full cols without abandoned_* if those are missing; then drop ai_mode
-      if (includeSalesCols && msg.includes('abandoned_reminder')) {
+    if (err?.code === '42703' || msg.includes('ai_mode') || msg.includes('abandoned_reminder') || msg.includes('product_interest_reminder')) {
+      // Prefer full cols without reminder cols if those are missing; then drop ai_mode
+      if (includeSalesCols && (msg.includes('abandoned_reminder') || msg.includes('product_interest_reminder'))) {
         try {
           const colsNoAbandoned = SELECT_SETTINGS_COLS_FULL_WITH_AI
             .replace(
               /,\s*abandoned_reminder_enabled,\s*abandoned_reminder_delay_minutes,\s*abandoned_reminder_message/,
+              ''
+            )
+            .replace(
+              /,\s*product_interest_reminder_enabled,\s*product_interest_reminder_delay_minutes,\s*product_interest_reminder_message/,
               ''
             );
           const r = await pool.query(
@@ -101,6 +111,9 @@ async function fetchSettingsRow(merchantId: string, includeSalesCols: boolean): 
             row.abandoned_reminder_enabled = true;
             row.abandoned_reminder_delay_minutes = 45;
             row.abandoned_reminder_message = null;
+            row.product_interest_reminder_enabled = true;
+            row.product_interest_reminder_delay_minutes = 60;
+            row.product_interest_reminder_message = null;
           }
           return row;
         } catch (inner: any) {
@@ -109,10 +122,15 @@ async function fetchSettingsRow(merchantId: string, includeSalesCols: boolean): 
       }
       const colsFallback = includeSalesCols ? SELECT_SETTINGS_COLS_FULL : SELECT_SETTINGS_COLS;
       const r = await pool.query(
-        `SELECT ${colsFallback.replace(
-          /,\s*abandoned_reminder_enabled,\s*abandoned_reminder_delay_minutes,\s*abandoned_reminder_message/,
-          ''
-        )} FROM merchant_settings WHERE merchant_id = $1`,
+        `SELECT ${colsFallback
+          .replace(
+            /,\s*abandoned_reminder_enabled,\s*abandoned_reminder_delay_minutes,\s*abandoned_reminder_message/,
+            ''
+          )
+          .replace(
+            /,\s*product_interest_reminder_enabled,\s*product_interest_reminder_delay_minutes,\s*product_interest_reminder_message/,
+            ''
+          )} FROM merchant_settings WHERE merchant_id = $1`,
         [merchantId]
       );
       const row = r.rows[0] || null;
@@ -121,6 +139,10 @@ async function fetchSettingsRow(merchantId: string, includeSalesCols: boolean): 
         row.abandoned_reminder_enabled = row.abandoned_reminder_enabled ?? true;
         row.abandoned_reminder_delay_minutes = row.abandoned_reminder_delay_minutes ?? 45;
         row.abandoned_reminder_message = row.abandoned_reminder_message ?? null;
+        row.product_interest_reminder_enabled = row.product_interest_reminder_enabled ?? true;
+        row.product_interest_reminder_delay_minutes =
+          row.product_interest_reminder_delay_minutes ?? 60;
+        row.product_interest_reminder_message = row.product_interest_reminder_message ?? null;
       }
       return row;
     }
@@ -272,6 +294,25 @@ export const updateSettings = async (
         'UPDATE facebook_pages SET auto_reply_comments = $1 WHERE merchant_id = $2', 
         [validated.autoReplyComments, req.merchantId]
       );
+    }
+
+    // Keep existing products/variants in sync with the store currency
+    if (validated.storeCurrency !== undefined) {
+      await pool.query(
+        `UPDATE products
+         SET currency = $1, updated_at = CURRENT_TIMESTAMP
+         WHERE merchant_id = $2 AND currency IS DISTINCT FROM $1`,
+        [validated.storeCurrency, req.merchantId]
+      );
+      await pool.query(
+        `UPDATE product_variants
+         SET currency = $1, updated_at = CURRENT_TIMESTAMP
+         WHERE merchant_id = $2 AND currency IS DISTINCT FROM $1`,
+        [validated.storeCurrency, req.merchantId]
+      );
+      invalidateProductKeywords(req.merchantId!);
+      clearProductKeywordsCache(req.merchantId!);
+      clearProductCache(req.merchantId!);
     }
 
     // Invalidate merchant settings cache after update
@@ -479,6 +520,9 @@ function formatSettings(row: any) {
     abandonedReminderEnabled: row.abandoned_reminder_enabled ?? true,
     abandonedReminderDelayMinutes: row.abandoned_reminder_delay_minutes ?? 45,
     abandonedReminderMessage: row.abandoned_reminder_message || '',
+    productInterestReminderEnabled: row.product_interest_reminder_enabled ?? true,
+    productInterestReminderDelayMinutes: row.product_interest_reminder_delay_minutes ?? 60,
+    productInterestReminderMessage: row.product_interest_reminder_message || '',
     salesScripts: salesScripts
   };
 }

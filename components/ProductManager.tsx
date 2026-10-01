@@ -499,8 +499,13 @@ const ProductManager: React.FC<ProductManagerProps> = ({ products, onAddProduct,
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       <img 
-                        src={getProductImageDisplaySrc(product.id, product.imageUrl)} 
+                        src={getProductImageDisplaySrc(
+                          product.id,
+                          product.imageUrl,
+                          product.updatedAt
+                        )}
                         alt={`صورة ${product.name}`}
+                        key={`${product.id}-${product.updatedAt || product.imageUrl || ''}`}
                         loading="lazy"
                         decoding="async"
                         className="w-10 h-10 rounded-lg object-cover bg-gray-200 dark:bg-gray-600"
@@ -695,7 +700,11 @@ const ProductManager: React.FC<ProductManagerProps> = ({ products, onAddProduct,
                       ? img
                       : /^https?:\/\//i.test(img)
                         ? img
-                        : getProductImageDisplaySrc(newProduct.id, img);
+                        : getProductImageDisplaySrc(
+                            newProduct.id,
+                            img,
+                            newProduct.updatedAt
+                          );
                     const colorValue =
                       imageColors[index] && availableColors.includes(imageColors[index]!)
                         ? imageColors[index]!

@@ -32,7 +32,7 @@ type GroundingApi = {
   }) => GroundingResult;
 };
 type FocusState = ConversationState & {
-  pending_bot_question?: 'color' | 'size' | null;
+  pending_bot_question?: string | null;
   pending_bot_question_product_id?: string | null;
 };
 

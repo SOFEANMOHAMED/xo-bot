@@ -15,6 +15,7 @@ import productRoutes from './routes/product.routes.js';
 import orderRoutes from './routes/order.routes.js';
 import serviceRoutes from './routes/service.routes.js';
 import settingsRoutes from './routes/settings.routes.js';
+import faqRoutes from './routes/faq.routes.js';
 import integrationRoutes from './routes/integration.routes.js';
 import adminRoutes from './routes/admin.routes.js';
 import affiliateRoutes from './routes/affiliate.routes.js';
@@ -30,6 +31,7 @@ import analyticsRoutes from './routes/analytics.routes.js';
 import whatsappRoutes from './routes/whatsapp.routes.js';
 import pagesRoutes from './routes/pages.routes.js';
 import supportRoutes from './routes/support.routes.js';
+import acquisitionRoutes from './routes/acquisition.routes.js';
 import { autoReenableBot } from './controllers/conversation.controller.js';
 import pool from './database/connection.js';
 import { createRequire } from 'module';
@@ -257,6 +259,7 @@ app.get('/api', (req, res) => {
       orders: '/api/orders',
       services: '/api/services',
       settings: '/api/settings',
+      faqs: '/api/faqs',
       integrations: '/api/integrations',
       conversations: '/api/conversations',
       ai: '/api/ai',
@@ -282,6 +285,7 @@ app.use('/api/products', productRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/services', serviceRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/faqs', faqRoutes);
 app.use('/api/integrations', integrationRoutes);
   app.use('/api/content', contentPublishingRoutes);
 app.use('/api/admin', adminRoutes);
@@ -297,6 +301,7 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/pages', pagesRoutes);
 app.use('/api/support', supportRoutes);
+app.use('/api/acquisition', acquisitionRoutes);
 app.use('/webhooks', webhookRoutes);
 
 // Serve uploaded files (product images for channels). Sensitive dirs stay private.
@@ -362,9 +367,12 @@ process.on('uncaughtException', (error) => {
   process.exit(1);
 });
 
+// Log only: Baileys/pg often emit transient rejections under load; exiting here caused repeated downtime.
 process.on('unhandledRejection', (reason) => {
-  logger.error('Unhandled promise rejection — process will exit', reason instanceof Error ? reason : new Error(String(reason)));
-  process.exit(1);
+  logger.error(
+    'Unhandled promise rejection (process continues)',
+    reason instanceof Error ? reason : new Error(String(reason))
+  );
 });
 
 async function startServer() {

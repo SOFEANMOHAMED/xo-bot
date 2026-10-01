@@ -4,6 +4,7 @@
 
 export { ChannelAdapter, ParsedIncomingEvent, SendMessageParams, TypingIndicatorParams } from './channel.interface.js';
 export { FacebookAdapter, facebookAdapter, sendFacebookTyping, sendFacebookMessage, sendFacebookImage } from './facebook.adapter.js';
+export { prepareMetaOutboundImageUrl } from './prepareMetaOutboundImage.js';
 export { TelegramAdapter, telegramAdapter, sendTelegramTyping, sendTelegramMessage, sendTelegramPhoto } from './telegram.adapter.js';
 export {
   deliverHumanLikeReply,

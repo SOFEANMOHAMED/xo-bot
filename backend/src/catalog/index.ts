@@ -53,7 +53,9 @@ export {
   resolveProductImageForBot,
   resolveImageSrcForServing,
   fetchProductGallery,
-  pickGalleryImageForColor
+  pickGalleryImageForColor,
+  pickGalleryImageForVariant,
+  galleryIsVariantBound,
 } from './resolve-product-image.js';
 
 export type {
@@ -61,6 +63,14 @@ export type {
   ResolveProductImageInput,
   ResolveProductImageResult
 } from './resolve-product-image.js';
+
+export {
+  readUploadSrcMedia,
+  uploadSrcToLocalCandidates,
+  resolveExistingUploadFile,
+} from './upload-local-media.js';
+
+export type { LocalUploadMedia } from './upload-local-media.js';
 
 // ==================== VISUAL (CLIP) IMAGE EMBEDDINGS ====================
 export {

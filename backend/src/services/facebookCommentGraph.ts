@@ -1,9 +1,10 @@
 /**
- * Shared Graph API helpers for Facebook comment public + private replies.
+ * Shared Graph API helpers for Facebook comment public + private replies + likes.
  * Used by merchant and platform (official page) comment automation.
  */
 
 import { logger } from '../utils/logger.js';
+import type { CommentReactionType } from './commentReactions.js';
 
 const GRAPH_VERSION = process.env.FACEBOOK_GRAPH_VERSION || 'v21.0';
 
@@ -82,6 +83,41 @@ export async function sendFacebookCommentReply(
     return true;
   } catch (error) {
     logger.error('Error sending Facebook comment reply', error as Error, { commentId });
+    return false;
+  }
+}
+
+/**
+ * Page Like on a comment.
+ * Meta third-party apps cannot POST /reactions (OAuthException #3).
+ * Pages must use POST /{comment-id}/likes.
+ * @see https://developers.facebook.com/docs/graph-api/reference/object/likes
+ */
+export async function reactToFacebookComment(
+  commentId: string,
+  _reactionType: CommentReactionType,
+  accessToken: string
+): Promise<boolean> {
+  try {
+    const url =
+      `https://graph.facebook.com/${GRAPH_VERSION}/${encodeURIComponent(commentId)}/likes` +
+      `?access_token=${encodeURIComponent(accessToken)}`;
+    const response = await fetch(url, { method: 'POST' });
+    const data = (await response.json()) as {
+      success?: boolean;
+      error?: { message?: string; code?: number };
+    };
+    if (!response.ok || data.error) {
+      logger.error(
+        'Facebook comment like failed',
+        new Error(JSON.stringify(data)),
+        { commentId, graphCode: data?.error?.code }
+      );
+      return false;
+    }
+    return data.success !== false;
+  } catch (error) {
+    logger.error('Error liking Facebook comment', error as Error, { commentId });
     return false;
   }
 }

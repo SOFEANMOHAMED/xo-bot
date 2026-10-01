@@ -65,6 +65,69 @@ export function isExplicitPhotoRefusal(messageText: string): boolean {
   );
 }
 
+/**
+ * Single photo decision for attach / send_image / browse_media.
+ * Current message + optional interpreter ownership; no history inference.
+ */
+export type PhotoDecision = {
+  wantsPhoto: boolean;
+  refusesPhoto: boolean;
+  attachImage: boolean;
+  nextActionHint: 'send_image' | null;
+};
+
+export function resolvePhotoDecision(opts: {
+  messageText: string;
+  customerRequest?: CustomerRequestSignals | null;
+  /** When interpreter owned refuse_photo this turn. */
+  interpreterRefusesPhoto?: boolean;
+  /** When interpreter owned request_photo this turn. */
+  interpreterWantsPhoto?: boolean | null;
+  /** True when refuse_photo was flipped/applied this turn. */
+  interpreterOwnsRefuse?: boolean;
+  /** True when request_photo was flipped/applied this turn. */
+  interpreterOwnsRequest?: boolean;
+}): PhotoDecision {
+  if (opts.interpreterOwnsRefuse || opts.interpreterRefusesPhoto) {
+    return {
+      wantsPhoto: false,
+      refusesPhoto: true,
+      attachImage: false,
+      nextActionHint: null,
+    };
+  }
+
+  if (opts.interpreterOwnsRequest) {
+    const wants = Boolean(opts.interpreterWantsPhoto);
+    return {
+      wantsPhoto: wants,
+      refusesPhoto: false,
+      attachImage: wants,
+      nextActionHint: wants ? 'send_image' : null,
+    };
+  }
+
+  const refuses = isExplicitPhotoRefusal(opts.messageText);
+  if (refuses) {
+    return {
+      wantsPhoto: false,
+      refusesPhoto: true,
+      attachImage: false,
+      nextActionHint: null,
+    };
+  }
+
+  const wants =
+    isExplicitPhotoRequest(opts.messageText) ||
+    opts.customerRequest?.wantsPhoto === true;
+  return {
+    wantsPhoto: wants,
+    refusesPhoto: false,
+    attachImage: wants,
+    nextActionHint: wants ? 'send_image' : null,
+  };
+}
+
 export interface ResolveTurnIntentInput {
   userMessage: string;
   customerRequest?: CustomerRequestSignals | null;
@@ -91,18 +154,17 @@ export function resolveTurnIntent(input: ResolveTurnIntentInput): TurnIntent {
     isFinalizing = false,
   } = input;
 
-  // Current message only — never infer photo from prior bot/user turns.
-  // Refusal wins over wants_photo flag / lexeme mention of «صورة».
-  const photo =
-    !isExplicitPhotoRefusal(userMessage) &&
-    (isExplicitPhotoRequest(userMessage) || customerRequest?.wantsPhoto === true);
+  const photoDecision = resolvePhotoDecision({
+    messageText: userMessage,
+    customerRequest,
+  });
 
   // Finalize only when not clearly asking for a photo in the same breath
-  if ((isFinalizing || customerRequest?.readyToConfirm) && !photo) {
+  if ((isFinalizing || customerRequest?.readyToConfirm) && !photoDecision.wantsPhoto) {
     return 'finalize';
   }
 
-  if (photo) {
+  if (photoDecision.wantsPhoto) {
     return 'browse_media';
   }
 

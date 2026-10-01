@@ -104,7 +104,7 @@ function looksLikeColorTemplate(text: string): boolean {
 }
 
 function looksLikeIdentityAsk(text: string): boolean {
-  return /شو اسمك|شو رقم هاتفك|شو عنوان التوصيل|what is your (full )?name|phone number|delivery address/i.test(
+  return /شو اسمك|شو رقم هاتفك|شو عنوان التوصيل|لإكمال الطلب أحتاج|what is your (full )?name|phone number|delivery address/i.test(
     text
   );
 }

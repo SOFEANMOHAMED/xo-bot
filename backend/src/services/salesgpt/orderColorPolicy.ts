@@ -14,6 +14,14 @@ import {
     normalizeColorToken,
   } from '../../catalog/color-options.js';
 import { isPastBotClaimDispute } from './pastBotClaimDispute.js';
+import { buildAskVariantMessage, buildUnavailableVariantMessage } from './variantEngine/ask.js';
+import { colorAxisFromValues } from './variantEngine/axes.js';
+import {
+    extractBareCatalogAnswer,
+    extractNumericAxisChoice,
+    stripSelectionPadding,
+    tokenizeVariantText,
+  } from './variantEngine/match.js';
 
   export function isColorInProductCatalog(
     color: string | null | undefined,
@@ -25,29 +33,15 @@ import { isPastBotClaimDispute } from './pastBotClaimDispute.js';
 
   /**
    * Map numeric replies ("2", "رقم 2", "الخيار 2") to a catalog color option.
+   * Wrapper over variant-engine numeric extract.
    */
   export function extractNumericColorChoice(
     text: string,
     catalogColors: string[]
   ): string | null {
-    if (!text?.trim() || !catalogColors.length) return null;
-    const t = text.trim();
-
-    const pure = t.match(/^(\d{1,2})$/);
-    if (pure) {
-      const idx = parseInt(pure[1], 10) - 1;
-      if (idx >= 0 && idx < catalogColors.length) return catalogColors[idx];
-    }
-
-    const labeled = t.match(
-      /(?:رقم|الخيار|اللون|option|number|#|no\.?)\s*(\d{1,2})\s*[).]?$/i
-    );
-    if (labeled) {
-      const idx = parseInt(labeled[1], 10) - 1;
-      if (idx >= 0 && idx < catalogColors.length) return catalogColors[idx];
-    }
-
-    return null;
+    const axis = colorAxisFromValues(catalogColors);
+    if (!axis) return null;
+    return extractNumericAxisChoice(text, axis);
   }
 
   function stripLeadingAlToken(value: string): string {
@@ -125,7 +119,11 @@ import { isPastBotClaimDispute } from './pastBotClaimDispute.js';
     return any;
   }
 
-  /** Extract a catalog-bound color from a single user message (text or number). */
+  /** Extract a catalog-bound color from a single user message (text or number).
+   * Prefer strict bare extract (engine). Wider scan is for **history corroboration
+   * and negation reading only** — the live current-message path uses
+   * `extractBareCatalogAnswer` via `resolveOrderColor`, not this function.
+   */
   export function extractColorFromUserText(
     text: string,
     catalogColors: string[]
@@ -133,6 +131,12 @@ import { isPastBotClaimDispute } from './pastBotClaimDispute.js';
     if (!text?.trim() || !catalogColors.length) return null;
     // «أنت قلت في أسود» is a dispute, not a color selection.
     if (isPastBotClaimDispute(text)) return null;
+
+    const axis = colorAxisFromValues(catalogColors);
+    if (axis) {
+      const bare = extractBareCatalogAnswer(text, axis);
+      if (bare) return bare;
+    }
 
     const numeric = extractNumericColorChoice(text, catalogColors);
     if (numeric) return numeric;
@@ -206,35 +210,35 @@ import { isPastBotClaimDispute } from './pastBotClaimDispute.js';
         ? aiColor
         : null;
   
-    // 1) Current message
-    const rawCurrent = extractColorFromText(currentMessage, catalogColors)
-      ?? extractNumericColorChoice(currentMessage, catalogColors);
-    if (rawCurrent) {
-      const currentMatch = matchColorOption(rawCurrent, catalogColors);
-      if (currentMatch.matched) {
-        return { color: currentMatch.matched, needsClarification: false, ambiguous: [] };
+    // 1) Current message — V5 bare catalog answer only (P1-2: «الأسود غالي؟» is not a pick)
+    const colorAxis = colorAxisFromValues(catalogColors);
+    if (colorAxis && !isPastBotClaimDispute(currentMessage)) {
+      const currentBare = extractBareCatalogAnswer(currentMessage, colorAxis);
+      if (currentBare) {
+        return { color: currentBare, needsClarification: false, ambiguous: [] };
       }
-      if (currentMatch.ambiguous.length > 1) {
-        return {
-          color: null,
-          needsClarification: true,
-          ambiguous: currentMatch.ambiguous,
-          rejectedAiColor: rejectAi
-        };
-      }
-      // Mentioned a color not sold for this product
-      if (extractColorFromText(currentMessage, catalogColors) || extractNumericColorChoice(currentMessage, catalogColors)) {
-        return {
-          color: null,
-          needsClarification: false,
-          ambiguous: [],
-          rejectedAiColor: rejectAi ?? rawCurrent
-        };
+      const padded = stripSelectionPadding(currentMessage, colorAxis);
+      const tokens = tokenizeVariantText(padded);
+      if (tokens.length > 0 && tokens.length <= 3) {
+        const currentMatch = matchColorOption(padded, catalogColors);
+        if (currentMatch.ambiguous.length > 1) {
+          return {
+            color: null,
+            needsClarification: true,
+            ambiguous: currentMatch.ambiguous,
+            rejectedAiColor: rejectAi
+          };
+        }
       }
     }
   
-    // 2) User history (newest explicit mention wins)
-    const fromHistory = extractLastColorFromUserHistory(userMessages, catalogColors);
+    // 2) Prior user messages only — current already handled by the strict branch
+    const priorMessages =
+      userMessages.length > 0 &&
+      userMessages[userMessages.length - 1] === currentMessage
+        ? userMessages.slice(0, -1)
+        : userMessages;
+    const fromHistory = extractLastColorFromUserHistory(priorMessages, catalogColors);
     if (fromHistory) {
       return { color: fromHistory, needsClarification: false, ambiguous: [], rejectedAiColor: rejectAi };
     }
@@ -274,6 +278,10 @@ import { isPastBotClaimDispute } from './pastBotClaimDispute.js';
     catalogColors: string[],
     rejectedColor?: string | null
   ): string {
+    const axis = colorAxisFromValues(catalogColors);
+    if (axis) {
+      return buildUnavailableVariantMessage(language, axis, rejectedColor);
+    }
     const options = formatColorOptionsForDisplay(catalogColors, language);
     if (language === 'arabic') {
       const rejected = rejectedColor?.trim()
@@ -291,9 +299,12 @@ import { isPastBotClaimDispute } from './pastBotClaimDispute.js';
     language: 'arabic' | 'english',
     catalogColors: string[]
   ): string {
-    const options = formatColorOptionsForDisplay(catalogColors, language);
-    return language === 'arabic'
-      ? `أي لون بتحب؟ 🎨\n${options}`
-      : `Which color would you like? 🎨\n${options}`;
+    const axis = colorAxisFromValues(catalogColors);
+    if (!axis) {
+      return language === 'english'
+        ? 'Which color would you like?'
+        : 'أي لون بتحب؟';
+    }
+    return buildAskVariantMessage(language, axis);
   }
   

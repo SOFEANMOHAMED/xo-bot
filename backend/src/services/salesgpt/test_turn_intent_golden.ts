@@ -10,6 +10,8 @@ import {
   customerCancelsOrder,
   botReplyAsksForConfirmation,
   botReplyAsksToAddMore,
+  isProductInfoRequest,
+  isStorePolicyInfoRequest,
   AWAIT_CONFIRMATION_ACTION,
 } from './orderConfirmationPolicy.js';
 import {
@@ -97,6 +99,26 @@ function run(): void {
     'browse_media must force send_image over collect_info'
   );
   passed++;
+
+  // Shipping-cost question → product_qa (never collect_info / identity hijack)
+  {
+    const shippingMsg = 'شو تكلفة الشحن ع المعضمية';
+    assert(isStorePolicyInfoRequest(shippingMsg), 'shipping cost must be store-policy Q');
+    assert(isProductInfoRequest(shippingMsg), 'shipping cost must be product-info Q');
+    const shippingIntent = resolveTurnIntent({
+      userMessage: shippingMsg,
+      asksProductInfo: isProductInfoRequest(shippingMsg),
+    });
+    assert(
+      shippingIntent === 'product_qa',
+      `shipping Q turnIntent expected product_qa, got ${shippingIntent}`
+    );
+    assert(
+      nextActionForBrowseTurn(shippingIntent, 'collect_info') === 'present_product',
+      'shipping Q must force present_product over collect_info'
+    );
+    passed++;
+  }
 
   // Order rails: AI jumps to await_confirmation on photo turn → still send_image
   const stolenCheckout = resolveOrderNextAction({

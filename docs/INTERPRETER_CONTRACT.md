@@ -1,10 +1,12 @@
 # عقد المُفسّر (Interpreter Contract) — تصميم فقط
 
-**PHASE 4-PREP + تعديلات 1C — لا تنفيذ إنتاجي في هذه الوثيقة.**  
+**PHASE 4 مكتمل للصفوف 1–6 + browse + هوية:** وحدة `backend/src/services/salesgpt/interpreter/` حية؛ whitelist يشمل pending لون/مقاس وإلغاء وهوية؛ بعد التطبيق يُطفأ المسار القديم لنفس النوع في نفس الدور.  
+**مالك واحد لكل قرار:** استخراج المحور = `variantEngine`؛ `next_action` = `nextActionFromInterpreterFacts` / `effectiveNextActionFromTurnFacts`؛ صدق الرد = `groundInterpreterReply`؛ تأكيد = `resolveConfirmFinalize` (I4 فقط)؛ صورة = `resolvePhotoDecision`.  
 العربية للشرح؛ المعرّفات والمسارات والـ JSON بالإنجليزية.
 
 المرجع القياسي الصالح: `docs/BASELINE.md` (1C) + `docs/BASELINE_BREAKDOWN.md`.  
-v1 باطل: `docs/BASELINE_v1_INVALID.md`.
+v1 باطل: `docs/BASELINE_v1_INVALID.md`.  
+محاور المنتج العامة (لون/مقاس/لاحقاً): `docs/VARIANT_ENGINE.md` — `select_color` / `select_size` هنا تبقى حتى V6 هناك.
 
 ---
 
@@ -148,9 +150,9 @@ type InterpreterResult = {
 | 2 | **photo refusal** | 6× soft حقيقي | I5=100%؛ لا وعد صورة عند الرفض؛ أثر `order`/`refuse_photo` |
 | 3 | **quantity / order-intent** | «ساعتين» | تثبيت كمية أو توضيح واحد؛ ≥ baseline |
 | 4 | **anti color→identity hijack** | «أنت قلت في أسود» | لا `collect_info` اسم على ذكر لون في سياق qa |
-| 5 | color/size selection | hard مستقر | ظل ثم FLIP عند ≥95% اتفاق |
-| 6 | variant / add / remove / cancel | قوية hard | بعد استقرار 5 |
-| 7 | browse / price/details / OOS | ~100% | ظل فقط عند انحدار |
+| 5 | color/size selection | hard مستقر | **FLIP** — whitelist pending + `extractBareCatalogAnswer`؛ مسار pending/variant القديم يُطفأ عند التطبيق |
+| 6 | variant / add / remove / cancel | قوية hard | **FLIP** — cancel/remove عبر whitelist؛ `VARIANT_OPTION_PATTERN` محذوف |
+| 7 | browse / price/details / OOS | ~100% | browse + ask_product_info مقلوبان؛ توسعة ظل عند انحدار |
 
 ### بروتوكول لكل نوع
 

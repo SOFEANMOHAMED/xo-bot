@@ -33,8 +33,10 @@ import AboutPage from './components/AboutPage';
 import WhatsAppBotPage from './components/WhatsAppBotPage';
 import AgencyPartnerPage from './components/AgencyPartnerPage';
 import AgencyRegisterPage from './components/AgencyRegisterPage';
+import TrackedLinkRedirect from './components/TrackedLinkRedirect';
 import NotFoundPage from './components/NotFoundPage';
 import SeoHead from './components/SeoHead';
+import MetaPixelPageTracker from './components/MetaPixelPageTracker';
 
 function postLoginPath(
   role: UserRole | string | undefined,
@@ -397,6 +399,7 @@ function NotFoundRoute() {
 const App: React.FC = () => {
   return (
     <OAuthTokenHandler>
+      <MetaPixelPageTracker />
       <Routes>
         <Route path={PATHS.HOME} element={<HomeRoute />} />
         <Route path={PATHS.LOGIN} element={<LoginRoute />} />
@@ -441,6 +444,7 @@ const App: React.FC = () => {
         <Route path={PATHS.ABOUT} element={<AboutRoute />} />
         <Route path={PATHS.WHATSAPP_BOT} element={<WhatsAppBotRoute />} />
         <Route path={PATHS.BECOME_AGENCY} element={<BecomeAgencyRoute />} />
+        <Route path={`${PATHS.GO}/:code`} element={<TrackedLinkRedirect />} />
         <Route path="/:slug" element={<PublicPageRoute />} />
         <Route path="*" element={<NotFoundRoute />} />
       </Routes>

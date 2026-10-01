@@ -39,6 +39,17 @@ export function formatDisplayPhone(jidOrDigits: string | undefined): string | nu
   return `+${digits}`;
 }
 
+/**
+ * Phone label for inbox display — only from PN JIDs (`@s.whatsapp.net`).
+ * LID JIDs do not expose a real phone number.
+ */
+export function phoneDisplayFromCustomerJid(jid: string | undefined): string | null {
+  if (!jid || !isPnUser(jid)) return null;
+  const digits = phoneDigitsFromJid(jid);
+  if (!digits || digits.length < 8) return null;
+  return `+${digits}`;
+}
+
 export function toOutboundJid(userId: string): string {
   const trimmed = (userId || '').trim();
   if (!trimmed) return '';

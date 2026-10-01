@@ -1,6 +1,7 @@
 /**
  * Official XO Bot page comment automation (per selected post).
  * Isolated from merchant CRM / products / SalesGPT.
+ * Supports Facebook Page feed comments and Instagram (page-feed + IG webhooks).
  * Private replies seed platform_conversations for the official Messenger bot.
  */
 
@@ -19,11 +20,19 @@ import {
 } from './socialCommentMention.js';
 import {
   fetchFacebookCommenterProfile,
+  reactToFacebookComment,
   sendFacebookCommentReply,
   sendFacebookPrivateReplyAfterComment,
 } from './facebookCommentGraph.js';
+import {
+  sendInstagramCommentReply,
+  sendInstagramPrivateReplyAfterComment,
+} from './instagramCommentGraph.js';
+import { applyCommentReaction } from './commentReactions.js';
 import { ensurePlatformCommentTables } from './platformSocialPosts.js';
 import type { PlatformFacebookPage } from './platformFacebookPage.js';
+
+type OfficialPlatform = 'facebook' | 'instagram';
 
 type PostReplyRow = {
   id: string;
@@ -32,6 +41,7 @@ type PostReplyRow = {
   public_reply_text: string | null;
   send_dm_on_comment: boolean;
   private_reply_text: string | null;
+  react_on_comment_enabled: boolean;
 };
 
 type KeywordRuleRow = {
@@ -71,7 +81,7 @@ function ruleMatches(rule: KeywordRuleRow, commentText: string): string | null {
 
 async function alreadyHandled(
   pageId: string,
-  platform: string,
+  platform: OfficialPlatform,
   commentId: string
 ): Promise<boolean> {
   const r = await pool.query(
@@ -83,26 +93,32 @@ async function alreadyHandled(
   return r.rows.length > 0;
 }
 
-async function loadEnabledPost(
+async function loadAutomationPost(
   pageId: string,
+  platform: OfficialPlatform,
   externalPostId: string
 ): Promise<PostReplyRow | null> {
   const r = await pool.query(
     `SELECT id, external_post_id, comment_reply_enabled, public_reply_text,
-            send_dm_on_comment, private_reply_text
+            send_dm_on_comment, private_reply_text,
+            COALESCE(react_on_comment_enabled, false) AS react_on_comment_enabled
      FROM platform_social_posts
      WHERE page_id = $1
-       AND platform = 'facebook'
-       AND external_post_id = $2
-       AND comment_reply_enabled = true
+       AND platform = $2
+       AND external_post_id = $3
+       AND (
+         comment_reply_enabled = true
+         OR COALESCE(react_on_comment_enabled, false) = true
+       )
      LIMIT 1`,
-    [pageId, externalPostId]
+    [pageId, platform, externalPostId]
   );
   return (r.rows[0] as PostReplyRow) || null;
 }
 
 async function findMatchingRule(params: {
   pageId: string;
+  platform: OfficialPlatform;
   accountRef: string;
   externalPostId: string;
   commentText: string;
@@ -112,19 +128,19 @@ async function findMatchingRule(params: {
             private_reply_enabled, private_reply_text
      FROM platform_keyword_rules
      WHERE page_id = $1
-       AND platform = 'facebook'
-       AND account_ref = $2
+       AND platform = $2
+       AND account_ref = $3
        AND is_active = true
        AND scope = 'post'
        AND (
-         external_post_id = $3
+         external_post_id = $4
          OR social_post_id IN (
            SELECT id FROM platform_social_posts
-           WHERE page_id = $1 AND external_post_id = $3
+           WHERE page_id = $1 AND platform = $2 AND external_post_id = $4
          )
        )
      ORDER BY priority DESC, created_at DESC`,
-    [params.pageId, params.accountRef, params.externalPostId]
+    [params.pageId, params.platform, params.accountRef, params.externalPostId]
   );
 
   for (const row of result.rows as KeywordRuleRow[]) {
@@ -136,6 +152,7 @@ async function findMatchingRule(params: {
 
 async function recordAction(params: {
   pageId: string;
+  platform: OfficialPlatform;
   accountRef: string;
   commentId: string;
   postId?: string | null;
@@ -151,10 +168,11 @@ async function recordAction(params: {
        page_id, platform, account_ref, external_comment_id, external_post_id,
        matched_rule_id, matched_keyword, public_replied, private_replied,
        conversation_id, metadata
-     ) VALUES ($1,'facebook',$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)
      ON CONFLICT (page_id, platform, external_comment_id) DO NOTHING`,
     [
       params.pageId,
+      params.platform,
       params.accountRef,
       params.commentId,
       params.postId || null,
@@ -168,36 +186,42 @@ async function recordAction(params: {
   );
 }
 
-/**
- * Process a feed comment on the official XO Bot Facebook page.
- */
-export async function processOfficialPageComment(
+type OfficialCommentInput = {
+  platform: OfficialPlatform;
+  commentId: string;
+  commentText: string;
+  commenterId?: string | null;
+  commenterName: string;
+  commenterUsername?: string | null;
+  externalPostId?: string | null;
+};
+
+async function runOfficialCommentAutomation(
   page: PlatformFacebookPage,
-  value: Record<string, any>
+  input: OfficialCommentInput
 ): Promise<void> {
   await ensurePlatformCommentTables();
 
-  const verb = typeof value?.verb === 'string' ? value.verb.toLowerCase() : '';
-  if (verb === 'remove' || verb === 'hide' || verb === 'edited') {
-    logger.debug('Official page comment skipped verb', { verb, pageId: page.page_id });
-    return;
-  }
-
-  const { normalizePageFeedCommentValue } = await import('./pageFeedCommentPayload.js');
-  const n = normalizePageFeedCommentValue(value);
-  const commentId = n.commentId;
-  let commentText = n.message;
-  let commenterId = n.fromId;
-  let commenterName = n.fromName || 'صديقنا';
-  const externalPostId = n.postId || n.parentId || null;
+  const platform = input.platform;
+  const accountRef =
+    platform === 'instagram' ? page.ig_user_id || page.page_id : page.page_id;
+  const commentId = String(input.commentId);
+  let commentText = input.commentText || '';
+  let commenterId = input.commenterId || null;
+  let commenterName = input.commenterName || 'صديقنا';
+  const commenterUsername = input.commenterUsername || null;
+  const externalPostId = input.externalPostId || null;
 
   if (!commentId) {
-    logger.warn('Official page comment: missing comment id', { pageId: page.page_id });
+    logger.warn('Official comment skipped: missing comment id', {
+      pageId: page.page_id,
+      platform,
+    });
     return;
   }
 
-  if (!commenterId) {
-    const profile = await fetchFacebookCommenterProfile(String(commentId), page.access_token);
+  if (platform === 'facebook' && !commenterId) {
+    const profile = await fetchFacebookCommenterProfile(commentId, page.access_token);
     if (profile?.fromId) {
       commenterId = profile.fromId;
       if (profile.fromName) commenterName = profile.fromName;
@@ -206,51 +230,54 @@ export async function processOfficialPageComment(
   }
 
   if (commenterId && String(commenterId) === String(page.page_id)) return;
+  if (
+    platform === 'instagram' &&
+    page.ig_user_id &&
+    commenterId &&
+    String(commenterId) === String(page.ig_user_id)
+  ) {
+    return;
+  }
 
-  if (await alreadyHandled(page.page_id, 'facebook', String(commentId))) {
-    logger.debug('Official page comment already handled', {
+  if (await alreadyHandled(page.page_id, platform, commentId)) {
+    logger.debug('Official comment already handled', {
       pageId: page.page_id,
+      platform,
       commentId,
     });
     return;
   }
 
   if (!externalPostId) {
-    logger.info('Official page comment skipped: missing post id', {
+    logger.info('Official comment skipped: missing post id', {
       pageId: page.page_id,
+      platform,
       commentId,
     });
     return;
   }
 
-  const post = await loadEnabledPost(page.page_id, String(externalPostId));
+  const post = await loadAutomationPost(page.page_id, platform, String(externalPostId));
   if (!post) {
-    logger.debug('Official page comment skipped: post not enabled', {
+    logger.debug('Official comment skipped: post not enabled', {
       pageId: page.page_id,
+      platform,
       externalPostId,
     });
     return;
   }
 
   const mention = await resolvePublicCommentMentionIdentity({
-    platform: 'facebook',
-    commentId: String(commentId),
+    platform,
+    commentId,
     accessToken: page.access_token,
     commenterId,
     commenterName,
-    commenterUsername: null,
+    commenterUsername,
   });
-  const displayName =
-    mention.commenterName?.trim() || commenterName || 'صديقنا';
+  const displayName = mention.commenterName?.trim() || commenterName || 'صديقنا';
   if (mention.commenterId) commenterId = mention.commenterId;
   if (mention.commenterName) commenterName = mention.commenterName;
-
-  const match = await findMatchingRule({
-    pageId: page.page_id,
-    accountRef: page.page_id,
-    externalPostId: post.external_post_id,
-    commentText,
-  });
 
   let publicText: string | null = null;
   let privateText: string | null = null;
@@ -258,67 +285,92 @@ export async function processOfficialPageComment(
   let matchedRuleId: string | null = null;
   let matchedKeyword: string | null = null;
 
-  if (match) {
-    matchedRuleId = match.rule.id;
-    matchedKeyword = match.matchedKeyword;
-    if (match.rule.public_reply_enabled) {
+  if (post.comment_reply_enabled) {
+    const match = await findMatchingRule({
+      pageId: page.page_id,
+      platform,
+      accountRef,
+      externalPostId: post.external_post_id,
+      commentText,
+    });
+
+    if (match) {
+      matchedRuleId = match.rule.id;
+      matchedKeyword = match.matchedKeyword;
+      if (match.rule.public_reply_enabled) {
+        publicText = clampSocialText(
+          applyCommentTemplate(
+            match.rule.public_reply_text,
+            post.public_reply_text || DEFAULT_COMMENT_REPLY,
+            { comment: commentText, name: displayName }
+          ).replace(/\{\{keyword\}\}/gi, match.matchedKeyword)
+        );
+      }
+      sendPrivate = match.rule.private_reply_enabled === true;
+      if (sendPrivate) {
+        privateText = clampSocialText(
+          applyCommentTemplate(
+            match.rule.private_reply_text,
+            post.private_reply_text || DEFAULT_DM_AFTER_COMMENT,
+            { comment: commentText, name: displayName }
+          ).replace(/\{\{keyword\}\}/gi, match.matchedKeyword)
+        );
+      }
+    } else {
       publicText = clampSocialText(
-        applyCommentTemplate(
-          match.rule.public_reply_text,
-          post.public_reply_text || DEFAULT_COMMENT_REPLY,
-          { comment: commentText, name: displayName }
-        ).replace(/\{\{keyword\}\}/gi, match.matchedKeyword)
-      );
-    }
-    sendPrivate = match.rule.private_reply_enabled === true;
-    if (sendPrivate) {
-      privateText = clampSocialText(
-        applyCommentTemplate(
-          match.rule.private_reply_text,
-          post.private_reply_text || DEFAULT_DM_AFTER_COMMENT,
-          { comment: commentText, name: displayName }
-        ).replace(/\{\{keyword\}\}/gi, match.matchedKeyword)
-      );
-    }
-  } else {
-    publicText = clampSocialText(
-      applyCommentTemplate(post.public_reply_text, DEFAULT_COMMENT_REPLY, {
-        comment: commentText,
-        name: displayName,
-      })
-    );
-    sendPrivate = post.send_dm_on_comment === true;
-    if (sendPrivate) {
-      privateText = clampSocialText(
-        applyCommentTemplate(post.private_reply_text, DEFAULT_DM_AFTER_COMMENT, {
+        applyCommentTemplate(post.public_reply_text, DEFAULT_COMMENT_REPLY, {
           comment: commentText,
           name: displayName,
         })
       );
+      sendPrivate = post.send_dm_on_comment === true;
+      if (sendPrivate) {
+        privateText = clampSocialText(
+          applyCommentTemplate(post.private_reply_text, DEFAULT_DM_AFTER_COMMENT, {
+            comment: commentText,
+            name: displayName,
+          })
+        );
+      }
     }
   }
 
   let publicReplied = false;
   if (publicText) {
-    logMissingPublicMention(mention, { commentId: String(commentId) });
+    logMissingPublicMention(mention, { commentId });
     const mentioned = clampSocialText(withPublicCommentMention(publicText, mention));
-    publicReplied = await sendFacebookCommentReply(
-      String(commentId),
-      mentioned,
-      page.access_token
-    );
+    publicReplied =
+      platform === 'instagram'
+        ? await sendInstagramCommentReply(commentId, mentioned, page.access_token)
+        : await sendFacebookCommentReply(commentId, mentioned, page.access_token);
   }
+
+  const reaction = await applyCommentReaction({
+    enabled: post.react_on_comment_enabled === true,
+    platform,
+    commentId,
+    accessToken: page.access_token,
+    sendReaction: platform === 'facebook' ? reactToFacebookComment : undefined,
+  });
 
   let conversationId: string | null = null;
   let privateReplied = false;
 
   if (sendPrivate && privateText) {
-    privateReplied = await sendFacebookPrivateReplyAfterComment(
-      page.page_id,
-      String(commentId),
-      privateText,
-      page.access_token
-    );
+    privateReplied =
+      platform === 'instagram'
+        ? await sendInstagramPrivateReplyAfterComment(
+            page.page_id,
+            commentId,
+            privateText,
+            page.access_token
+          )
+        : await sendFacebookPrivateReplyAfterComment(
+            page.page_id,
+            commentId,
+            privateText,
+            page.access_token
+          );
 
     if (privateReplied && commenterId) {
       const existing = await pool.query(
@@ -346,11 +398,7 @@ export async function processOfficialPageComment(
           `INSERT INTO platform_messages (conversation_id, role, content) VALUES
              ($1, 'user', $2),
              ($1, 'model', $3)`,
-          [
-            conversationId,
-            commentText || 'تعليق على منشور',
-            privateText,
-          ]
+          [conversationId, commentText || 'تعليق على منشور', privateText]
         );
         await pool.query(
           `UPDATE platform_conversations
@@ -364,23 +412,136 @@ export async function processOfficialPageComment(
 
   await recordAction({
     pageId: page.page_id,
-    accountRef: page.page_id,
-    commentId: String(commentId),
+    platform,
+    accountRef,
+    commentId,
     postId: post.external_post_id,
     ruleId: matchedRuleId,
     keyword: matchedKeyword,
     publicReplied,
     privateReplied,
     conversationId,
-    metadata: { per_post: true, template_dm: true, social_post_id: post.id },
+    metadata: {
+      per_post: true,
+      template_dm: true,
+      social_post_id: post.id,
+      reaction: {
+        enabled: post.react_on_comment_enabled === true,
+        attempted: reaction.attempted,
+        success: reaction.success,
+        type: reaction.reactionType,
+        skipped: reaction.skippedReason || null,
+      },
+    },
   });
 
-  logger.info('Official page comment automation finished', {
+  logger.info('Official comment automation finished', {
     pageId: page.page_id,
+    platform,
     commentId,
     externalPostId: post.external_post_id,
     publicReplied,
     privateReplied,
+    reacted: reaction.success,
+    reactionType: reaction.reactionType,
     matchedKeyword,
+  });
+}
+
+/**
+ * Process a feed comment on the official XO Bot Facebook page.
+ */
+export async function processOfficialPageComment(
+  page: PlatformFacebookPage,
+  value: Record<string, any>
+): Promise<void> {
+  const verb = typeof value?.verb === 'string' ? value.verb.toLowerCase() : '';
+  if (verb === 'remove' || verb === 'hide' || verb === 'edited') {
+    logger.debug('Official page comment skipped verb', { verb, pageId: page.page_id });
+    return;
+  }
+
+  const { normalizePageFeedCommentValue } = await import('./pageFeedCommentPayload.js');
+  const n = normalizePageFeedCommentValue(value);
+
+  await runOfficialCommentAutomation(page, {
+    platform: 'facebook',
+    commentId: n.commentId || '',
+    commentText: n.message,
+    commenterId: n.fromId,
+    commenterName: n.fromName || 'صديقنا',
+    commenterUsername: null,
+    externalPostId: n.postId || n.parentId || null,
+  });
+}
+
+/**
+ * Process an Instagram comment on the official XO Bot IG account (page-feed shape).
+ */
+export async function processOfficialInstagramCommentFromPageFeed(
+  page: PlatformFacebookPage,
+  value: Record<string, any>
+): Promise<void> {
+  if (!page.ig_user_id) {
+    logger.warn('Official IG comment skipped: page has no ig_user_id', {
+      pageId: page.page_id,
+    });
+    return;
+  }
+
+  const verb = typeof value?.verb === 'string' ? value.verb.toLowerCase() : '';
+  if (verb === 'remove' || verb === 'hide' || verb === 'edited') {
+    logger.debug('Official IG comment skipped verb', { verb, pageId: page.page_id });
+    return;
+  }
+
+  const { normalizePageFeedCommentValue } = await import('./pageFeedCommentPayload.js');
+  const n = normalizePageFeedCommentValue(value);
+  const commenterUsername = n.fromUsername?.trim().replace(/^@+/, '') || null;
+
+  await runOfficialCommentAutomation(page, {
+    platform: 'instagram',
+    commentId: n.commentId || '',
+    commentText: n.message,
+    commenterId: n.fromId,
+    commenterName: n.fromName || commenterUsername || 'صديقنا',
+    commenterUsername,
+    externalPostId:
+      n.postId ||
+      (value?.media_id != null ? String(value.media_id) : null) ||
+      n.parentId ||
+      null,
+  });
+}
+
+/**
+ * Process an Instagram comments webhook payload for the official XO Bot account.
+ */
+export async function processOfficialInstagramCommentWebhook(
+  page: PlatformFacebookPage,
+  value: Record<string, any>
+): Promise<void> {
+  if (!page.ig_user_id) {
+    logger.warn('Official IG webhook skipped: page has no ig_user_id', {
+      pageId: page.page_id,
+    });
+    return;
+  }
+
+  const commentId = value?.id != null ? String(value.id) : '';
+  const from = value?.from || {};
+  const commenterUsername =
+    typeof from.username === 'string' && from.username.trim()
+      ? from.username.trim().replace(/^@+/, '')
+      : null;
+
+  await runOfficialCommentAutomation(page, {
+    platform: 'instagram',
+    commentId,
+    commentText: value?.text != null ? String(value.text) : '',
+    commenterId: from?.id != null ? String(from.id) : null,
+    commenterName: commenterUsername || (from.name as string | undefined) || 'صديقنا',
+    commenterUsername,
+    externalPostId: value?.media?.id != null ? String(value.media.id) : null,
   });
 }

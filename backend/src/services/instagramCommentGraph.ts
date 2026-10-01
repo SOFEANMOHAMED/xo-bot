@@ -1,5 +1,6 @@
 /**
  * Shared Graph API helpers for Instagram public comment replies and commenter identity.
+ * Used by merchant and platform (official page) comment automation.
  */
 
 import { logger } from '../utils/logger.js';
@@ -38,6 +39,44 @@ export async function sendInstagramCommentReply(
 }
 
 /**
+ * First private message after an IG comment — must use comment_id (Private Replies).
+ * @see https://developers.facebook.com/docs/messenger-platform/instagram/features/private-replies/
+ */
+export async function sendInstagramPrivateReplyAfterComment(
+  pageId: string,
+  commentId: string,
+  message: string,
+  accessToken: string
+): Promise<boolean> {
+  try {
+    const url =
+      `https://graph.facebook.com/${GRAPH_VERSION}/${encodeURIComponent(pageId)}/messages` +
+      `?access_token=${encodeURIComponent(accessToken)}`;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recipient: { comment_id: commentId },
+        message: { text: message },
+      }),
+    });
+    const data = (await resp.json()) as { error?: unknown };
+    if (!resp.ok) {
+      logger.error(
+        'Instagram private reply after comment failed',
+        new Error(JSON.stringify(data)),
+        { pageId, commentId }
+      );
+      return false;
+    }
+    return true;
+  } catch (error) {
+    logger.error('Error sending Instagram private reply', error as Error, { pageId, commentId });
+    return false;
+  }
+}
+
+/**
  * Resolve Instagram username for @mention. Webhooks often omit `from.username`;
  * since Aug 2024 Graph requires instagram_manage_comments to read `username`.
  */
@@ -63,7 +102,10 @@ export async function fetchInstagramCommenterUsername(
       return null;
     }
     const username = data.username || data.from?.username;
-    const normalized = username && String(username).trim() ? String(username).trim().replace(/^@+/, '') : '';
+    const normalized =
+      username && String(username).trim()
+        ? String(username).trim().replace(/^@+/, '')
+        : '';
     return normalized || null;
   } catch (error) {
     logger.error('IG comment username lookup error', error as Error, { commentId });

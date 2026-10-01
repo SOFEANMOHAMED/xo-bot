@@ -45,9 +45,10 @@ function buildPoolConfig(): pg.PoolConfig {
     database,
     user: process.env.DB_USER || 'postgres',
     password: process.env.DB_PASSWORD,
+    // Under load, 2s connect timeout caused cascade failures (WhatsApp + admin stats).
     max: 20,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000,
+    connectionTimeoutMillis: 10000,
   };
 }
 

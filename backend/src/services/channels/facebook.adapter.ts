@@ -13,6 +13,7 @@ import {
 } from './channel.interface.js';
 import { deliverHumanLikeReply } from './replyDelivery.js';
 import { extractImageUrl } from './botTurn.js';
+import { prepareMetaOutboundImageUrl } from './prepareMetaOutboundImage.js';
 import {
   isStoryReplyMessagingEvent,
   resolveInboundMessagingText,
@@ -27,6 +28,7 @@ export const sendFacebookImage = async (
   accessToken: string
 ): Promise<boolean> => {
   try {
+    const metaImageUrl = await prepareMetaOutboundImageUrl(imageUrl);
     const response = await fetch(`https://graph.facebook.com/v21.0/${pageId}/messages?access_token=${accessToken}`, {
       method: 'POST',
       headers: {
@@ -38,7 +40,7 @@ export const sendFacebookImage = async (
           attachment: {
             type: 'image',
             payload: {
-              url: imageUrl,
+              url: metaImageUrl,
               is_reusable: false
             }
           }
@@ -53,7 +55,8 @@ export const sendFacebookImage = async (
       logger.error('Facebook API error sending image', new Error(JSON.stringify(data)), {
         pageId,
         recipientId,
-        imageUrl
+        imageUrl: metaImageUrl,
+        originalImageUrl: imageUrl
       });
       return false;
     }

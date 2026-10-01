@@ -21,6 +21,55 @@ interface AdminUsersProps {
   filterByTrial?: boolean;
 }
 
+function mapAdminUserFromApi(user: any): AdminUser {
+  return {
+    ...user,
+    registrationDate: new Date(user.registrationDate),
+    trialEndsAt: user.trialEndsAt ? new Date(user.trialEndsAt) : undefined,
+    subscriptionStartsAt: user.subscriptionStartsAt
+      ? new Date(user.subscriptionStartsAt)
+      : undefined,
+    subscriptionEndsAt: user.subscriptionEndsAt
+      ? new Date(user.subscriptionEndsAt)
+      : undefined,
+  };
+}
+
+function dateToInputValue(date?: Date | null): string {
+  if (!date || Number.isNaN(date.getTime())) return '';
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/** Stable DD/MM/YYYY (Latin digits) — avoids RTL bidi scrambling from ar locale. */
+function formatDisplayDate(date?: Date | null): string {
+  if (!date || Number.isNaN(date.getTime())) return '—';
+  const d = String(date.getDate()).padStart(2, '0');
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const y = date.getFullYear();
+  return `${d}/${m}/${y}`;
+}
+
+/** Package period shown in the table: trial uses account open → trial end; paid uses starts/ends. */
+function getPackagePeriod(user: AdminUser): { start: Date | null; end: Date | null; label: string } {
+  const planKey = (user.plan || '').toLowerCase();
+  const isTrialPlan = user.isTrial || planKey === 'trial';
+  if (isTrialPlan && !user.subscriptionEndsAt) {
+    return {
+      start: user.registrationDate,
+      end: user.trialEndsAt || null,
+      label: 'تجربة',
+    };
+  }
+  return {
+    start: user.subscriptionStartsAt || null,
+    end: user.subscriptionEndsAt || null,
+    label: 'باقة',
+  };
+}
+
 const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
   const navigate = useNavigate();
   const { setToken } = useAuth();
@@ -57,6 +106,7 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
     message: string;
     onConfirm: () => void;
     type?: 'danger' | 'warning' | 'info';
+    confirmText?: string;
   }>({
     isOpen: false,
     title: '',
@@ -72,10 +122,20 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
   // State for Edit User Modal
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
-  const [editFormData, setEditFormData] = useState<{ name: string; email: string; status: 'active' | 'suspended' | 'expired' }>({
+  const [editFormData, setEditFormData] = useState<{
+    name: string;
+    email: string;
+    status: 'active' | 'suspended' | 'expired';
+    trialEndsAt: string;
+    subscriptionStartsAt: string;
+    subscriptionEndsAt: string;
+  }>({
     name: '',
     email: '',
-    status: 'active'
+    status: 'active',
+    trialEndsAt: '',
+    subscriptionStartsAt: '',
+    subscriptionEndsAt: '',
   });
 
   // State for Change Plan Modal
@@ -95,11 +155,7 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
       try {
         const response = await apiService.getAdminUsers();
         // Convert date strings to Date objects
-        const users = (Array.isArray(response) ? response : []).map((user: any) => ({
-          ...user,
-          registrationDate: new Date(user.registrationDate),
-          trialEndsAt: user.trialEndsAt ? new Date(user.trialEndsAt) : undefined
-        }));
+        const users = (Array.isArray(response) ? response : []).map(mapAdminUserFromApi);
         setUsers(users);
       } catch (err: any) {
         logger.error('Failed to fetch admin users:', err);
@@ -217,16 +273,36 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
     });
   };
 
+  const refreshUsers = async () => {
+    const response = await apiService.getAdminUsers();
+    setUsers((Array.isArray(response) ? response : []).map(mapAdminUserFromApi));
+  };
+
   const handleExtendTrial = (user: AdminUser) => {
       setConfirmDialog({
         isOpen: true,
         title: 'تمديد الفترة التجريبية',
         message: `هل أنت متأكد من رغبتك في تمديد الفترة التجريبية للمستخدم "${user.name}" لمدة 7 أيام إضافية؟`,
         type: 'warning',
-        onConfirm: () => {
-          // In a real app, update state here
-          showSuccess(`تم تمديد الفترة التجريبية للمستخدم ${user.name} بنجاح.`);
-          setConfirmDialog({ ...confirmDialog, isOpen: false });
+        onConfirm: async () => {
+          try {
+            const base =
+              user.trialEndsAt && user.trialEndsAt.getTime() > Date.now()
+                ? user.trialEndsAt
+                : new Date();
+            const extended = new Date(base.getTime() + 7 * 24 * 60 * 60 * 1000);
+            await apiService.updateAdminUser(user.id, {
+              trial_ends_at: extended,
+              subscription_plan: 'trial',
+              subscription_status: 'active',
+            });
+            showSuccess(`تم تمديد الفترة التجريبية للمستخدم ${user.name} بنجاح.`);
+            await refreshUsers();
+            setConfirmDialog({ ...confirmDialog, isOpen: false });
+          } catch (err: any) {
+            showError('فشل تمديد التجربة: ' + (err.message || 'خطأ غير معروف'));
+            setConfirmDialog({ ...confirmDialog, isOpen: false });
+          }
         }
       });
   };
@@ -240,15 +316,18 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
           setOpenDropdownId(null);
           setDropdownPosition(null);
       } else {
+          const MENU_WIDTH = 192; // w-48
+          const GAP = 4;
+          const MARGIN = 8;
+          let left = rect.right - MENU_WIDTH;
+          left = Math.max(MARGIN, Math.min(left, window.innerWidth - MENU_WIDTH - MARGIN));
+          let top = rect.bottom + GAP;
+          const approxMenuHeight = 220;
+          if (top + approxMenuHeight > window.innerHeight - MARGIN) {
+            top = Math.max(MARGIN, rect.top - approxMenuHeight - GAP);
+          }
           setOpenDropdownId(user.id);
-          // Calculate position for fixed dropdown
-          // Button is in the leftmost column (Actions), dropdown should appear to its right
-          // Use left positioning to align dropdown with button's right edge
-          setDropdownPosition({
-              top: rect.bottom + 4,
-              left: rect.right, // Start dropdown at button's right edge
-              right: undefined
-          });
+          setDropdownPosition({ top, left });
       }
   };
 
@@ -258,7 +337,10 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
       setEditFormData({
         name: user.name,
         email: user.email,
-        status: user.status
+        status: user.status,
+        trialEndsAt: dateToInputValue(user.trialEndsAt),
+        subscriptionStartsAt: dateToInputValue(user.subscriptionStartsAt),
+        subscriptionEndsAt: dateToInputValue(user.subscriptionEndsAt),
       });
       setShowEditModal(true);
   };
@@ -271,25 +353,33 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
           return;
       }
 
+      const starts = editFormData.subscriptionStartsAt
+        ? new Date(editFormData.subscriptionStartsAt)
+        : null;
+      const ends = editFormData.subscriptionEndsAt
+        ? new Date(editFormData.subscriptionEndsAt)
+        : null;
+      if (starts && ends && starts.getTime() > ends.getTime()) {
+          showError('تاريخ بداية الباقة يجب أن يكون قبل أو يساوي تاريخ النهاية');
+          return;
+      }
+
       try {
           await apiService.updateAdminUser(editingUser.id, {
               name: editFormData.name,
               email: editFormData.email,
-              subscription_status: editFormData.status
+              subscription_status: editFormData.status,
+              trial_ends_at: editFormData.trialEndsAt
+                ? new Date(editFormData.trialEndsAt)
+                : null,
+              subscription_starts_at: starts,
+              subscription_ends_at: ends,
           });
           
           showSuccess(`تم تحديث المستخدم ${editFormData.name} بنجاح`);
           setShowEditModal(false);
           setEditingUser(null);
-          
-          // Refresh users list
-          const response = await apiService.getAdminUsers();
-          const users = (Array.isArray(response) ? response : []).map((u: any) => ({
-            ...u,
-            registrationDate: new Date(u.registrationDate),
-            trialEndsAt: u.trialEndsAt ? new Date(u.trialEndsAt) : undefined
-          }));
-          setUsers(users);
+          await refreshUsers();
       } catch (err: any) {
           showError('فشل تحديث المستخدم: ' + (err.message || 'خطأ غير معروف'));
       }
@@ -314,14 +404,7 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
               ? `تم تفعيل حساب ${user.name} بنجاح`
               : `تم تعليق حساب ${user.name} بنجاح`
             );
-            // Refresh users list
-            const response = await apiService.getAdminUsers();
-            const users = (Array.isArray(response) ? response : []).map((u: any) => ({
-              ...u,
-              registrationDate: new Date(u.registrationDate),
-              trialEndsAt: u.trialEndsAt ? new Date(u.trialEndsAt) : undefined
-            }));
-            setUsers(users);
+            await refreshUsers();
             setConfirmDialog({ ...confirmDialog, isOpen: false });
           } catch (err: any) {
             showError('فشل تحديث حالة المستخدم: ' + (err.message || 'خطأ غير معروف'));
@@ -344,14 +427,7 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
           try {
             await apiService.deleteAdminUser(user.id);
             showSuccess(`تم حذف المستخدم ${user.name} بنجاح`);
-            // Refresh users list
-            const response = await apiService.getAdminUsers();
-            const users = (Array.isArray(response) ? response : []).map((u: any) => ({
-              ...u,
-              registrationDate: new Date(u.registrationDate),
-              trialEndsAt: u.trialEndsAt ? new Date(u.trialEndsAt) : undefined
-            }));
-            setUsers(users);
+            await refreshUsers();
             setConfirmDialog({ ...confirmDialog, isOpen: false });
           } catch (err: any) {
             showError('فشل حذف المستخدم: ' + (err.message || 'خطأ غير معروف'));
@@ -389,8 +465,11 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
       try {
           await apiService.updateAdminUser(changingPlanUser.id, {
               subscription_plan: selectedPlan,
-              // If changing to trial, set trial_ends_at
-              trial_ends_at: selectedPlan === 'trial' ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : null
+              // Backend sets default 7-day trial when plan is trial; explicit date keeps UI predictable
+              trial_ends_at: selectedPlan === 'trial'
+                ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+                : null,
+              subscription_status: 'active',
           });
           
           const planNames: Record<string, string> = {
@@ -407,29 +486,31 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
           showSuccess(`تم تغيير خطة المستخدم ${changingPlanUser.name} إلى ${planNames[selectedPlan]} بنجاح`);
           setShowChangePlanModal(false);
           setChangingPlanUser(null);
-          
-          // Refresh users list
-          const response = await apiService.getAdminUsers();
-          const users = (Array.isArray(response) ? response : []).map((u: any) => ({
-            ...u,
-            registrationDate: new Date(u.registrationDate),
-            trialEndsAt: u.trialEndsAt ? new Date(u.trialEndsAt) : undefined
-          }));
-          setUsers(users);
+          await refreshUsers();
       } catch (err: any) {
           showError('فشل تغيير الخطة: ' + (err.message || 'خطأ غير معروف'));
       }
   };
 
-  // Close dropdown when clicking outside
+  // Close dropdown when clicking outside or scrolling
   useEffect(() => {
       const handleClickOutside = () => {
           setOpenDropdownId(null);
           setDropdownPosition(null);
       };
+      const handleScrollOrResize = () => {
+          setOpenDropdownId(null);
+          setDropdownPosition(null);
+      };
       if (openDropdownId) {
           document.addEventListener('click', handleClickOutside);
-          return () => document.removeEventListener('click', handleClickOutside);
+          window.addEventListener('scroll', handleScrollOrResize, true);
+          window.addEventListener('resize', handleScrollOrResize);
+          return () => {
+            document.removeEventListener('click', handleClickOutside);
+            window.removeEventListener('scroll', handleScrollOrResize, true);
+            window.removeEventListener('resize', handleScrollOrResize);
+          };
       }
   }, [openDropdownId]);
 
@@ -461,13 +542,7 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
           });
 
           // Refresh users list
-          const usersResponse = await apiService.getAdminUsers();
-          const users = (Array.isArray(usersResponse) ? usersResponse : []).map((user: any) => ({
-              ...user,
-              registrationDate: new Date(user.registrationDate),
-              trialEndsAt: user.trialEndsAt ? new Date(user.trialEndsAt) : undefined
-          }));
-          setUsers(users);
+          await refreshUsers();
 
           setShowAddModal(false);
           // Reset form
@@ -503,8 +578,14 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
         'التكلفة الإجمالية ($)': normalizeLlmUsage(user.llmUsage).costUsd,
         'الحالة': user.status === 'active' ? 'نشط' : user.status === 'suspended' ? 'معلق' : 'منتهي',
         'تجربة مجانية': user.isTrial ? 'نعم' : 'لا',
-        'تاريخ انتهاء التجربة': user.trialEndsAt ? user.trialEndsAt.toLocaleDateString('ar-SA-u-nu-latn') : '-',
-        'تاريخ التسجيل': user.registrationDate.toLocaleDateString('ar-SA-u-nu-latn'),
+        'تاريخ انتهاء التجربة': user.trialEndsAt ? formatDisplayDate(user.trialEndsAt) : '-',
+        'بداية الباقة': user.subscriptionStartsAt
+          ? formatDisplayDate(user.subscriptionStartsAt)
+          : '-',
+        'نهاية الباقة': user.subscriptionEndsAt
+          ? formatDisplayDate(user.subscriptionEndsAt)
+          : '-',
+        'تاريخ فتح الحساب': formatDisplayDate(user.registrationDate),
       }));
 
       const fileName = `users_export_${new Date().toISOString().split('T')[0]}.${format === 'excel' ? 'xlsx' : 'csv'}`;
@@ -736,7 +817,9 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
                       <th className="px-6 py-4">الباقة الحالية</th>
                       <th className="px-6 py-4">توكنات هذا الشهر</th>
                       <th className="px-6 py-4">التكلفة ($)</th>
-                      <th className="px-6 py-4">تاريخ التسجيل</th>
+                      <th className="px-6 py-4">فتح الحساب</th>
+                      <th className="px-6 py-4">بداية الباقة</th>
+                      <th className="px-6 py-4">نهاية الباقة</th>
                       <th className="px-6 py-4">الحالة</th>
                       {filterByTrial && <th className="px-6 py-4">حالة التجربة</th>}
                       <th className="px-6 py-4">إجراءات</th>
@@ -770,7 +853,23 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
                             {formatUsdCost(normalizeLlmUsage(user.llmUsage).costUsdThisMonth)}
                          </td>
                          <td className="px-6 py-4 text-sm text-slate-300" dir="ltr">
-                            {user.registrationDate.toLocaleDateString('ar-u-nu-latn')}
+                            {formatDisplayDate(user.registrationDate)}
+                         </td>
+                         <td className="px-6 py-4 text-sm text-slate-300" dir="ltr">
+                            {(() => {
+                              const period = getPackagePeriod(user);
+                              return (
+                                <span title={period.label}>
+                                  {formatDisplayDate(period.start)}
+                                </span>
+                              );
+                            })()}
+                         </td>
+                         <td className="px-6 py-4 text-sm text-slate-300" dir="ltr">
+                            {(() => {
+                              const period = getPackagePeriod(user);
+                              return formatDisplayDate(period.end);
+                            })()}
                          </td>
                          <td className="px-6 py-4">
                             {getStatusBadge(user.status)}
@@ -803,7 +902,7 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
                                   >
                                      <MoreHorizontal size={16} />
                                   </button>
-                                  {openDropdownId === user.id && dropdownPosition && (
+                                  {openDropdownId === user.id && dropdownPosition && createPortal(
                                     <div 
                                       className="fixed w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-2xl z-[99999] overflow-hidden"
                                       dir="rtl"
@@ -811,6 +910,7 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
                                         top: `${dropdownPosition.top}px`,
                                         left: `${dropdownPosition.left}px`
                                       }}
+                                      onClick={(e) => e.stopPropagation()}
                                     >
                                       <button
                                         onClick={() => handleImpersonateUser(user)}
@@ -857,7 +957,8 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
                                         <Trash2 size={16} />
                                         <span>حذف المستخدم</span>
                                       </button>
-                                    </div>
+                                    </div>,
+                                    document.body
                                   )}
                                </div>
                             </div>
@@ -866,7 +967,7 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
                    ))}
                    {paginatedUsers.length === 0 && (
                       <tr>
-                         <td colSpan={filterByTrial ? 9 : 8} className="px-6 py-12 text-center text-slate-500">
+                         <td colSpan={filterByTrial ? 11 : 10} className="px-6 py-12 text-center text-slate-500">
                              لا توجد نتائج مطابقة
                          </td>
                       </tr>
@@ -1095,6 +1196,50 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
                            </select>
                        </div>
 
+                       <div className="p-3 bg-slate-800/80 rounded-lg border border-slate-700">
+                           <p className="text-xs text-slate-400 mb-1">تاريخ فتح الحساب</p>
+                           <p className="text-sm text-white" dir="ltr">
+                             {formatDisplayDate(editingUser.registrationDate)}
+                           </p>
+                           <p className="text-xs text-slate-500 mt-1">ثابت — يُعيَّن عند التسجيل</p>
+                       </div>
+
+                       <div>
+                           <label className="block text-sm font-medium text-slate-400 mb-1">
+                             نهاية التجربة المجانية (7 أيام)
+                           </label>
+                           <input
+                               type="date"
+                               value={editFormData.trialEndsAt}
+                               onChange={e => setEditFormData({ ...editFormData, trialEndsAt: e.target.value })}
+                               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                           />
+                       </div>
+
+                       <div className="grid grid-cols-2 gap-4">
+                           <div>
+                               <label className="block text-sm font-medium text-slate-400 mb-1">بداية الباقة</label>
+                               <input
+                                   type="date"
+                                   value={editFormData.subscriptionStartsAt}
+                                   onChange={e => setEditFormData({ ...editFormData, subscriptionStartsAt: e.target.value })}
+                                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                               />
+                           </div>
+                           <div>
+                               <label className="block text-sm font-medium text-slate-400 mb-1">نهاية الباقة</label>
+                               <input
+                                   type="date"
+                                   value={editFormData.subscriptionEndsAt}
+                                   onChange={e => setEditFormData({ ...editFormData, subscriptionEndsAt: e.target.value })}
+                                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                               />
+                           </div>
+                       </div>
+                       <p className="text-xs text-slate-500">
+                         للباقات المدفوعة: عدّل البداية والنهاية يدوياً. للتجربة: استخدم تاريخ انتهاء التجربة (افتراضي +7 أيام من فتح الحساب).
+                       </p>
+
                        <div className="flex gap-3 pt-4">
                            <button
                                onClick={handleSaveEditUser}
@@ -1225,9 +1370,33 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
                            <p className="text-white font-medium" dir="ltr">{selectedUser.phone || '—'}</p>
                        </div>
                        <div>
-                           <label className="text-sm text-slate-400">تاريخ التسجيل</label>
-                           <p className="text-white font-medium">{selectedUser.registrationDate.toLocaleDateString('ar-u-nu-latn')}</p>
+                           <label className="text-sm text-slate-400">تاريخ فتح الحساب</label>
+                           <p className="text-white font-medium" dir="ltr">
+                             {formatDisplayDate(selectedUser.registrationDate)}
+                           </p>
                        </div>
+                       <div className="grid grid-cols-2 gap-4">
+                           <div>
+                               <label className="text-sm text-slate-400">بداية الباقة / التجربة</label>
+                               <p className="text-white font-medium" dir="ltr">
+                                 {formatDisplayDate(getPackagePeriod(selectedUser).start)}
+                               </p>
+                           </div>
+                           <div>
+                               <label className="text-sm text-slate-400">نهاية الباقة / التجربة</label>
+                               <p className="text-white font-medium" dir="ltr">
+                                 {formatDisplayDate(getPackagePeriod(selectedUser).end)}
+                               </p>
+                           </div>
+                       </div>
+                       {selectedUser.trialEndsAt && (
+                         <div>
+                             <label className="text-sm text-slate-400">نهاية التجربة المجانية</label>
+                             <p className="text-white font-medium" dir="ltr">
+                               {formatDisplayDate(selectedUser.trialEndsAt)}
+                             </p>
+                         </div>
+                       )}
                        <div>
                            <label className="text-sm text-slate-400">الباقة</label>
                            <p className="text-white font-medium">{selectedUser.plan}</p>
@@ -1280,6 +1449,7 @@ const AdminUsers: React.FC<AdminUsersProps> = ({ filterByTrial = false }) => {
            title={confirmDialog.title}
            message={confirmDialog.message}
            type={confirmDialog.type}
+           confirmText={confirmDialog.confirmText}
            onConfirm={confirmDialog.onConfirm}
            onCancel={() => setConfirmDialog({ ...confirmDialog, isOpen: false })}
        />

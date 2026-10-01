@@ -2,22 +2,25 @@
  * pending_bot_question — color | size bound to a product_id in conversation_state.
  *
  * Set only when the outbound reply is a deterministic color/size ASK template
- * (buildAskColorMessage / buildAskSizeMessage fingerprints) — not free sales copy.
+ * (buildAskColorMessage / buildAskVariantMessage fingerprints) — not free sales copy.
  * Cleared after the next bare answer is consumed (or on fall-through).
  */
 import type { ConversationState, Product } from '../../core/types.js';
 import { extractColorFromText } from '../../catalog/color-options.js';
 import {
-  extractColorFromUserText,
   isColorInProductCatalog,
 } from './orderColorPolicy.js';
 import { isExplicitPhotoRequest } from './turnIntent.js';
 import { isPastBotClaimDispute } from './pastBotClaimDispute.js';
+import { colorAxisFromValues, sizeAxisFromValues } from './variantEngine/axes.js';
+import { extractBareVariantAnswer } from './variantEngine/extract.js';
+import { extractBareCatalogAnswer } from './variantEngine/match.js';
 
 export type PendingBotQuestionKind = 'color' | 'size';
 
 export type PendingBotQuestionState = {
-  pending_bot_question: PendingBotQuestionKind | null;
+  /** Axis id — color/size today; other ids are type-legal (V2) but not written here. */
+  pending_bot_question: string | null;
   pending_bot_question_product_id: string | null;
 };
 
@@ -67,14 +70,14 @@ export function lastAssistantContent(
  * Stored value is used only when there is no last bot text.
  */
 export function resolveIncomingPendingBotQuestion(opts: {
-  stored?: PendingBotQuestionKind | null;
+  stored?: string | null;
   lastBotReply: string;
 }): PendingBotQuestionKind | null {
   const last = (opts.lastBotReply || '').trim();
   if (last) {
     return detectPendingBotQuestion(last);
   }
-  const stored = opts.stored;
+  const stored = (opts.stored || '').trim();
   if (stored === 'color' || stored === 'size') return stored;
   return null;
 }
@@ -120,7 +123,7 @@ export function readPendingFromState(state: ConversationState): PendingBotQuesti
     pending_bot_question?: string | null;
     pending_bot_question_product_id?: string | null;
   }).pending_bot_question;
-  const kind = raw === 'color' || raw === 'size' ? raw : null;
+  const kind = typeof raw === 'string' && raw.trim() ? raw.trim() : null;
   const productId =
     (state as ConversationState & { pending_bot_question_product_id?: string | null })
       .pending_bot_question_product_id || null;
@@ -163,11 +166,12 @@ export function extractBareColorAnswer(
   if (!text?.trim()) return null;
   if (looksLikeShowOrPhotoAsk(text) || isAvailabilityQuestion(text)) return null;
   if (isPastBotClaimDispute(text)) return null;
-  const colors = (catalogColors || []).filter((c) => typeof c === 'string' && c.trim());
-  if (!colors.length) return null;
-  return extractColorFromUserText(text, colors);
+  const axis = colorAxisFromValues(catalogColors);
+  if (!axis) return null;
+  return extractBareCatalogAnswer(text, axis);
 }
 
+/** Catalog size aliases (S/M/L words) — value↔option only, not intent. */
 const SIZE_ALIAS_GROUPS: ReadonlyArray<{ aliases: string[] }> = [
   { aliases: ['xs', 'xxs'] },
   { aliases: ['s', 'small', 'صغير', 'الصغير'] },
@@ -184,47 +188,41 @@ function normalizeSizeToken(value: string): string {
     .replace(/^ال/, '');
 }
 
-function stripSelectionPadding(text: string): string {
-  return text
-    .replace(/[\u064B-\u0652]/g, '')
-    .replace(/لو سمحت|من فضلك|please|thanks|thank you|شكرا(?:ً| لك)?/gi, ' ')
-    .replace(/\b(?:بدي|بغي|أبي|ابي|أبغى|ابغى|أريد|اريد|أبا|ابا)\b/gi, ' ')
-    .replace(/\b(?:اللون|لون|المقاس|مقاس|سايز|size|color)\b/gi, ' ')
-    .replace(/[?!؟.,،]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
+/**
+ * Bare size answer — engine first; size-word aliases only when remainder is one token.
+ */
 export function extractBareSizeAnswer(
   text: string,
   catalogSizes: string[] | null | undefined
 ): string | null {
+  const axis = sizeAxisFromValues(catalogSizes);
+  if (axis) {
+    const bare = extractBareVariantAnswer(text, axis);
+    if (bare) return bare;
+  }
   if (!text?.trim()) return null;
   if (looksLikeShowOrPhotoAsk(text) || isAvailabilityQuestion(text)) return null;
-  const padded = stripSelectionPadding(text);
+  if (isPastBotClaimDispute(text)) return null;
+  if (!axis) return null;
+  // Alias pass: only when engine padding leaves a short remainder.
+  const padded = text
+    .replace(/[\u064B-\u0652]/g, '')
+    .replace(/لو سمحت|من فضلك|please|thanks|thank you|شكرا(?:ً| لك)?/gi, ' ')
+    .replace(/(?:^|\s)(?:بدي|بغي|أبي|ابي|أبغى|ابغى|أريد|اريد|أبا|ابا)(?=\s|$)/gi, ' ')
+    .replace(/(?:^|\s)(?:المقاس|مقاس|سايز|size)(?=\s|$)/gi, ' ')
+    .replace(/[?!؟.,،]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!padded || padded.split(/\s+/).length > 3) return null;
-  const sizes = (catalogSizes || []).map((s) => String(s).trim()).filter(Boolean);
   const token = normalizeSizeToken(padded);
-  for (const size of sizes) {
-    if (normalizeSizeToken(size) === token) return size;
-  }
   for (const group of SIZE_ALIAS_GROUPS) {
     if (!group.aliases.some((alias) => normalizeSizeToken(alias) === token)) continue;
-    const hit = sizes.find((size) =>
+    const hit = axis.values.find((size) =>
       group.aliases.some(
         (alias) => normalizeSizeToken(size) === normalizeSizeToken(alias)
       )
     );
     if (hit) return hit;
-  }
-  if (
-    sizes.length === 0 &&
-    (/^\d{1,3}$/.test(padded) || /^(?:ال)?(?:وسط|صغير|كبير)$/.test(padded))
-  ) {
-    return padded;
-  }
-  if (sizes.length && /^\d{1,3}$/.test(padded)) {
-    return sizes.includes(padded) ? padded : null;
   }
   return null;
 }

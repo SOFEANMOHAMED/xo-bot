@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS merchants (
     subscription_plan VARCHAR(50) DEFAULT 'trial',
     subscription_status VARCHAR(50) DEFAULT 'active',
     trial_ends_at TIMESTAMP,
+    subscription_starts_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -51,6 +52,14 @@ BEGIN
         WHERE table_name = 'merchants' AND column_name = 'trial_ends_at'
     ) THEN
         ALTER TABLE merchants ADD COLUMN trial_ends_at TIMESTAMP;
+    END IF;
+
+    -- Add subscription_starts_at column
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'merchants' AND column_name = 'subscription_starts_at'
+    ) THEN
+        ALTER TABLE merchants ADD COLUMN subscription_starts_at TIMESTAMP;
     END IF;
     
     -- Add google_id column
@@ -218,6 +227,9 @@ CREATE TABLE IF NOT EXISTS merchant_settings (
     abandoned_reminder_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     abandoned_reminder_delay_minutes INTEGER NOT NULL DEFAULT 45,
     abandoned_reminder_message TEXT,
+    product_interest_reminder_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    product_interest_reminder_delay_minutes INTEGER NOT NULL DEFAULT 60,
+    product_interest_reminder_message TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

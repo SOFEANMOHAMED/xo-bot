@@ -45,13 +45,46 @@ export function compressImageDataUrlForAI(
   });
 }
 
+/** Fingerprint a stored image URL so replacements bust browser cache. */
+function fingerprintImageRef(storedImageUrl: string): string {
+  let h = 0;
+  const s = storedImageUrl.trim();
+  for (let i = 0; i < s.length; i++) {
+    h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  }
+  return String(Math.abs(h));
+}
+
+function normalizeCacheVersion(
+  cacheVersion?: string | number | Date | null,
+  storedImageUrl?: string | null
+): string {
+  if (cacheVersion instanceof Date && !Number.isNaN(cacheVersion.getTime())) {
+    return String(cacheVersion.getTime());
+  }
+  if (typeof cacheVersion === 'number' && Number.isFinite(cacheVersion)) {
+    return String(cacheVersion);
+  }
+  if (typeof cacheVersion === 'string' && cacheVersion.trim()) {
+    const asDate = Date.parse(cacheVersion);
+    if (!Number.isNaN(asDate)) return String(asDate);
+    return cacheVersion.trim();
+  }
+  if (storedImageUrl?.trim() && !storedImageUrl.startsWith('data:')) {
+    return fingerprintImageRef(storedImageUrl);
+  }
+  return '';
+}
+
 /**
  * Build a stable <img src> for product thumbnails.
  * Uses GET /api/products/:id/image so base64, /uploads/*, and remote URLs in DB all work.
+ * Pass updatedAt (or any version) so edits invalidate browser / CDN cache.
  */
 export function getProductImageDisplaySrc(
   productId: string | undefined,
-  storedImageUrl: string | null | undefined
+  storedImageUrl: string | null | undefined,
+  cacheVersion?: string | number | Date | null
 ): string {
   if (!storedImageUrl?.trim()) return '';
   if (storedImageUrl.startsWith('data:')) return storedImageUrl;
@@ -71,5 +104,7 @@ export function getProductImageDisplaySrc(
     return '';
   }
 
-  return `${origin}/api/products/${productId}/image`;
+  const base = `${origin}/api/products/${productId}/image`;
+  const v = normalizeCacheVersion(cacheVersion, storedImageUrl);
+  return v ? `${base}?v=${encodeURIComponent(v)}` : base;
 }

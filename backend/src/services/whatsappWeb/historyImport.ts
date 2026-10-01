@@ -8,7 +8,6 @@
 
 import type { proto, WAMessage } from '@whiskeysockets/baileys';
 import { logger } from '../../utils/logger.js';
-import { isPlaceholderCustomerName } from '../socialProfile.js';
 import {
   buildImportedHistoryMetadata,
   WHATSAPP_WEB_HISTORY_ORIGIN,
@@ -20,6 +19,7 @@ import {
 } from '../inbox/importedConversation.js';
 import { extractInboundText, unwrapMessageContent } from './media.js';
 import { isDirectCustomerJid, normalizeWhatsAppJid } from './jid.js';
+import { resolveWhatsAppCustomerDisplayName } from './customerDisplayName.js';
 
 const MAX_CHATS = 60;
 const MAX_MESSAGES_PER_CHAT = 30;
@@ -69,12 +69,6 @@ function getBudget(merchantId: string): HistoryBudget {
   return budget;
 }
 
-function customerDisplayName(pushName: string | null | undefined): string {
-  if (isPlaceholderCustomerName(pushName)) return 'عميل واتساب';
-  const trimmed = (pushName || '').trim();
-  return trimmed || 'عميل واتساب';
-}
-
 async function importWhatsAppWebHistoryMessages(
   merchantId: string,
   messages: WAMessage[]
@@ -109,7 +103,7 @@ async function importWhatsAppWebHistoryMessages(
       merchantId,
       platform: 'whatsapp',
       userId: remoteJid,
-      userName: customerDisplayName(message.pushName),
+      userName: resolveWhatsAppCustomerDisplayName(message.pushName, remoteJid),
     });
 
     const fromMe = message.key?.fromMe === true;

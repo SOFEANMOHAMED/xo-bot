@@ -400,6 +400,14 @@ export const reviewPaymentRequest = async (
         `UPDATE merchants
          SET subscription_plan = $1,
              subscription_status = 'active',
+             subscription_starts_at = CASE
+               WHEN subscription_starts_at IS NULL
+                    OR COALESCE(subscription_status, 'active') <> 'active'
+                    OR subscription_ends_at IS NULL
+                    OR subscription_ends_at <= CURRENT_TIMESTAMP
+               THEN CURRENT_TIMESTAMP
+               ELSE subscription_starts_at
+             END,
              subscription_ends_at = CASE
                WHEN subscription_ends_at IS NOT NULL
                     AND subscription_ends_at > CURRENT_TIMESTAMP

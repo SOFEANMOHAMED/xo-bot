@@ -55,7 +55,7 @@ type CommerceApi = {
   }) => CommerceEvent;
 };
 type TestState = ConversationState & {
-  pending_bot_question?: 'color' | 'size' | null;
+  pending_bot_question?: string | null;
   pending_bot_question_product_id?: string | null;
 };
 

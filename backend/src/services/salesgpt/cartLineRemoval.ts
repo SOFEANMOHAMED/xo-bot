@@ -25,6 +25,10 @@ function stripLeadingAl(value: string): string {
   return value.replace(/^ال/, '');
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function textMentionsCartField(hay: string, raw: string | undefined): boolean {
   if (!raw?.trim()) return false;
   const n = normalizeArabic(raw);
@@ -38,6 +42,47 @@ function textMentionsCartField(hay: string, raw: string | undefined): boolean {
     if (namesLooselyMatch(tok, n) || namesLooselyMatch(tok, strippedN)) return true;
   }
   return false;
+}
+
+/**
+ * True when the message rejects this product name
+ * («مو الساعة»، «ما بدي الساعة»، «بدون القميص»).
+ * Uses the cart/catalog product's own name only — no color/size lexicon.
+ */
+export function isProductNameNegatedInMessage(
+  messageText: string,
+  productName: string
+): boolean {
+  if (!messageText?.trim() || !productName?.trim()) return false;
+  const hay = normalizeArabic(messageText);
+  const name = normalizeArabic(productName);
+  if (!name || name.length < 2) return false;
+
+  const forms = [...new Set([name, stripLeadingAl(name)].filter((f) => f.length >= 2))];
+  for (const form of forms) {
+    const escaped = escapeRegExp(form);
+    const re = new RegExp(
+      `(?:^|[\\s،,])(?:مو|مش|ما\\s*بدي|لا\\s*بدي|بدون)\\s+(?:ال)?${escaped}(?=$|[\\s،,.!?])`,
+      'i'
+    );
+    if (re.test(hay)) return true;
+  }
+  return false;
+}
+
+/**
+ * Cart lines whose product name is explicitly negated in the message.
+ * Distinct from remove-verb targeting (شيل/الغي) — those use matchCartLinesForRemoval.
+ */
+export function matchCartLinesForProductNegation(
+  messageText: string,
+  lines: CartItem[]
+): CartItem[] {
+  if (!messageText?.trim() || !lines.length) return [];
+  if (isInterimPartialRemoveVerb(messageText)) return [];
+  return lines.filter((line) =>
+    isProductNameNegatedInMessage(messageText, line.productName)
+  );
 }
 
 /**

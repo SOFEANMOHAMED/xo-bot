@@ -230,13 +230,15 @@ export const searchProducts = async (
       const baseTerm = normalizedTerm.replace(/^ال/, '');
       const rawTerm = searchTerm.toLowerCase();
       const rawBase = rawTerm.replace(/^ال/, '');
+      // Keep 1-char terms (sizes like "m"/"s"/"l"). Filtering length > 1 emptied
+      // variations for short replies and produced invalid SQL: WHERE (... () ...).
       const variations = [
         ...generateArabicVariations(normalizedTerm),
         ...generateArabicVariations(baseTerm),
         rawTerm,
         rawBase
-      ].filter(v => v && v.length > 1);
-      const exactTerms = [...new Set([normalizedTerm, baseTerm, rawTerm, rawBase].filter(v => v && v.length > 1))];
+      ].filter(v => v && v.length > 0);
+      const exactTerms = [...new Set([normalizedTerm, baseTerm, rawTerm, rawBase].filter(v => v && v.length > 0))];
 
       // --------------------
       // Phase 0: exact match on normalized name (fast path)
@@ -332,48 +334,51 @@ export const searchProducts = async (
         }
       }
 
-      const strictWhere = [
-        'merchant_id = $1',
-        `(${strictConditions.join(' OR ')})`,
-        ...strictFilterConditions
-      ].join(' AND ');
+      // Skip strict LIKE when there are no terms (avoids empty `()` in WHERE).
+      if (strictConditions.length > 0) {
+        const strictWhere = [
+          'merchant_id = $1',
+          `(${strictConditions.join(' OR ')})`,
+          ...strictFilterConditions
+        ].join(' AND ');
 
-      const strictSql = `
-        SELECT 
-          id, name, description, price, currency, category,
-          stock, sizes, colors, image_url, external_id, source, handle, has_variants
-        FROM products 
-        WHERE ${strictWhere}
-        ORDER BY stock DESC, created_at DESC
-        LIMIT ${limit}
-      `;
+        const strictSql = `
+          SELECT 
+            id, name, description, price, currency, category,
+            stock, sizes, colors, image_url, external_id, source, handle, has_variants
+          FROM products 
+          WHERE ${strictWhere}
+          ORDER BY stock DESC, created_at DESC
+          LIMIT ${limit}
+        `;
 
-      const strictResult = await pool.query(strictSql, strictValues);
-      if (strictResult.rows.length > 0) {
-        let products: Product[] = strictResult.rows.map(row => ({
-          id: row.id,
-          name: row.name,
-          price: parseFloat(row.price),
-          currency: row.currency,
-          stock: row.stock,
-          sizes: row.sizes || null,
-          colors: row.colors || null,
-          imageUrl: convertImageUrl(row.image_url, row.id),
-          externalId: row.external_id,
-          source: row.source,
-          description: row.description,
-          category: row.category,
-          handle: row.handle || null,
-          has_variants: row.has_variants || false
-        }));
+        const strictResult = await pool.query(strictSql, strictValues);
+        if (strictResult.rows.length > 0) {
+          let products: Product[] = strictResult.rows.map(row => ({
+            id: row.id,
+            name: row.name,
+            price: parseFloat(row.price),
+            currency: row.currency,
+            stock: row.stock,
+            sizes: row.sizes || null,
+            colors: row.colors || null,
+            imageUrl: convertImageUrl(row.image_url, row.id),
+            externalId: row.external_id,
+            source: row.source,
+            description: row.description,
+            category: row.category,
+            handle: row.handle || null,
+            has_variants: row.has_variants || false
+          }));
 
-        // 🚀 Enrich with variants if needed
-        products = await Promise.all(
-          products.map(p => enrichProductWithVariants(p, merchantId))
-        );
+          // 🚀 Enrich with variants if needed
+          products = await Promise.all(
+            products.map(p => enrichProductWithVariants(p, merchantId))
+          );
 
-        setCachedData(cacheKey, products, 5 * 60 * 1000); // 5 min cache
-        return products;
+          setCachedData(cacheKey, products, 5 * 60 * 1000); // 5 min cache
+          return products;
+        }
       }
 
       // --------------------
@@ -413,7 +418,9 @@ export const searchProducts = async (
         paramIndex++;
       }
 
-      conditions.push(`(${searchConditions.join(' OR ')})`);
+      if (searchConditions.length > 0) {
+        conditions.push(`(${searchConditions.join(' OR ')})`);
+      }
     }
 
     // Apply filters

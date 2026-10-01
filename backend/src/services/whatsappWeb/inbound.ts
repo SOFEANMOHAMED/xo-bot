@@ -39,6 +39,7 @@ import {
 import { isDirectCustomerJid, normalizeWhatsAppJid } from './jid.js';
 import { wasSentByBot } from './runtimeRegistry.js';
 import { isPlaceholderCustomerName } from '../socialProfile.js';
+import { resolveWhatsAppCustomerDisplayName } from './customerDisplayName.js';
 
 type PreparedInbound = {
   merchantId: string;
@@ -55,7 +56,7 @@ async function getOrCreateConversation(
   userName: string
 ): Promise<{ conversationId: string; conversationState: ConversationState }> {
   const existing = await pool.query(
-    `SELECT id, conversation_state, current_intent
+    `SELECT id, conversation_state, current_intent, user_name
      FROM conversations
      WHERE merchant_id = $1 AND platform = 'whatsapp' AND user_id = $2
      ORDER BY last_message_at DESC NULLS LAST
@@ -67,6 +68,20 @@ async function getOrCreateConversation(
     const row = existing.rows[0];
     const conversationState: ConversationState = row.conversation_state || { message_count: 0 };
     if (row.current_intent) conversationState.last_intent = row.current_intent;
+
+    if (
+      userName &&
+      !isPlaceholderCustomerName(userName) &&
+      isPlaceholderCustomerName(row.user_name as string | null)
+    ) {
+      await pool.query(
+        `UPDATE conversations
+         SET user_name = $1, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2 AND merchant_id = $3`,
+        [userName, row.id, merchantId]
+      );
+    }
+
     return { conversationId: row.id, conversationState };
   }
 
@@ -74,7 +89,7 @@ async function getOrCreateConversation(
     `INSERT INTO conversations (merchant_id, platform, user_id, user_name)
      VALUES ($1, 'whatsapp', $2, $3)
      RETURNING id`,
-    [merchantId, userId, userName || 'عميل واتساب']
+    [merchantId, userId, userName || resolveWhatsAppCustomerDisplayName(null, userId)]
   );
   return { conversationId: created.rows[0].id, conversationState: { message_count: 0 } };
 }
@@ -333,9 +348,7 @@ async function prepareInboundFromWaMessage(
   const content = unwrapMessageContent(message.message);
   let messageText = extractInboundText(content);
   const messageId = message.key?.id || '';
-  const userName = isPlaceholderCustomerName(message.pushName)
-    ? 'عميل واتساب'
-    : (message.pushName as string).trim();
+  const userName = resolveWhatsAppCustomerDisplayName(message.pushName, remoteJid);
   let imageUrl: string | null = null;
 
   if (inboundHasImage(content)) {

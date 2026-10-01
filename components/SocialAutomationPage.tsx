@@ -73,7 +73,7 @@ const SocialAutomationPage: React.FC<SocialAutomationPageProps> = ({
           أتمتة المنشورات والتعليقات
         </h2>
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-          اربط صفحة فيسبوك أو حساب إنستغرام أولاً من «الربط والتكامل».
+          اربط صفحة فيسبوك أو حساب إنستغرام أولاً من «ربط الصفحات».
         </p>
         {onGoToIntegrations && (
           <button
@@ -82,7 +82,7 @@ const SocialAutomationPage: React.FC<SocialAutomationPageProps> = ({
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-brand hover:bg-brand-700 text-white text-sm font-medium"
           >
             <Link2 size={16} />
-            الذهاب إلى الربط والتكامل
+            الذهاب إلى ربط الصفحات
           </button>
         )}
       </div>

@@ -22,7 +22,7 @@ export const CONVERSATION_STAGES: Record<string, string> = {
     "4": "عرض الحلول: اعرض المنتج المناسب مع السعر و2–3 فوائد مستخرجة من وصفه، ثم اسأل سؤالاً يدفع للقرار.",
     "5": "التعامل مع الاعتراضات: اعترف بالمخاوف وردّ بحجج من وصف المنتج أو سياسات المتجر فقط — بدون اختلاق.",
     "6": "إغلاق البيع: أعد تأكيد أقوى فائدة من الوصف، ثم اطلب إتمام الشراء بشكل مريح.",
-    "7": "جمع معلومات الطلب: اجمع معلومات العميل اللازمة (الاسم، الهاتف، العنوان) وتفضيلات المنتج (اللون والمقاس إذا كانت متوفرة في المنتج) لإتمام الطلب.",
+    "7": "جمع معلومات الطلب: النظام يطلب الاسم والهاتف والعنوان معاً (أو كل الناقص برسالة واحدة)، ثم اللون/المقاس بقوالب منفصلة. لا تخترع أسئلة جمع.",
     "8": "تأكيد الطلب: أكد تفاصيل الطلب مع العميل واشكره على ثقته.",
     "9": "إنهاء المحادثة: انهِ المحادثة بشكل ودود وادع العميل للعودة في أي وقت."
 };
@@ -34,7 +34,7 @@ export const CONVERSATION_STAGES_EN: Record<string, string> = {
     "4": "Solution Presentation: Present the suitable product with price and 2–3 benefits extracted from its description, then ask a decision-driving question.",
     "5": "Objection Handling: Acknowledge concerns and answer with evidence from the product description or store policies only — never invent.",
     "6": "Closing: Reaffirm the strongest benefit from the description, then ask to complete the purchase comfortably.",
-    "7": "Order Information Collection: Collect necessary customer information (name, phone, address) and product preferences (color and size if available) to complete the order.",
+    "7": "Order Information Collection: the system asks name, phone, and address together (or all remaining fields in one message), then color/size via templates. Do not invent collect questions.",
     "8": "Order Confirmation: Confirm order details with the customer and thank them for their trust.",
     "9": "End Conversation: End the conversation warmly and invite the customer to return anytime."
 };

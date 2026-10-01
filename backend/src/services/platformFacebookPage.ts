@@ -177,6 +177,21 @@ export async function getLinkedPlatformFacebookPage(): Promise<PlatformFacebookP
   return result.rows[0] || null;
 }
 
+export async function getPlatformFacebookPageByIgUserId(
+  igUserId: string
+): Promise<PlatformFacebookPage | null> {
+  if (!igUserId) return null;
+  await ensurePlatformFacebookTables();
+  const result = await pool.query(
+    `SELECT ${PAGE_SELECT}
+     FROM platform_facebook_pages
+     WHERE ig_user_id = $1
+     LIMIT 1`,
+    [igUserId]
+  );
+  return result.rows[0] || null;
+}
+
 export async function isPlatformFacebookPageId(pageId: string): Promise<boolean> {
   const page = await getPlatformFacebookPageByPageId(pageId);
   return !!page;

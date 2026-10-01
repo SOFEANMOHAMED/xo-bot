@@ -18,7 +18,12 @@ import {
 } from './turnIntent.js';
 import { classifyInterimCancelIntent } from './interimCancelMatchers.js';
 import {
+  buildIdentityAskForCollected,
   buildIdentityCollectMessage,
+  isAnsweringIdentityTurn,
+  resolveIdentityCollectReply,
+  type IdentityField,
+  type IdentitySnapshot,
 } from './collectInfoOrder.js';
 import { mayReplaceWithOrderTemplate } from './deterministicReplyGate.js';
 
@@ -72,6 +77,23 @@ const PRODUCT_INFO_REQUEST_PATTERNS: RegExp[] = [
   // Catalog availability («طيب في تلفزيونات»، «عندكم ساعات؟») — NOT order confirmation.
   /(^|\s)(في|فيه|عندكم|عندكن|عندك|متوفر|يتوفر)\s+\S+/i,
   /\b(do you (have|sell)|any .+ (available|in stock)|got any)\b/i,
+];
+
+/**
+ * Shipping / delivery / payment / return policy questions — answer these; never
+ * hijack into identity collect («شو تكلفة الشحن ع المعضمية» live bug).
+ */
+const STORE_POLICY_INFO_PATTERNS: RegExp[] = [
+  /(تكلفه|تكلفة|سعر|مصاريف|كلفة)\s*(ال)?(شحن|توصيل)/i,
+  /(شحن|توصيل)\s*(كام|كم|بكم|بقديش|بماذا|لوين|لع|ع\s+\S+)/i,
+  /(كم|شو|قديش)\s*(تكلفه|تكلفة|سعر|مصاريف)?\s*(ال)?(شحن|توصيل)/i,
+  /(في|فيه)\s*(توصيل|شحن)\s*(ع|ل|إلى|الى|لـ)?/i,
+  /(وقت|مده|مدة|ايام|أيام)\s*(ال)?(توصيل|شحن)/i,
+  /(طرق|وسائل|اسلوب|أسلوب)\s*(ال)?(دفع|دفعات)/i,
+  /(سياسه|سياسة)\s*(ال)?(شحن|توصيل|دفع|ارجاع|إرجاع|الاسترجاع)/i,
+  /\b(shipping|delivery)\s*(cost|fee|price|charge|rate|time)\b/i,
+  /how\s+much\s+(is\s+)?(the\s+)?(shipping|delivery|to\s+ship)/i,
+  /\b(payment\s*methods?|return\s*policy|shipping\s*policy)\b/i,
 ];
 
 /**
@@ -138,9 +160,22 @@ function containsHardAffirmToken(messageText: string): boolean {
   return containsAnyToken(messageText, hard);
 }
 
-/** True when the customer is requesting product details / explanation. */
+/**
+ * True when the customer asks about shipping, delivery, payment, or return policy.
+ * Must stay out of collect_info / identity templates.
+ */
+export function isStorePolicyInfoRequest(messageText: string): boolean {
+  if (!messageText?.trim()) return false;
+  const normalized = normalizeArabic(messageText);
+  return STORE_POLICY_INFO_PATTERNS.some(
+    (p) => p.test(messageText) || p.test(normalized)
+  );
+}
+
+/** True when the customer is requesting product details / explanation / store policy. */
 export function isProductInfoRequest(messageText: string): boolean {
   if (!messageText?.trim()) return false;
+  if (isStorePolicyInfoRequest(messageText)) return true;
   const normalized = normalizeArabic(messageText);
   if (PRODUCT_INFO_REQUEST_PATTERNS.some(p => p.test(messageText) || p.test(normalized))) {
     return true;
@@ -167,9 +202,6 @@ export function customerAffirmsOrder(messageText: string): boolean {
   if (containsHardAffirmToken(messageText)) return true;
   return CONFIRM_VERB_PATTERNS.some((p) => p.test(messageText));
 }
-
-/** @deprecated Use customerAffirmsOrder */
-export const isAffirmativeReply = customerAffirmsOrder;
 
 /** Short «no» / decline — only meaningful when bot asked to add more (see resolveOrderNextAction). */
 export function customerDeclinesMoreItems(messageText: string): boolean {
@@ -413,11 +445,22 @@ export function buildCollectMissingFieldsMessage(
   language: Language,
   missingFields: string[]
 ): string {
-  // Identity fields always use the deterministic one-question templates.
-  for (const field of ['name', 'phone', 'address'] as const) {
-    if (missingFields.includes(field)) {
-      return buildIdentityCollectMessage(language, field);
-    }
+  // Identity SSOT: full/partial bundle via collectInfoOrder (never one-at-a-time loop).
+  const identityMissing = (['name', 'phone', 'address'] as const).filter((field) =>
+    missingFields.includes(field)
+  ) as IdentityField[];
+  if (identityMissing.length > 0) {
+    const collected: IdentitySnapshot = {
+      name: identityMissing.includes('name') ? null : '✓',
+      phone: identityMissing.includes('phone') ? null : '✓',
+      address: identityMissing.includes('address') ? null : '✓',
+    };
+    const resolved = resolveIdentityCollectReply({ language, collected });
+    if (resolved.replyText) return resolved.replyText;
+    return (
+      buildIdentityAskForCollected(language, collected) ||
+      buildIdentityCollectMessage(language, identityMissing[0])
+    );
   }
 
   const first = missingFields.find((field) =>
@@ -532,6 +575,67 @@ export interface ResolveOrderActionResult {
   reason: string;
 }
 
+/** Inputs for the single I4 finalize gate (fast-path + resolveOrderNextAction). */
+export type ConfirmFinalizeFacts = {
+  effectivelyComplete: boolean;
+  fieldsWereCompleteBeforeTurn: boolean;
+  botAskedConfirm: boolean;
+  botAskedAddMore: boolean;
+  userAffirms: boolean;
+  userDeclinesMore: boolean;
+  askingProductInfo?: boolean;
+  addAnotherIntent?: boolean;
+  /** Default true when omitted. */
+  variantsReady?: boolean;
+  /** Default true when omitted. */
+  colorReady?: boolean;
+};
+
+/**
+ * Sole owner of whether this turn may emit confirm_order (I4).
+ * Does not build reply text — callers keep AI-skip vs agent copy.
+ */
+export function resolveConfirmFinalize(
+  facts: ConfirmFinalizeFacts
+): { finalize: boolean; reason: string } {
+  if (facts.askingProductInfo) {
+    return { finalize: false, reason: 'product_info_blocks_finalize' };
+  }
+  if (facts.addAnotherIntent) {
+    return { finalize: false, reason: 'add_another_blocks_finalize' };
+  }
+  if (facts.variantsReady === false) {
+    return { finalize: false, reason: 'variants_not_ready' };
+  }
+  if (facts.colorReady === false) {
+    return { finalize: false, reason: 'color_not_ready' };
+  }
+  if (!facts.effectivelyComplete) {
+    return { finalize: false, reason: 'incomplete' };
+  }
+
+  const customerWantsFinalize =
+    facts.userAffirms || (facts.userDeclinesMore && facts.botAskedAddMore);
+  if (!customerWantsFinalize) {
+    return { finalize: false, reason: 'no_finalize_intent' };
+  }
+
+  const allowedContext =
+    facts.botAskedConfirm ||
+    facts.fieldsWereCompleteBeforeTurn ||
+    (facts.userDeclinesMore && facts.botAskedAddMore);
+  if (!allowedContext) {
+    return { finalize: false, reason: 'not_awaiting_finalize' };
+  }
+
+  return {
+    finalize: true,
+    reason: facts.userAffirms
+      ? 'customer_affirmed_while_ready'
+      : 'customer_declined_more_while_ready',
+  };
+}
+
 /**
  * Resolve whether this turn finalizes the order or only waits for customer confirmation.
  * Channels must treat only `confirm_order` as permission to append ORDER_DATA.
@@ -598,16 +702,20 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
   // التوصيل؟» and then cross-sells — that must not skip await (S10 live residual).
   const answeringIdentityAsk =
     (!fieldsWereCompleteBeforeTurn && identityComplete) ||
-    /شو اسمك الكامل|شو رقم هاتفك|شو عنوان التوصيل|عنوان التوصيل|عنوانك|what is your full name|what is your phone number|what is the delivery address/i.test(
-      lastBotReply
-    );
+    isAnsweringIdentityTurn({
+      lastBotReply,
+      collectedBeforeIngest: safeCollected,
+      userMessage,
+    });
   // Upsell copy is not product Q&A — never let asks_product_info keep it (S10 r9 residual).
+  // Store-policy questions («شو تكلفة الشحن») win even when the model sets asks_product_info=false.
   const asksProductInfo =
     !answeringIdentityAsk &&
     !botReplyAsksToAddMore(responseText) &&
-    (typeof modelAsksProductInfo === 'boolean'
-      ? modelAsksProductInfo
-      : isProductInfoRequest(userMessage));
+    (isStorePolicyInfoRequest(userMessage) ||
+      (typeof modelAsksProductInfo === 'boolean'
+        ? modelAsksProductInfo
+        : isProductInfoRequest(userMessage)));
 
   if (asksProductInfo) {
     const safeAction =
@@ -658,16 +766,17 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
     };
   }
 
-  const customerWantsFinalize =
-    affirms || (declinesMore && botAskedAddMore);
-
-  const allowedToFinalize =
-    effectivelyComplete &&
-    customerWantsFinalize &&
-    (botAskedConfirm || fieldsWereCompleteBeforeTurn || (declinesMore && botAskedAddMore));
+  const finalizeGate = resolveConfirmFinalize({
+    effectivelyComplete,
+    fieldsWereCompleteBeforeTurn,
+    botAskedConfirm,
+    botAskedAddMore,
+    userAffirms: affirms,
+    userDeclinesMore: declinesMore,
+  });
 
   // Finalize only after an explicit yes while we were already ready / awaiting.
-  if (allowedToFinalize) {
+  if (finalizeGate.finalize) {
     const safeThanks =
       !responseText.trim() ||
       botReplyAsksForConfirmation(responseText)
@@ -677,7 +786,7 @@ export function resolveOrderNextAction(input: ResolveOrderActionInput): ResolveO
       nextAction: CONFIRM_ORDER_ACTION,
       responseText: safeThanks,
       awaitingConfirmation: false,
-      reason: 'customer_finalized_while_ready'
+      reason: finalizeGate.reason,
     };
   }
 
